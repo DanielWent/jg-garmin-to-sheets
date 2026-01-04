@@ -97,7 +97,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         ensure_credentials_file_exists()
 
         sheets_id = profile_data.get('sheet_id')
-        sheet_name = profile_data.get('sheet_name', 'Raw Data')
+        sheet_name = profile_data.get('sheet_name', 'Daily Summaries')
         display_name = profile_data.get('spreadsheet_name', f"ID: {sheets_id}")
 
         logger.info(f"Initializing Google Sheets client for spreadsheet: '{display_name}'")
