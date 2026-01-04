@@ -44,7 +44,7 @@ class GarminMetrics:
     tennis_activity_count: Optional[int] = None
     tennis_activity_duration: Optional[float] = None
 
-    # NEW: List to hold individual activities for the secondary tab
+    # List to hold individual activities for the secondary tab
     activities: List[Dict[str, Any]] = field(default_factory=list)
 
 # 2. Daily Summary Headers (Tab 1)
@@ -67,13 +67,13 @@ HEADERS = [
     "Tennis Activity Count", "Tennis Duration (min)"
 ]
 
-# 3. Activity Headers (Tab 2 - UPDATED)
+# 3. Activity Headers (Tab 2)
+# HR Zones removed to match the client logic
 ACTIVITY_HEADERS = [
     "Activity ID", "Date", "Time", "Type", "Name",
     "Distance (km)", "Duration (min)", "Avg Pace (min/km)",
     "Avg HR", "Max HR", "Calories", "Avg Cadence (spm)",
-    "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE",
-    "Z1 Time (min)", "Z2 Time (min)", "Z3 Time (min)", "Z4 Time (min)", "Z5 Time (min)"
+    "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE"
 ]
 
 # 4. Daily Summary Map
