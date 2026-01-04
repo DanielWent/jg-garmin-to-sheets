@@ -222,7 +222,7 @@ async def run_interactive_sync():
     selected_profile_index = -1
     while True:
         try:
-            choice = input(f"Select profile number (1-{len(profile_names)}): ")
+            choice = "1"
             selected_profile_index = int(choice) - 1
             if 0 <= selected_profile_index < len(profile_names):
                 break
