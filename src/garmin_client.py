@@ -197,6 +197,14 @@ class GarminClient:
                         # HR
                         avg_hr = activity.get('averageHR')
                         max_hr = activity.get('maxHR')
+
+                        # HR Zones (in seconds, convert to minutes)
+                        hr_zones = activity.get('timeInHRZones', [])
+                        z1_m = round(hr_zones[1] / 60, 2) if len(hr_zones) > 1 else 0
+                        z2_m = round(hr_zones[2] / 60, 2) if len(hr_zones) > 2 else 0
+                        z3_m = round(hr_zones[3] / 60, 2) if len(hr_zones) > 3 else 0
+                        z4_m = round(hr_zones[4] / 60, 2) if len(hr_zones) > 4 else 0
+                        z5_m = round(hr_zones[5] / 60, 2) if len(hr_zones) > 5 else 0
                         
                         # Cadence (Steps per minute)
                         # Garmin usually sends 'averageRunningCadenceInStepsPerMinute' for runs
@@ -227,7 +235,12 @@ class GarminClient:
                             "Avg Cadence (spm)": int(avg_cadence) if avg_cadence else "",
                             "Elevation Gain (m)": int(elev) if elev else "",
                             "Aerobic TE": aerobic_te,
-                            "Anaerobic TE": anaerobic_te
+                            "Anaerobic TE": anaerobic_te,
+                            "Z1 Time (min)": z1_m,
+                            "Z2 Time (min)": z2_m,
+                            "Z3 Time (min)": z3_m,
+                            "Z4 Time (min)": z4_m,
+                            "Z5 Time (min)": z5_m
                         })
                     except Exception as e_act:
                         logger.error(f"Error parsing activity detail: {e_act}")
