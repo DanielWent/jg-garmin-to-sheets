@@ -7,7 +7,6 @@ from garth.sso import resume_login
 import garth
 from .exceptions import MFARequiredException
 from .config import GarminMetrics
-import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,6 @@ class GarminClient:
 
     async def authenticate(self):
         """Modified to handle non-async login method"""
-        print("Authenticating with Garmin...")
         try:
             def login_wrapper():
                 return self.client.login()
@@ -28,7 +26,6 @@ class GarminClient:
             await asyncio.get_event_loop().run_in_executor(None, login_wrapper)
             self._authenticated = True
             self.mfa_ticket_dict = None
-            print("Authentication successful.")
 
         except AttributeError as e:
             if "'dict' object has no attribute 'expired'" in str(e):
@@ -54,7 +51,7 @@ class GarminClient:
                 None, self.client.get_hrv_data, target_date_iso
             )
         except Exception as e:
-            print(f"   [!] HRV Data missing: {e}")
+            logger.error(f"Error fetching HRV data: {str(e)}")
             return None
 
     async def get_metrics(self, target_date: date) -> GarminMetrics:
@@ -63,70 +60,70 @@ class GarminClient:
                 raise Exception("Authentication previously failed.")
             await self.authenticate()
 
-        date_str = target_date.isoformat()
-        print(f"\n--- Fetching Data for {date_str} (Sequential Mode) ---")
-
-        # Define a synchronous helper to run inside the executor
-        # This ensures we use one thread and do not trigger rate limits with parallel calls
-        def fetch_all_sync():
-            data = {}
-            
-            print("1. Fetching Daily Stats...")
-            try: data['stats'] = self.client.get_stats_and_body(date_str)
-            except Exception as e: print(f"   Error: {e}"); data['stats'] = None
-
-            print("2. Fetching Sleep Data...")
-            try: data['sleep'] = self.client.get_sleep_data(date_str)
-            except Exception as e: print(f"   Error: {e}"); data['sleep'] = None
-
-            print("3. Fetching Activity List...")
-            try: data['activities'] = self.client.get_activities_by_date(date_str, date_str)
-            except Exception as e: print(f"   Error: {e}"); data['activities'] = []
-
-            print("4. Fetching User Summary...")
-            try: data['summary'] = self.client.get_user_summary(date_str)
-            except Exception as e: print(f"   Error: {e}"); data['summary'] = None
-
-            print("5. Fetching Training Status...")
-            try: data['training_status'] = self.client.get_training_status(date_str)
-            except Exception as e: print(f"   Error: {e}"); data['training_status'] = None
-
-            return data
-
         try:
-            # Run the big sequential fetcher
-            results = await asyncio.get_event_loop().run_in_executor(None, fetch_all_sync)
-            
-            # Fetch HRV separately (since it's already async compatible in this class)
-            print("6. Fetching HRV...")
-            hrv_payload = await self._fetch_hrv_data(date_str)
+            # 1. Define async fetchers
+            async def get_stats():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_date.isoformat())
+            async def get_sleep():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_date.isoformat())
+            async def get_activities():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_date.isoformat(), target_date.isoformat())
+            async def get_user_summary():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_date.isoformat())
+            async def get_training_status():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_date.isoformat())
+            async def get_hrv():
+                return await self._fetch_hrv_data(target_date.isoformat())
 
-            # Unpack
-            stats = results.get('stats')
-            sleep_data = results.get('sleep')
-            activity_summaries = results.get('activities')
-            summary = results.get('summary')
-            training_status = results.get('training_status')
+            # 2. Fetch all concurrently
+            # Added return_exceptions=True to ensure partial failures don't crash the script
+            results = await asyncio.gather(
+                get_stats(), get_sleep(), get_activities(), get_user_summary(), get_training_status(), get_hrv(),
+                return_exceptions=True
+            )
 
-            # --- PROCESS SLEEP ---
-            sleep_score = sleep_length = sleep_need = sleep_start_time = sleep_end_time = None
-            sleep_deep = sleep_light = sleep_rem = sleep_awake = None
-            overnight_respiration = overnight_pulse_ox = None
+            # Unpack results safely
+            stats = results[0] if not isinstance(results[0], Exception) else None
+            sleep_data = results[1] if not isinstance(results[1], Exception) else None
+            activities = results[2] if not isinstance(results[2], Exception) else None
+            summary = results[3] if not isinstance(results[3], Exception) else None
+            training_status = results[4] if not isinstance(results[4], Exception) else None
+            hrv_payload = results[5] if not isinstance(results[5], Exception) else None
+
+            # 3. Process Sleep Data
+            sleep_score = None
+            sleep_length = None
+            sleep_need = None
+            sleep_start_time = None
+            sleep_end_time = None
+            sleep_deep = None
+            sleep_light = None
+            sleep_rem = None
+            sleep_awake = None
+            overnight_respiration = None
+            overnight_pulse_ox = None
 
             if sleep_data:
                 sleep_dto = sleep_data.get('dailySleepDTO', {})
                 if sleep_dto:
                     sleep_score = sleep_dto.get('sleepScores', {}).get('overall', {}).get('value')
+                    
                     sleep_need_obj = sleep_dto.get('sleepNeed')
-                    sleep_need = sleep_need_obj.get('actual') if isinstance(sleep_need_obj, dict) else sleep_need_obj
+                    if isinstance(sleep_need_obj, dict):
+                        sleep_need = sleep_need_obj.get('actual')
+                    else:
+                        sleep_need = sleep_need_obj
+
                     overnight_respiration = sleep_dto.get('averageRespirationValue')
                     overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
+
                     sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
                     if sleep_time_seconds:
-                        sleep_length = round(sleep_time_seconds / 60)
+                        sleep_length = round(sleep_time_seconds / 60)  # Minutes
                     
                     start_ts_local = sleep_dto.get('sleepStartTimestampLocal')
                     end_ts_local = sleep_dto.get('sleepEndTimestampLocal')
+                    
                     if start_ts_local:
                         sleep_start_time = datetime.fromtimestamp(start_ts_local/1000).strftime('%H:%M')
                     if end_ts_local:
@@ -137,43 +134,36 @@ class GarminClient:
                     sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
                     sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
-            # --- PROCESS HRV ---
-            overnight_hrv_value = hrv_status_value = None
+            # 4. Process HRV
+            overnight_hrv_value = None
+            hrv_status_value = None
             if hrv_payload and 'hrvSummary' in hrv_payload:
                 hrv_summary = hrv_payload['hrvSummary']
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # --- PROCESS ACTIVITIES (SEQUENTIAL DETAIL FETCH) ---
-            running_count = running_distance = cycling_count = cycling_distance = 0
-            strength_count = strength_duration = cardio_count = cardio_duration = 0
-            tennis_count = tennis_duration = 0
+            # 5. Process Activities
+            running_count = 0
+            running_distance = 0
+            cycling_count = 0
+            cycling_distance = 0
+            strength_count = 0
+            strength_duration = 0
+            cardio_count = 0
+            cardio_duration = 0
+            tennis_count = 0
+            tennis_duration = 0
+            
+            # List to store processed activities for the second tab
             processed_activities = []
 
-            if activity_summaries:
-                print(f"   Found {len(activity_summaries)} activities. Fetching details one by one...")
-                for idx, act in enumerate(activity_summaries):
-                    act_id = act.get('activityId')
-                    print(f"   -> Processing Activity {idx+1}/{len(activity_summaries)} (ID: {act_id})...")
-                    
-                    # FETCH DETAIL SEQUENTIALLY
-                    try:
-                        detailed_act = await asyncio.get_event_loop().run_in_executor(
-                            None, self.client.get_activity_details, act_id
-                        )
-                    except Exception as e:
-                        print(f"      [!] Failed to get details for {act_id}: {e}")
-                        continue
-
-                    # In detailed view, metrics are inside 'summaryDTO'
-                    activity = detailed_act.get('summaryDTO', {})
-                    if not activity: continue
-
+            if activities:
+                for activity in activities:
                     atype = activity.get('activityType', {})
                     type_key = atype.get('typeKey', '').lower()
                     parent_id = atype.get('parentTypeId')
                     
-                    # Totals Aggregation
+                    # Daily Summary Aggregation
                     if 'run' in type_key or parent_id == 1:
                         running_count += 1
                         running_distance += activity.get('distance', 0) / 1000
@@ -190,25 +180,63 @@ class GarminClient:
                         tennis_count += 1
                         tennis_duration += activity.get('duration', 0) / 60
                     
-                    # Detail Processing
+                    # --- NEW LOGIC: Fetch Activity Details for HR Zones ---
                     try:
-                        act_name = activity.get('activityName')
-                        act_start_local = activity.get('startTimeLocal')
-                        act_time_str = act_start_local.split(' ')[1][:5] if act_start_local and ' ' in act_start_local else ""
+                        act_id = activity.get('activityId')
                         
-                        dist_km = (activity.get('distance') or 0) / 1000
-                        dur_min = (activity.get('duration') or 0) / 60
+                        # We use the same 'run_in_executor' pattern the original author used
+                        # to fetch the full details for this specific activity.
+                        detailed_data = await asyncio.get_event_loop().run_in_executor(
+                            None, self.client.get_activity_details, act_id
+                        )
+                        
+                        # Use the detailed summary if available, otherwise fallback to the basic one
+                        detailed_activity = detailed_data.get('summaryDTO') or activity
+
+                        act_name = detailed_activity.get('activityName')
+                        act_start_local = detailed_activity.get('startTimeLocal') # "YYYY-MM-DD HH:MM:SS"
+                        
+                        # Parse time
+                        act_time_str = ""
+                        if act_start_local:
+                             # Garmin often sends "2024-01-01 10:00:00"
+                             act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
+                        
+                        # Metrics
+                        dist_km = (detailed_activity.get('distance') or 0) / 1000
+                        dur_min = (detailed_activity.get('duration') or 0) / 60
+                        
+                        # Pace (min/km)
                         pace_str = ""
                         if dist_km > 0 and dur_min > 0:
                              pace_decimal = dur_min / dist_km
-                             pace_str = f"{int(pace_decimal)}:{int((pace_decimal - int(pace_decimal)) * 60):02d}"
+                             p_min = int(pace_decimal)
+                             p_sec = int((pace_decimal - p_min) * 60)
+                             pace_str = f"{p_min}:{p_sec:02d}"
 
-                        # HR Zones (Safe Logic)
-                        hr_zones = activity.get('timeInHRZones', [])
+                        # HR
+                        avg_hr = detailed_activity.get('averageHR')
+                        max_hr = detailed_activity.get('maxHR')
+                        
+                        # HR ZONES (Now extracting from detailed data)
+                        hr_zones = detailed_activity.get('timeInHRZones', [])
+                        # Create safe list
                         z_m = []
                         for i in range(6):
                             val = hr_zones[i] if hr_zones and len(hr_zones) > i else 0
                             z_m.append(round((val or 0) / 60, 2))
+
+                        # Cadence
+                        avg_cadence = detailed_activity.get('averageRunningCadenceInStepsPerMinute')
+                        if not avg_cadence:
+                            avg_cadence = detailed_activity.get('averageBikingCadenceInRevPerMinute') 
+
+                        cal = detailed_activity.get('calories')
+                        elev = detailed_activity.get('elevationGain') # meters
+                        
+                        # TE
+                        aerobic_te = detailed_activity.get('aerobicTrainingEffect')
+                        anaerobic_te = detailed_activity.get('anaerobicTrainingEffect')
 
                         processed_activities.append({
                             "Activity ID": act_id,
@@ -216,16 +244,16 @@ class GarminClient:
                             "Time": act_time_str,
                             "Type": atype.get('typeKey', 'Unknown'),
                             "Name": act_name,
-                            "Distance (km)": round(dist_km, 2),
-                            "Duration (min)": round(dur_min, 1),
+                            "Distance (km)": round(dist_km, 2) if dist_km else 0,
+                            "Duration (min)": round(dur_min, 1) if dur_min else 0,
                             "Avg Pace (min/km)": pace_str,
-                            "Avg HR": int(activity.get('averageHR') or 0),
-                            "Max HR": int(activity.get('maxHR') or 0),
-                            "Calories": int(activity.get('calories') or 0),
-                            "Avg Cadence (spm)": int(activity.get('averageRunningCadenceInStepsPerMinute') or activity.get('averageBikingCadenceInRevPerMinute') or 0),
-                            "Elevation Gain (m)": int(activity.get('elevationGain') or 0),
-                            "Aerobic TE": activity.get('aerobicTrainingEffect'),
-                            "Anaerobic TE": activity.get('anaerobicTrainingEffect'),
+                            "Avg HR": int(avg_hr) if avg_hr else "",
+                            "Max HR": int(max_hr) if max_hr else "",
+                            "Calories": int(cal) if cal else "",
+                            "Avg Cadence (spm)": int(avg_cadence) if avg_cadence else "",
+                            "Elevation Gain (m)": int(elev) if elev else "",
+                            "Aerobic TE": aerobic_te,
+                            "Anaerobic TE": anaerobic_te,
                             "Z1 Time (min)": z_m[1],
                             "Z2 Time (min)": z_m[2],
                             "Z3 Time (min)": z_m[3],
@@ -233,15 +261,24 @@ class GarminClient:
                             "Z5 Time (min)": z_m[5]
                         })
                     except Exception as e_act:
-                        print(f"      [!] Error parsing activity details: {e_act}")
+                        logger.error(f"Error parsing activity detail: {e_act}")
+                        continue
 
             # 6. Process General Stats
-            weight = body_fat = None
+            weight = None
+            body_fat = None
             if stats:
-                weight = stats.get('weight', 0) / 1000 if stats.get('weight') else None
+                if stats.get('weight'): weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
 
-            active_cal = resting_cal = intensity_min = resting_hr = avg_stress = steps = floors = None
+            active_cal = None
+            resting_cal = None
+            intensity_min = None
+            resting_hr = None
+            avg_stress = None
+            steps = None
+            floors = None
+            
             if summary:
                 active_cal = summary.get('activeKilocalories')
                 resting_cal = summary.get('bmrKilocalories')
@@ -249,52 +286,94 @@ class GarminClient:
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
                 steps = summary.get('totalSteps')
+                
+                # Floors
                 raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
-                floors = round(float(raw_floors)) if raw_floors is not None else None
+                if raw_floors is not None:
+                    try:
+                        floors = round(float(raw_floors))
+                    except (ValueError, TypeError):
+                        floors = raw_floors
 
-            # 7. Training Status
-            vo2_run = vo2_cycle = train_phrase = None
+            # 7. Training Status / VO2 Max
+            vo2_run = None
+            vo2_cycle = None
+            train_phrase = None
+            
             if training_status:
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
-                vo2_run = mr_vo2.get('generic', {}).get('vo2MaxValue')
-                vo2_cycle = mr_vo2.get('cycling', {}).get('vo2MaxValue')
+                if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
+                if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
+                
                 ts_data = training_status.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
-                for dev_data in ts_data.values():
-                    train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
-                    break
+                if ts_data:
+                    for dev_data in ts_data.values():
+                        train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
+                        break
 
-            print("Data processing complete. Returning metrics.")
+            # Return populated object
             return GarminMetrics(
-                date=target_date, sleep_score=sleep_score, sleep_need=sleep_need, sleep_length=sleep_length,
-                sleep_start_time=sleep_start_time, sleep_end_time=sleep_end_time, sleep_deep=sleep_deep,
-                sleep_light=sleep_light, sleep_rem=sleep_rem, sleep_awake=sleep_awake,
-                overnight_respiration=overnight_respiration, overnight_pulse_ox=overnight_pulse_ox,
-                weight=weight, body_fat=body_fat, resting_heart_rate=resting_hr, average_stress=avg_stress,
-                overnight_hrv=overnight_hrv_value, hrv_status=hrv_status_value, vo2max_running=vo2_run,
-                vo2max_cycling=vo2_cycle, training_status=train_phrase, active_calories=active_cal,
-                resting_calories=resting_cal, intensity_minutes=intensity_min, steps=steps, floors_climbed=floors,
-                all_activity_count=len(activity_summaries) if activity_summaries else 0,
-                running_activity_count=running_count, running_distance=running_distance,
-                cycling_activity_count=cycling_count, cycling_distance=cycling_distance,
-                strength_activity_count=strength_count, strength_duration=strength_duration,
-                cardio_activity_count=cardio_count, cardio_duration=cardio_duration,
-                tennis_activity_count=tennis_count, tennis_activity_duration=tennis_duration,
-                activities=processed_activities
+                date=target_date,
+                sleep_score=sleep_score,
+                sleep_need=sleep_need,             
+                sleep_length=sleep_length,
+                sleep_start_time=sleep_start_time, 
+                sleep_end_time=sleep_end_time,     
+                sleep_deep=sleep_deep,             
+                sleep_light=sleep_light,           
+                sleep_rem=sleep_rem,               
+                sleep_awake=sleep_awake,
+                overnight_respiration=overnight_respiration, 
+                overnight_pulse_ox=overnight_pulse_ox,       
+                weight=weight,
+                body_fat=body_fat,
+                resting_heart_rate=resting_hr,
+                average_stress=avg_stress,
+                overnight_hrv=overnight_hrv_value,
+                hrv_status=hrv_status_value,
+                vo2max_running=vo2_run,
+                vo2max_cycling=vo2_cycle,
+                training_status=train_phrase,
+                active_calories=active_cal,
+                resting_calories=resting_cal,
+                intensity_minutes=intensity_min,
+                steps=steps,
+                floors_climbed=floors, 
+                all_activity_count=len(activities) if activities else 0,
+                running_activity_count=running_count,
+                running_distance=running_distance,
+                cycling_activity_count=cycling_count,
+                cycling_distance=cycling_distance,
+                strength_activity_count=strength_count,
+                strength_duration=strength_duration,
+                cardio_activity_count=cardio_count,
+                cardio_duration=cardio_duration,
+                tennis_activity_count=tennis_count,
+                tennis_activity_duration=tennis_duration,
+                activities=processed_activities # PASS LIST TO METRICS
             )
 
         except Exception as e:
-            print("CRITICAL FAILURE IN GET_METRICS")
-            traceback.print_exc()
+            logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
             return GarminMetrics(date=target_date)
 
     async def submit_mfa_code(self, mfa_code: str):
-        if not self.mfa_ticket_dict: raise Exception("MFA ticket not available.")
+        if not self.mfa_ticket_dict:
+            raise Exception("MFA ticket not available.")
         try:
             loop = asyncio.get_event_loop()
-            oauth1, oauth2 = await loop.run_in_executor(None, lambda: resume_login(self.mfa_ticket_dict, mfa_code))
-            self.client.garth.oauth1_token, self.client.garth.oauth2_token = oauth1, oauth2
-            self._authenticated, self.mfa_ticket_dict = True, None
+            resume_login_result = await loop.run_in_executor(
+                None, lambda: resume_login(self.mfa_ticket_dict, mfa_code)
+            )
+            
+            oauth1, oauth2 = resume_login_result
+            self.client.garth.oauth1_token = oauth1
+            self.client.garth.oauth2_token = oauth2
+            
+            self._authenticated = True
+            self.mfa_ticket_dict = None
             return True
         except Exception as e:
-            self._authenticated, self._auth_failed = False, True
+            self._authenticated = False
+            self._auth_failed = True
             raise Exception(f"MFA submission failed: {str(e)}")
