@@ -67,12 +67,13 @@ HEADERS = [
     "Tennis Activity Count", "Tennis Duration (min)"
 ]
 
-# 3. Activity Headers (Tab 2 - NEW)
+# 3. Activity Headers (Tab 2 - UPDATED)
 ACTIVITY_HEADERS = [
     "Activity ID", "Date", "Time", "Type", "Name",
     "Distance (km)", "Duration (min)", "Avg Pace (min/km)",
     "Avg HR", "Max HR", "Calories", "Avg Cadence (spm)",
-    "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE"
+    "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE",
+    "Z1 Time (min)", "Z2 Time (min)", "Z3 Time (min)", "Z4 Time (min)", "Z5 Time (min)"
 ]
 
 # 4. Daily Summary Map
