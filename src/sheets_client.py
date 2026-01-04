@@ -1,6 +1,6 @@
 import logging
 from typing import List, Any
-from datetime import datetime, date, timedelta
+from datetime import date
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -10,14 +10,17 @@ from .config import GarminMetrics, HEADERS, HEADER_TO_ATTRIBUTE_MAP, ACTIVITY_HE
 logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
+class GoogleAuthTokenRefreshError(Exception):
+    pass
+
 class GoogleSheetsClient:
     def __init__(self, credentials_path: str, spreadsheet_id: str, sheet_name: str):
         if not spreadsheet_id:
             raise ValueError("Spreadsheet ID is missing.")
             
         self.spreadsheet_id = spreadsheet_id
-        self.sheet_name = sheet_name 
-        self.activities_sheet_name = "Activities" 
+        self.sheet_name = sheet_name # Daily Summary Sheet Name
+        self.activities_sheet_name = "Activities" # Hardcoded secondary tab
         self.credentials_path = credentials_path
         self.credentials = self._get_credentials()
         self.service = build('sheets', 'v4', credentials=self.credentials)
@@ -43,6 +46,7 @@ class GoogleSheetsClient:
             raise
 
     def _ensure_tab_exists(self, tab_name: str, headers: List[str], all_sheets_properties):
+        """Ensures a specific tab exists and has headers."""
         sheet_exists = any(s['properties']['title'] == tab_name for s in all_sheets_properties)
         
         if not sheet_exists:
@@ -65,6 +69,7 @@ class GoogleSheetsClient:
             ).execute()
 
     def update_metrics(self, metrics: List[GarminMetrics]):
+        """Updates Daily Summary AND Activities tabs."""
         all_sheets_properties = self._get_spreadsheet_details()
         
         # 1. Update Daily Summary Tab
@@ -75,78 +80,13 @@ class GoogleSheetsClient:
         self._ensure_tab_exists(self.activities_sheet_name, ACTIVITY_HEADERS, all_sheets_properties)
         self._update_activities(metrics)
 
-    def _normalize_date(self, value: Any) -> str:
-        """
-        Robust date parser. 
-        Handles Google Sheets Serial Numbers (int/float) AND String formats.
-        Returns YYYY-MM-DD string.
-        """
-        # 1. Handle Serial Numbers (floats/ints from UNFORMATTED_VALUE)
-        # Google Sheets Epoch is Dec 30, 1899
-        if isinstance(value, (int, float)):
-            try:
-                # Basic sanity check: 30,000 days is around year 1982. 
-                # Avoid treating small numbers (like headers) as dates.
-                if value > 30000: 
-                    base_date = datetime(1899, 12, 30)
-                    delta = timedelta(days=value)
-                    return (base_date + delta).date().isoformat()
-            except Exception:
-                pass # Fall through to string parsing if math fails
-
-        # 2. Handle Strings (Text formatted dates)
-        date_str = str(value).strip()
-        
-        # Check if string is actually a number (e.g. "45300.0")
-        try:
-            float_val = float(date_str)
-            if float_val > 30000:
-                base_date = datetime(1899, 12, 30)
-                delta = timedelta(days=float_val)
-                return (base_date + delta).date().isoformat()
-        except ValueError:
-            pass # Not a number string
-
-        # 3. Check standard string formats
-        formats = [
-            "%Y-%m-%d",       # 2024-01-30
-            "%d/%m/%Y",       # 30/01/2024
-            "%m/%d/%Y",       # 01/30/2024
-            "%d-%b-%Y",       # 30-Jan-2024
-            "%Y/%m/%d",       # 2024/01/30
-            "%d.%m.%Y"        # 30.01.2024
-        ]
-        
-        for fmt in formats:
-            try:
-                return datetime.strptime(date_str, fmt).date().isoformat()
-            except ValueError:
-                continue
-        
-        # Return original if all parsing fails
-        return date_str
-
     def _update_daily_summary(self, metrics: List[GarminMetrics]):
-        """Logic to update the Daily Summary tab with robust date checking."""
+        """Logic to update the Daily Summary tab."""
         try:
-            # Read existing dates using UNFORMATTED_VALUE to get Serial Numbers where possible
             date_column_range = f"'{self.sheet_name}'!A:A"
-            result = self.service.spreadsheets().values().get(
-                spreadsheetId=self.spreadsheet_id, 
-                range=date_column_range,
-                valueRenderOption='UNFORMATTED_VALUE' # <--- MAGIC SAUCE
-            ).execute()
-            
+            result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=date_column_range).execute()
             existing_dates_list = result.get('values', [])
-            
-            # Create a map of { Normalized_Date_String : Row_Number }
-            date_to_row_map = {}
-            for i, row in enumerate(existing_dates_list):
-                if row:
-                    # row[0] might be int(45300) or str("2024-01-01")
-                    normalized_date = self._normalize_date(row[0])
-                    date_to_row_map[normalized_date] = i + 1
-                    
+            date_to_row_map = {row[0]: i + 1 for i, row in enumerate(existing_dates_list) if row}
         except HttpError as e:
             logger.error(f"Could not read existing dates: {e}")
             return
@@ -163,7 +103,7 @@ class GoogleSheetsClient:
                 value = getattr(metric, attribute_name, "") if attribute_name else ""
                 
                 if attribute_name == 'date':
-                    value = metric_date_str # Always write in ISO format
+                    value = metric_date_str
 
                 if value is None:
                     value = ""
@@ -172,7 +112,6 @@ class GoogleSheetsClient:
                 
                 row_data.append(value)
 
-            # Check if this date exists in our Normalized Map
             if metric_date_str in date_to_row_map:
                 row_number = date_to_row_map[metric_date_str]
                 updates.append({
@@ -199,6 +138,8 @@ class GoogleSheetsClient:
 
     def _update_activities(self, metrics: List[GarminMetrics]):
         """Logic to update the Activities tab (No updates, only appends new IDs)."""
+        
+        # 1. Flatten all activities from all days into a single list
         new_activities_buffer = []
         for metric in metrics:
             if metric.activities:
@@ -207,27 +148,31 @@ class GoogleSheetsClient:
         if not new_activities_buffer:
             return
 
+        # 2. Get existing Activity IDs to prevent duplicates
         try:
             id_column_range = f"'{self.activities_sheet_name}'!A:A"
             result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=id_column_range).execute()
             existing_ids = set()
             for row in result.get('values', []):
-                if row: existing_ids.add(str(row[0])) 
+                if row: existing_ids.add(str(row[0])) # Store as string
         except HttpError as e:
             logger.error(f"Could not read existing activity IDs: {e}")
             return
 
+        # 3. Filter for unique new activities
         appends = []
         for act in new_activities_buffer:
             act_id = str(act.get("Activity ID"))
             if act_id not in existing_ids:
+                # Prepare row based on ACTIVITY_HEADERS
                 row_data = []
                 for header in ACTIVITY_HEADERS:
                     val = act.get(header, "")
                     row_data.append(val)
                 appends.append(row_data)
-                existing_ids.add(act_id)
+                existing_ids.add(act_id) # Prevent dupes within the same batch
 
+        # 4. Write to sheet
         if appends:
             logger.info(f"Appending {len(appends)} new activities to '{self.activities_sheet_name}'.")
             self.service.spreadsheets().values().append(
