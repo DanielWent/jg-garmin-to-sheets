@@ -61,7 +61,7 @@ class GarminClient:
             await self.authenticate()
 
         try:
-            # 1. Define async fetchers for daily summaries
+            # 1. Define async fetchers
             async def get_stats():
                 return await asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_date.isoformat())
             async def get_sleep():
@@ -75,10 +75,23 @@ class GarminClient:
             async def get_hrv():
                 return await self._fetch_hrv_data(target_date.isoformat())
 
-            # 2. Fetch all daily summaries concurrently
-            stats, sleep_data, activity_summaries, summary, training_status, hrv_payload = await asyncio.gather(
-                get_stats(), get_sleep(), get_activity_list(), get_user_summary(), get_training_status(), get_hrv()
+            # 2. Fetch all concurrently (WITH FAULT TOLERANCE)
+            # return_exceptions=True ensures that if 'Training Status' fails, we still get 'Sleep' and 'Activities'
+            results = await asyncio.gather(
+                get_stats(), get_sleep(), get_activity_list(), get_user_summary(), get_training_status(), get_hrv(),
+                return_exceptions=True
             )
+            
+            # Safely unpack results. If an API call failed, the result will be an Exception object.
+            stats = results[0] if not isinstance(results[0], Exception) else None
+            sleep_data = results[1] if not isinstance(results[1], Exception) else None
+            activity_summaries = results[2] if not isinstance(results[2], Exception) else None
+            summary = results[3] if not isinstance(results[3], Exception) else None
+            training_status = results[4] if not isinstance(results[4], Exception) else None
+            hrv_payload = results[5] if not isinstance(results[5], Exception) else None
+
+            # Log warnings for partial failures so you know what is missing
+            if isinstance(results[2], Exception): logger.warning(f"Failed to fetch activity list for {target_date}: {results[2]}")
 
             # 3. Process Sleep Data
             sleep_score = sleep_length = sleep_need = sleep_start_time = sleep_end_time = None
@@ -116,99 +129,98 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # 5. Process Activities (NOW WITH DOUBLE FETCH FOR DETAILS)
+            # 5. Process Activities
             running_count = running_distance = cycling_count = cycling_distance = 0
             strength_count = strength_duration = cardio_count = cardio_duration = 0
             tennis_count = tennis_duration = 0
             processed_activities = []
 
-            # --- CRITICAL FIX START: Fetch full details for HR Zones ---
+            # --- DOUBLE FETCH: Get Details for HR Zones ---
             detailed_activities = []
             if activity_summaries:
                 try:
-                    # Create a list of tasks to fetch details for each activity ID found
                     detail_tasks = [
-                        asyncio.get_event_loop().run_in_executor(
-                            None, self.client.get_activity_details, act.get('activityId')
-                        )
+                        asyncio.get_event_loop().run_in_executor(None, self.client.get_activity_details, act.get('activityId'))
                         for act in activity_summaries
                     ]
-                    # Run them all at once
-                    detailed_activities = await asyncio.gather(*detail_tasks)
+                    # Fault tolerant fetch for details too
+                    detail_results = await asyncio.gather(*detail_tasks, return_exceptions=True)
+                    detailed_activities = [res for res in detail_results if not isinstance(res, Exception)]
                 except Exception as e:
-                    logger.error(f"Failed to fetch detailed activity data: {e}")
-            # --- CRITICAL FIX END ---
+                    logger.error(f"Error preparing activity detail fetch: {e}")
 
-            if detailed_activities:
-                for detailed_act in detailed_activities:
-                    # In the detailed view, the main stats are nested inside 'summaryDTO'
-                    activity = detailed_act.get('summaryDTO', {})
-                    if not activity: continue
+            for detailed_act in detailed_activities:
+                if not detailed_act: continue
+                # In detailed view, metrics are inside 'summaryDTO'
+                activity = detailed_act.get('summaryDTO', {})
+                if not activity: continue
 
-                    atype = activity.get('activityType', {})
-                    type_key = atype.get('typeKey', '').lower()
-                    parent_id = atype.get('parentTypeId')
+                atype = activity.get('activityType', {})
+                type_key = atype.get('typeKey', '').lower()
+                parent_id = atype.get('parentTypeId')
+                
+                # Totals Aggregation
+                if 'run' in type_key or parent_id == 1:
+                    running_count += 1
+                    running_distance += activity.get('distance', 0) / 1000
+                elif 'cycling' in type_key or parent_id == 2:
+                    cycling_count += 1
+                    cycling_distance += activity.get('distance', 0) / 1000
+                elif 'strength' in type_key:
+                    strength_count += 1
+                    strength_duration += activity.get('duration', 0) / 60
+                elif 'cardio' in type_key:
+                    cardio_count += 1
+                    cardio_duration += activity.get('duration', 0) / 60
+                elif 'tennis' in type_key:
+                    tennis_count += 1
+                    tennis_duration += activity.get('duration', 0) / 60
+                
+                # Detail Processing
+                try:
+                    act_id = activity.get('activityId')
+                    act_name = activity.get('activityName')
+                    act_start_local = activity.get('startTimeLocal')
+                    act_time_str = act_start_local.split(' ')[1][:5] if act_start_local and ' ' in act_start_local else ""
                     
-                    # Totals Aggregation
-                    if 'run' in type_key or parent_id == 1:
-                        running_count += 1
-                        running_distance += activity.get('distance', 0) / 1000
-                    elif 'cycling' in type_key or parent_id == 2:
-                        cycling_count += 1
-                        cycling_distance += activity.get('distance', 0) / 1000
-                    elif 'strength' in type_key:
-                        strength_count += 1
-                        strength_duration += activity.get('duration', 0) / 60
-                    elif 'cardio' in type_key:
-                        cardio_count += 1
-                        cardio_duration += activity.get('duration', 0) / 60
-                    elif 'tennis' in type_key:
-                        tennis_count += 1
-                        tennis_duration += activity.get('duration', 0) / 60
-                    
-                    # Detail Processing
-                    try:
-                        act_id = activity.get('activityId')
-                        act_name = activity.get('activityName')
-                        act_start_local = activity.get('startTimeLocal')
-                        act_time_str = act_start_local.split(' ')[1][:5] if act_start_local and ' ' in act_start_local else ""
-                        
-                        dist_km = (activity.get('distance') or 0) / 1000
-                        dur_min = (activity.get('duration') or 0) / 60
-                        pace_str = ""
-                        if dist_km > 0 and dur_min > 0:
-                             pace_decimal = dur_min / dist_km
-                             pace_str = f"{int(pace_decimal)}:{int((pace_decimal - int(pace_decimal)) * 60):02d}"
+                    dist_km = (activity.get('distance') or 0) / 1000
+                    dur_min = (activity.get('duration') or 0) / 60
+                    pace_str = ""
+                    if dist_km > 0 and dur_min > 0:
+                         pace_decimal = dur_min / dist_km
+                         pace_str = f"{int(pace_decimal)}:{int((pace_decimal - int(pace_decimal)) * 60):02d}"
 
-                        # HR Zones (Now available because we fetched details)
-                        hr_zones = activity.get('timeInHRZones', [])
-                        # Create a safe list of minutes, defaulting to 0 if index missing
-                        z_m = [round(hr_zones[i] / 60, 2) if len(hr_zones) > i else 0 for i in range(6)]
+                    # HR Zones (Safe Logic)
+                    hr_zones = activity.get('timeInHRZones', [])
+                    z_m = []
+                    for i in range(6):
+                        val = hr_zones[i] if hr_zones and len(hr_zones) > i else 0
+                        z_m.append(round((val or 0) / 60, 2))
 
-                        processed_activities.append({
-                            "Activity ID": act_id,
-                            "Date": target_date.isoformat(),
-                            "Time": act_time_str,
-                            "Type": atype.get('typeKey', 'Unknown'),
-                            "Name": act_name,
-                            "Distance (km)": round(dist_km, 2),
-                            "Duration (min)": round(dur_min, 1),
-                            "Avg Pace (min/km)": pace_str,
-                            "Avg HR": int(activity.get('averageHR') or 0),
-                            "Max HR": int(activity.get('maxHR') or 0),
-                            "Calories": int(activity.get('calories') or 0),
-                            "Avg Cadence (spm)": int(activity.get('averageRunningCadenceInStepsPerMinute') or activity.get('averageBikingCadenceInRevPerMinute') or 0),
-                            "Elevation Gain (m)": int(activity.get('elevationGain') or 0),
-                            "Aerobic TE": activity.get('aerobicTrainingEffect'),
-                            "Anaerobic TE": activity.get('anaerobicTrainingEffect'),
-                            "Z1 Time (min)": z_m[1],
-                            "Z2 Time (min)": z_m[2],
-                            "Z3 Time (min)": z_m[3],
-                            "Z4 Time (min)": z_m[4],
-                            "Z5 Time (min)": z_m[5]
-                        })
-                    except Exception as e_act:
-                        logger.error(f"Error parsing activity detail: {e_act}")
+                    processed_activities.append({
+                        "Activity ID": act_id,
+                        "Date": target_date.isoformat(),
+                        "Time": act_time_str,
+                        "Type": atype.get('typeKey', 'Unknown'),
+                        "Name": act_name,
+                        "Distance (km)": round(dist_km, 2),
+                        "Duration (min)": round(dur_min, 1),
+                        "Avg Pace (min/km)": pace_str,
+                        "Avg HR": int(activity.get('averageHR') or 0),
+                        "Max HR": int(activity.get('maxHR') or 0),
+                        "Calories": int(activity.get('calories') or 0),
+                        "Avg Cadence (spm)": int(activity.get('averageRunningCadenceInStepsPerMinute') or activity.get('averageBikingCadenceInRevPerMinute') or 0),
+                        "Elevation Gain (m)": int(activity.get('elevationGain') or 0),
+                        "Aerobic TE": activity.get('aerobicTrainingEffect'),
+                        "Anaerobic TE": activity.get('anaerobicTrainingEffect'),
+                        "Z1 Time (min)": z_m[1],
+                        "Z2 Time (min)": z_m[2],
+                        "Z3 Time (min)": z_m[3],
+                        "Z4 Time (min)": z_m[4],
+                        "Z5 Time (min)": z_m[5]
+                    })
+                except Exception as e_act:
+                    logger.error(f"Error parsing activity detail: {e_act}")
 
             # 6. Process General Stats
             weight = body_fat = None
@@ -257,17 +269,8 @@ class GarminClient:
             )
 
         except Exception as e:
-            logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
+            # Print full trace so we can see what happened if it ever fails again
+            import traceback
+            traceback.print_exc()
+            logger.error(f"CRITICAL ERROR fetching metrics for {target_date}: {str(e)}")
             return GarminMetrics(date=target_date)
-
-    async def submit_mfa_code(self, mfa_code: str):
-        if not self.mfa_ticket_dict: raise Exception("MFA ticket not available.")
-        try:
-            loop = asyncio.get_event_loop()
-            oauth1, oauth2 = await loop.run_in_executor(None, lambda: resume_login(self.mfa_ticket_dict, mfa_code))
-            self.client.garth.oauth1_token, self.client.garth.oauth2_token = oauth1, oauth2
-            self._authenticated, self.mfa_ticket_dict = True, None
-            return True
-        except Exception as e:
-            self._authenticated, self._auth_failed = False, True
-            raise Exception(f"MFA submission failed: {str(e)}")
