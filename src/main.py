@@ -195,7 +195,7 @@ async def run_interactive_sync():
         print("\nData output select:")
         print("1 for local CSV")
         print("2 for Google Sheets")
-        choice = input("Enter choice (1 or 2): ").strip()
+        choice = "2"
         if choice == '1':
             output_type = "csv"
         elif choice == '2':
