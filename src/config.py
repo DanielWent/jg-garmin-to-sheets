@@ -1,38 +1,32 @@
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field
 from datetime import date
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 # 1. The Dataclass defines the data structure
 @dataclass
 class GarminMetrics:
     date: date
-    # Sleep Details
+    # Daily Totals (Existing)
     sleep_score: Optional[float] = None
-    sleep_length: Optional[float] = None      # Changed to Minutes
-    sleep_start_time: Optional[str] = None    # HH:MM
-    sleep_end_time: Optional[str] = None      # HH:MM
-    sleep_need: Optional[int] = None          # Minutes
-    sleep_deep: Optional[float] = None        # Minutes
-    sleep_light: Optional[float] = None       # Minutes
-    sleep_rem: Optional[float] = None         # Minutes
-    sleep_awake: Optional[float] = None       # Minutes
-    overnight_respiration: Optional[float] = None # brpm
-    overnight_pulse_ox: Optional[float] = None    # %
-    
-    # Body & Health
+    sleep_length: Optional[float] = None
+    sleep_start_time: Optional[str] = None
+    sleep_end_time: Optional[str] = None
+    sleep_need: Optional[int] = None
+    sleep_deep: Optional[float] = None
+    sleep_light: Optional[float] = None
+    sleep_rem: Optional[float] = None
+    sleep_awake: Optional[float] = None
+    overnight_respiration: Optional[float] = None
+    overnight_pulse_ox: Optional[float] = None
     weight: Optional[float] = None
     body_fat: Optional[float] = None
     resting_heart_rate: Optional[int] = None
     average_stress: Optional[int] = None
     overnight_hrv: Optional[int] = None
     hrv_status: Optional[str] = None
-    
-    # Performance & Training
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
     training_status: Optional[str] = None
-    
-    # Activity Stats
     active_calories: Optional[int] = None
     resting_calories: Optional[int] = None
     intensity_minutes: Optional[int] = None
@@ -50,20 +44,19 @@ class GarminMetrics:
     tennis_activity_count: Optional[int] = None
     tennis_activity_duration: Optional[float] = None
 
-# 2. The Headers list defines the columns in your Google Sheet
+    # NEW: List to hold individual activities for the secondary tab
+    activities: List[Dict[str, Any]] = field(default_factory=list)
+
+# 2. Daily Summary Headers (Tab 1)
 HEADERS = [
     "Date",
-    # Sleep
     "Sleep Score", "Sleep Need (min)", "Sleep Length (min)", 
     "Fall Asleep Time", "Wake Up Time",
     "Deep Sleep (min)", "Light Sleep (min)", "REM Sleep (min)", "Awake/Restless (min)",
     "Overnight Respiration (brpm)", "Overnight Pulse Ox (%)",
-    # Health
     "Resting Heart Rate", "HRV (ms)", "HRV Status", "Average Stress",
     "Weight (kg)", "Body Fat %",
-    # Performance
     "VO2 Max Running", "VO2 Max Cycling", "Training Status",
-    # Activity
     "Steps", "Floors Climbed", 
     "Active Calories", "Resting Calories", "Intensity Minutes",
     "All Activity Count",
@@ -74,7 +67,15 @@ HEADERS = [
     "Tennis Activity Count", "Tennis Duration (min)"
 ]
 
-# 3. The Map connects the Headers to the Dataclass attributes
+# 3. Activity Headers (Tab 2 - NEW)
+ACTIVITY_HEADERS = [
+    "Activity ID", "Date", "Time", "Type", "Name",
+    "Distance (km)", "Duration (min)", "Avg Pace (min/km)",
+    "Avg HR", "Max HR", "Calories", "Avg Cadence (spm)",
+    "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE"
+]
+
+# 4. Daily Summary Map
 HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
     "Sleep Score": "sleep_score",
