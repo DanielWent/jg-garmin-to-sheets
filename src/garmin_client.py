@@ -217,6 +217,39 @@ class GarminClient:
             # Init Zones
             z0 = z1 = z2 = z3 = z4 = z5 = None
 
+            # --- SEARCH FOR HR ZONES ---
+            zones_obj = None
+            
+            # Strategy 1: Look in User Summary
+            if summary:
+                zones_obj = summary.get('timeInHeartRateZones')
+            
+            # Strategy 2: Look in Stats (fallback)
+            if not zones_obj and stats:
+                # Sometimes nested in userDailySummary or direct
+                zones_obj = stats.get('timeInHeartRateZones')
+            
+            # Strategy 3: Check for dailyHeartRateZones key
+            if not zones_obj and summary:
+                 zones_obj = summary.get('dailyHeartRateZones')
+
+            # Logging for debugging if empty
+            if not zones_obj:
+                logger.info(f"DEBUG: HR Zones missing. Summary Keys: {list(summary.keys()) if summary else 'None'}")
+            else:
+                # If found, parse it
+                if isinstance(zones_obj, dict):
+                    def get_z_min(idx):
+                        val = zones_obj.get(str(idx)) or zones_obj.get(idx)
+                        return (val / 60) if val else 0
+                    
+                    z0 = get_z_min(0)
+                    z1 = get_z_min(1)
+                    z2 = get_z_min(2)
+                    z3 = get_z_min(3)
+                    z4 = get_z_min(4)
+                    z5 = get_z_min(5)
+
             if summary:
                 active_cal = summary.get('activeKilocalories')
                 resting_cal = summary.get('bmrKilocalories')
@@ -232,21 +265,6 @@ class GarminClient:
                         floors = round(float(raw_floors))
                     except (ValueError, TypeError):
                         floors = raw_floors
-                
-                # HR Zones
-                zones_obj = summary.get('timeInHeartRateZones')
-                if zones_obj and isinstance(zones_obj, dict):
-                    def get_z_min(idx):
-                        val = zones_obj.get(str(idx)) or zones_obj.get(idx)
-                        return (val / 60) if val else 0
-                    
-                    z0 = get_z_min(0)
-                    z1 = get_z_min(1)
-                    z2 = get_z_min(2)
-                    z3 = get_z_min(3)
-                    z4 = get_z_min(4)
-                    z5 = get_z_min(5)
-
 
             # 8. Training Status / VO2 Max
             vo2_run = None
@@ -337,5 +355,3 @@ class GarminClient:
             self._authenticated = False
             self._auth_failed = True
             raise Exception(f"MFA submission failed: {str(e)}")
-
-# END OF FILE
