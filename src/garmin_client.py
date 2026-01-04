@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import asyncio
 import logging
 import garminconnect
@@ -107,7 +107,6 @@ class GarminClient:
                     overnight_respiration = sleep_dto.get('averageRespirationValue')
                     overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
 
-                    # UPDATED: Convert seconds to minutes and round
                     sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
                     if sleep_time_seconds:
                         sleep_length = round(sleep_time_seconds / 60)  # Minutes
@@ -144,6 +143,9 @@ class GarminClient:
             cardio_duration = 0
             tennis_count = 0
             tennis_duration = 0
+            
+            # List to store processed activities for the second tab
+            processed_activities = []
 
             if activities:
                 for activity in activities:
@@ -151,6 +153,7 @@ class GarminClient:
                     type_key = atype.get('typeKey', '').lower()
                     parent_id = atype.get('parentTypeId')
                     
+                    # Daily Summary Aggregation
                     if 'run' in type_key or parent_id == 1:
                         running_count += 1
                         running_distance += activity.get('distance', 0) / 1000
@@ -166,6 +169,69 @@ class GarminClient:
                     elif 'tennis' in type_key:
                         tennis_count += 1
                         tennis_duration += activity.get('duration', 0) / 60
+                    
+                    # --- NEW: Process Individual Activity Data ---
+                    try:
+                        act_id = activity.get('activityId')
+                        act_name = activity.get('activityName')
+                        act_start_local = activity.get('startTimeLocal') # "YYYY-MM-DD HH:MM:SS"
+                        
+                        # Parse time
+                        act_time_str = ""
+                        if act_start_local:
+                             # Garmin often sends "2024-01-01 10:00:00"
+                             act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
+                        
+                        # Metrics
+                        dist_km = (activity.get('distance') or 0) / 1000
+                        dur_min = (activity.get('duration') or 0) / 60
+                        
+                        # Pace (min/km)
+                        pace_str = ""
+                        if dist_km > 0 and dur_min > 0:
+                             pace_decimal = dur_min / dist_km
+                             p_min = int(pace_decimal)
+                             p_sec = int((pace_decimal - p_min) * 60)
+                             pace_str = f"{p_min}:{p_sec:02d}"
+
+                        # HR
+                        avg_hr = activity.get('averageHR')
+                        max_hr = activity.get('maxHR')
+                        
+                        # Cadence (Steps per minute)
+                        # Garmin usually sends 'averageRunningCadenceInStepsPerMinute' for runs
+                        avg_cadence = activity.get('averageRunningCadenceInStepsPerMinute')
+                        if not avg_cadence:
+                            # Fallback for cycling/other
+                            avg_cadence = activity.get('averageBikingCadenceInRevPerMinute') 
+
+                        cal = activity.get('calories')
+                        elev = activity.get('elevationGain') # meters
+                        
+                        # TE
+                        aerobic_te = activity.get('aerobicTrainingEffect')
+                        anaerobic_te = activity.get('anaerobicTrainingEffect')
+
+                        processed_activities.append({
+                            "Activity ID": act_id,
+                            "Date": target_date.isoformat(),
+                            "Time": act_time_str,
+                            "Type": atype.get('typeKey', 'Unknown'),
+                            "Name": act_name,
+                            "Distance (km)": round(dist_km, 2) if dist_km else 0,
+                            "Duration (min)": round(dur_min, 1) if dur_min else 0,
+                            "Avg Pace (min/km)": pace_str,
+                            "Avg HR": int(avg_hr) if avg_hr else "",
+                            "Max HR": int(max_hr) if max_hr else "",
+                            "Calories": int(cal) if cal else "",
+                            "Avg Cadence (spm)": int(avg_cadence) if avg_cadence else "",
+                            "Elevation Gain (m)": int(elev) if elev else "",
+                            "Aerobic TE": aerobic_te,
+                            "Anaerobic TE": anaerobic_te
+                        })
+                    except Exception as e_act:
+                        logger.error(f"Error parsing activity detail: {e_act}")
+                        continue
 
             # 6. Process General Stats
             weight = None
@@ -252,7 +318,8 @@ class GarminClient:
                 cardio_activity_count=cardio_count,
                 cardio_duration=cardio_duration,
                 tennis_activity_count=tennis_count,
-                tennis_activity_duration=tennis_duration
+                tennis_activity_duration=tennis_duration,
+                activities=processed_activities # PASS LIST TO METRICS
             )
 
         except Exception as e:
