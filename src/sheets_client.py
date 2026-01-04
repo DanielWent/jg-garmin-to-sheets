@@ -1,12 +1,7 @@
 import logging
 from typing import List
-from pathlib import Path
-import pickle
-from datetime import date # Import the date type
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-import google.auth.exceptions
+from datetime import date
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -21,34 +16,29 @@ class GoogleAuthTokenRefreshError(Exception):
 
 class GoogleSheetsClient:
     def __init__(self, credentials_path: str, spreadsheet_id: str, sheet_name: str):
+        if not spreadsheet_id:
+            raise ValueError("Spreadsheet ID is missing. Please check your .env or GitHub Secrets configuration.")
+            
         self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
         self.credentials_path = credentials_path
         self.credentials = self._get_credentials()
         self.service = build('sheets', 'v4', credentials=self.credentials)
-        self.spreadsheet_title = None # To store the human-readable name
+        self.spreadsheet_title = None 
 
     def _get_credentials(self) -> Credentials:
-        creds = None
-        token_path = Path(self.credentials_path).parent / 'token.pickle'
-        
-        if token_path.exists():
-            with open(token_path, 'rb') as token:
-                creds = pickle.load(token)
-                
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                except google.auth.exceptions.RefreshError as e:
-                    raise GoogleAuthTokenRefreshError(f"Google token refresh failed: {e}")
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(self.credentials_path, SCOPES)
-                creds = flow.run_local_server(port=0)
-            
-            with open(token_path, 'wb') as token:
-                pickle.dump(creds, token)
-        return creds
+        """
+        Authenticates using a Service Account JSON file.
+        This is the robust method for server-side automation (GitHub Actions).
+        """
+        try:
+            return Credentials.from_service_account_file(
+                self.credentials_path, 
+                scopes=SCOPES
+            )
+        except Exception as e:
+            logger.error(f"Failed to authenticate with Service Account: {e}")
+            raise
 
     def _get_spreadsheet_details(self):
         """Fetches spreadsheet metadata to get sheet properties and title."""
@@ -101,7 +91,7 @@ class GoogleSheetsClient:
         appends = []
 
         for metric in metrics:
-            # Convert the date object to an ISO format string for JSON serialization
+            # Convert the date object to an ISO format string
             metric_date_str = metric.date.isoformat() if isinstance(metric.date, date) else metric.date
             
             row_data = []
