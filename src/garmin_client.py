@@ -98,18 +98,15 @@ class GarminClient:
                 if sleep_dto:
                     sleep_score = sleep_dto.get('sleepScores', {}).get('overall', {}).get('value')
                     
-                    # Sleep Need (Handle Dict or Int)
                     sleep_need_obj = sleep_dto.get('sleepNeed')
                     if isinstance(sleep_need_obj, dict):
                         sleep_need = sleep_need_obj.get('actual')
                     else:
                         sleep_need = sleep_need_obj
 
-                    # Overnight Vitals
                     overnight_respiration = sleep_dto.get('averageRespirationValue')
                     overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
 
-                    # Times
                     sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
                     if sleep_time_seconds:
                         sleep_length = sleep_time_seconds / 3600  # Hours
@@ -122,40 +119,32 @@ class GarminClient:
                     if end_ts_local:
                         sleep_end_time = datetime.fromtimestamp(end_ts_local/1000).strftime('%H:%M')
                     
-                    # Sleep Stages (Seconds to Minutes)
                     sleep_deep = (sleep_dto.get('deepSleepSeconds') or 0) / 60
                     sleep_light = (sleep_dto.get('lightSleepSeconds') or 0) / 60
                     sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
                     sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
-            # 4. Process Lactate Threshold (Robust Logic)
+            # 4. Process Lactate Threshold
             lactate_pace = None
             lactate_hr = None
-            
             lt_speed = None
             lt_hr_raw = None
 
-            # Helper to check different keys (Garmin is inconsistent here)
             def parse_lt_obj(obj):
                 if not obj: return None, None
-                # Try 'value' (m/s) or 'speed' (m/s)
                 s = obj.get('value') or obj.get('speed')
-                # Try 'hrValue' (bpm) or 'bpm' or 'hr'
                 h = obj.get('hrValue') or obj.get('bpm') or obj.get('hr')
                 return s, h
 
-            # Source A: Training Status
             if training_status:
                 lt_obj = training_status.get('mostRecentLactateThreshold', {})
                 s, h = parse_lt_obj(lt_obj)
                 if s: lt_speed = s
                 if h: lt_hr_raw = h
             
-            # Source B: User Summary (Fallback)
             if (not lt_speed or not lt_hr_raw) and summary:
                 lt_obj = summary.get('latestLactateThreshold', {})
                 s, h = parse_lt_obj(lt_obj)
-                # Only overwrite if we didn't find it in Source A
                 if not lt_speed and s: lt_speed = s
                 if not lt_hr_raw and h: lt_hr_raw = h
 
@@ -210,7 +199,7 @@ class GarminClient:
                         tennis_count += 1
                         tennis_duration += activity.get('duration', 0) / 60
 
-            # 7. Process General Stats
+            # 7. Process General Stats & HR Zones
             weight = None
             body_fat = None
             if stats:
@@ -225,6 +214,9 @@ class GarminClient:
             steps = None
             floors = None
             
+            # Init Zones
+            z0 = z1 = z2 = z3 = z4 = z5 = None
+
             if summary:
                 active_cal = summary.get('activeKilocalories')
                 resting_cal = summary.get('bmrKilocalories')
@@ -233,9 +225,30 @@ class GarminClient:
                 avg_stress = summary.get('averageStressLevel')
                 steps = summary.get('totalSteps')
                 
-                # --- FIX: Floors Climbed ---
-                # "floorsAscended" is usually the key for raw count, "floorsClimbed" sometimes appears
-                floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
+                # Floors
+                raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
+                if raw_floors is not None:
+                    try:
+                        floors = round(float(raw_floors))
+                    except (ValueError, TypeError):
+                        floors = raw_floors
+                
+                # --- NEW: HR Zones ---
+                # 'timeInHeartRateZones' is usually a dict {0: seconds, 1: seconds...}
+                zones_obj = summary.get('timeInHeartRateZones')
+                if zones_obj and isinstance(zones_obj, dict):
+                    # Helper to get minutes
+                    def get_z_min(idx):
+                        val = zones_obj.get(str(idx)) or zones_obj.get(idx)
+                        return (val / 60) if val else 0
+                    
+                    z0 = get_z_min(0)
+                    z1 = get_z_min(1)
+                    z2 = get_z_min(2)
+                    z3 = get_z_min(3)
+                    z4 = get_z_min(4)
+                    z5 = get_z_min(5)
+
 
             # 8. Training Status / VO2 Max
             vo2_run = None
@@ -273,50 +286,15 @@ class GarminClient:
                 average_stress=avg_stress,
                 overnight_hrv=overnight_hrv_value,
                 hrv_status=hrv_status_value,
+                hr_zone_0=z0, # NEW
+                hr_zone_1=z1, # NEW
+                hr_zone_2=z2, # NEW
+                hr_zone_3=z3, # NEW
+                hr_zone_4=z4, # NEW
+                hr_zone_5=z5, # NEW
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
                 training_status=train_phrase,
                 lactate_threshold_pace=lactate_pace, 
                 lactate_threshold_hr=lactate_hr,     
                 active_calories=active_cal,
-                resting_calories=resting_cal,
-                intensity_minutes=intensity_min,
-                steps=steps,
-                floors_climbed=floors, 
-                all_activity_count=len(activities) if activities else 0,
-                running_activity_count=running_count,
-                running_distance=running_distance,
-                cycling_activity_count=cycling_count,
-                cycling_distance=cycling_distance,
-                strength_activity_count=strength_count,
-                strength_duration=strength_duration,
-                cardio_activity_count=cardio_count,
-                cardio_duration=cardio_duration,
-                tennis_activity_count=tennis_count,
-                tennis_activity_duration=tennis_duration
-            )
-
-        except Exception as e:
-            logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
-            return GarminMetrics(date=target_date)
-
-    async def submit_mfa_code(self, mfa_code: str):
-        if not self.mfa_ticket_dict:
-            raise Exception("MFA ticket not available.")
-        try:
-            loop = asyncio.get_event_loop()
-            resume_login_result = await loop.run_in_executor(
-                None, lambda: resume_login(self.mfa_ticket_dict, mfa_code)
-            )
-            
-            oauth1, oauth2 = resume_login_result
-            self.client.garth.oauth1_token = oauth1
-            self.client.garth.oauth2_token = oauth2
-            
-            self._authenticated = True
-            self.mfa_ticket_dict = None
-            return True
-        except Exception as e:
-            self._authenticated = False
-            self._auth_failed = True
-            raise Exception(f"MFA submission failed: {str(e)}")
