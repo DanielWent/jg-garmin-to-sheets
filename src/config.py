@@ -6,20 +6,36 @@ from typing import Optional
 @dataclass
 class GarminMetrics:
     date: date
+    # Sleep Details
     sleep_score: Optional[float] = None
     sleep_length: Optional[float] = None
+    sleep_start_time: Optional[str] = None    # NEW: HH:MM
+    sleep_end_time: Optional[str] = None      # NEW: HH:MM
+    sleep_deep: Optional[float] = None        # NEW: Minutes
+    sleep_light: Optional[float] = None       # NEW: Minutes
+    sleep_rem: Optional[float] = None         # NEW: Minutes
+    sleep_awake: Optional[float] = None       # NEW: Minutes
+    
+    # Body & Health
     weight: Optional[float] = None
     body_fat: Optional[float] = None
-    blood_pressure_systolic: Optional[int] = None
-    blood_pressure_diastolic: Optional[int] = None
-    active_calories: Optional[int] = None
-    resting_calories: Optional[int] = None
     resting_heart_rate: Optional[int] = None
     average_stress: Optional[int] = None
-    training_status: Optional[str] = None
+    overnight_hrv: Optional[int] = None
+    hrv_status: Optional[str] = None
+    
+    # Performance & Training
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
+    training_status: Optional[str] = None
+    lactate_threshold_pace: Optional[str] = None # NEW: MM:SS / km
+    lactate_threshold_hr: Optional[int] = None   # NEW: BPM
+    
+    # Activity Stats
+    active_calories: Optional[int] = None
+    resting_calories: Optional[int] = None
     intensity_minutes: Optional[int] = None
+    steps: Optional[int] = None
     all_activity_count: Optional[int] = None
     running_activity_count: Optional[int] = None
     running_distance: Optional[float] = None
@@ -31,54 +47,64 @@ class GarminMetrics:
     cardio_duration: Optional[float] = None
     tennis_activity_count: Optional[int] = None
     tennis_activity_duration: Optional[float] = None
-    overnight_hrv: Optional[int] = None
-    hrv_status: Optional[str] = None
-    steps: Optional[int] = None
-    # TODO: To add a new attribute, just add it here!
 
-# 2. The Headers list defines the output order and names
+# 2. The Headers list defines the columns in your Google Sheet
 HEADERS = [
-    "Date", "Sleep Score", "Sleep Length", "HRV (ms)", "HRV Status", "Weight (kg)", "Body Fat %",
-    "Blood Pressure Systolic", "Blood Pressure Diastolic", "Active Calories",
-    "Resting Calories", "Resting Heart Rate", "Average Stress", "Training Status",
-    "VO2 Max Running", "VO2 Max Cycling", "Intensity Minutes", "All Activity Count",
-    "Running Activity Count", "Running Distance (km)", "Cycling Activity Count",
-    "Cycling Distance (km)", "Strength Activity Count", "Strength Duration",
-    "Cardio Activity Count", "Cardio Duration",
-    "Tennis Activity Count", "Tennis Activity Duration", "Steps"
+    "Date",
+    # Sleep
+    "Sleep Score", "Sleep Length (hrs)", "Fall Asleep Time", "Wake Up Time",
+    "Deep Sleep (min)", "Light Sleep (min)", "REM Sleep (min)", "Awake/Restless (min)",
+    # Health
+    "Resting Heart Rate", "HRV (ms)", "HRV Status", "Average Stress",
+    "Weight (kg)", "Body Fat %",
+    # Performance
+    "Lactate Threshold Pace (min/km)", "Lactate Threshold HR (bpm)",
+    "VO2 Max Running", "VO2 Max Cycling", "Training Status",
+    # Activity
+    "Steps", "Active Calories", "Resting Calories", "Intensity Minutes",
+    "All Activity Count",
+    "Running Activity Count", "Running Distance (km)",
+    "Cycling Activity Count", "Cycling Distance (km)",
+    "Strength Activity Count", "Strength Duration (min)",
+    "Cardio Activity Count", "Cardio Duration (min)",
+    "Tennis Activity Count", "Tennis Duration (min)"
 ]
 
 # 3. The Map connects the Headers to the Dataclass attributes
 HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
     "Sleep Score": "sleep_score",
-    "Sleep Length": "sleep_length",
-    "Weight (kg)": "weight", # Note: Changed from weight_kg for simplicity
-    "Body Fat %": "body_fat",
-    "Blood Pressure Systolic": "blood_pressure_systolic",
-    "Blood Pressure Diastolic": "blood_pressure_diastolic",
-    "Active Calories": "active_calories",
-    "Resting Calories": "resting_calories",
+    "Sleep Length (hrs)": "sleep_length",
+    "Fall Asleep Time": "sleep_start_time",
+    "Wake Up Time": "sleep_end_time",
+    "Deep Sleep (min)": "sleep_deep",
+    "Light Sleep (min)": "sleep_light",
+    "REM Sleep (min)": "sleep_rem",
+    "Awake/Restless (min)": "sleep_awake",
     "Resting Heart Rate": "resting_heart_rate",
+    "HRV (ms)": "overnight_hrv",
+    "HRV Status": "hrv_status",
     "Average Stress": "average_stress",
-    "Training Status": "training_status",
+    "Weight (kg)": "weight",
+    "Body Fat %": "body_fat",
+    "Lactate Threshold Pace (min/km)": "lactate_threshold_pace",
+    "Lactate Threshold HR (bpm)": "lactate_threshold_hr",
     "VO2 Max Running": "vo2max_running",
     "VO2 Max Cycling": "vo2max_cycling",
+    "Training Status": "training_status",
+    "Steps": "steps",
+    "Active Calories": "active_calories",
+    "Resting Calories": "resting_calories",
     "Intensity Minutes": "intensity_minutes",
     "All Activity Count": "all_activity_count",
     "Running Activity Count": "running_activity_count",
     "Running Distance (km)": "running_distance",
+    "Cycling Activity Count": "cycling_activity_count",
     "Cycling Distance (km)": "cycling_distance",
     "Strength Activity Count": "strength_activity_count",
-    "Strength Duration": "strength_duration",
+    "Strength Duration (min)": "strength_duration",
     "Cardio Activity Count": "cardio_activity_count",
-    "Cardio Duration": "cardio_duration",
-    "HRV (ms)": "overnight_hrv",
-    "HRV Status": "hrv_status",
+    "Cardio Duration (min)": "cardio_duration",
     "Tennis Activity Count": "tennis_activity_count",
-    "Tennis Activity Duration": "tennis_activity_duration",
-    "Steps": "steps"
+    "Tennis Duration (min)": "tennis_activity_duration"
 }
-
-## Helper to get all attribute names from the dataclass
-#ALL_METRIC_ATTRIBUTES = [field.name for field in fields(GarminMetrics)]
