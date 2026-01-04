@@ -11,13 +11,13 @@ class GarminMetrics:
     sleep_length: Optional[float] = None
     sleep_start_time: Optional[str] = None    # HH:MM
     sleep_end_time: Optional[str] = None      # HH:MM
-    sleep_need: Optional[int] = None          # NEW: Minutes
+    sleep_need: Optional[int] = None          # Minutes
     sleep_deep: Optional[float] = None        # Minutes
     sleep_light: Optional[float] = None       # Minutes
     sleep_rem: Optional[float] = None         # Minutes
     sleep_awake: Optional[float] = None       # Minutes
-    overnight_respiration: Optional[float] = None # NEW: brpm
-    overnight_pulse_ox: Optional[float] = None    # NEW: %
+    overnight_respiration: Optional[float] = None # brpm
+    overnight_pulse_ox: Optional[float] = None    # %
     
     # Body & Health
     weight: Optional[float] = None
@@ -27,6 +27,14 @@ class GarminMetrics:
     overnight_hrv: Optional[int] = None
     hrv_status: Optional[str] = None
     
+    # Heart Rate Zones (Daily Total in Minutes)
+    hr_zone_0: Optional[float] = None # Sedentary/Low
+    hr_zone_1: Optional[float] = None # Warm up
+    hr_zone_2: Optional[float] = None # Easy
+    hr_zone_3: Optional[float] = None # Aerobic
+    hr_zone_4: Optional[float] = None # Threshold
+    hr_zone_5: Optional[float] = None # Maximum
+
     # Performance & Training
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
@@ -39,7 +47,7 @@ class GarminMetrics:
     resting_calories: Optional[int] = None
     intensity_minutes: Optional[int] = None
     steps: Optional[int] = None
-    floors_climbed: Optional[float] = None # NEW
+    floors_climbed: Optional[float] = None
     all_activity_count: Optional[int] = None
     running_activity_count: Optional[int] = None
     running_distance: Optional[float] = None
@@ -63,6 +71,9 @@ HEADERS = [
     # Health
     "Resting Heart Rate", "HRV (ms)", "HRV Status", "Average Stress",
     "Weight (kg)", "Body Fat %",
+    # HR Zones
+    "HR Zone 0 (min)", "HR Zone 1 (min)", "HR Zone 2 (min)", 
+    "HR Zone 3 (min)", "HR Zone 4 (min)", "HR Zone 5 (min)",
     # Performance
     "Lactate Threshold Pace (min/km)", "Lactate Threshold HR (bpm)",
     "VO2 Max Running", "VO2 Max Cycling", "Training Status",
@@ -97,6 +108,12 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Average Stress": "average_stress",
     "Weight (kg)": "weight",
     "Body Fat %": "body_fat",
+    "HR Zone 0 (min)": "hr_zone_0",
+    "HR Zone 1 (min)": "hr_zone_1",
+    "HR Zone 2 (min)": "hr_zone_2",
+    "HR Zone 3 (min)": "hr_zone_3",
+    "HR Zone 4 (min)": "hr_zone_4",
+    "HR Zone 5 (min)": "hr_zone_5",
     "Lactate Threshold Pace (min/km)": "lactate_threshold_pace",
     "Lactate Threshold HR (bpm)": "lactate_threshold_hr",
     "VO2 Max Running": "vo2max_running",
