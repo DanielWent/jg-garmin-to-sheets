@@ -8,7 +8,7 @@ class GarminMetrics:
     date: date
     # Sleep Details
     sleep_score: Optional[float] = None
-    sleep_length: Optional[float] = None
+    sleep_length: Optional[float] = None      # Changed to Minutes
     sleep_start_time: Optional[str] = None    # HH:MM
     sleep_end_time: Optional[str] = None      # HH:MM
     sleep_need: Optional[int] = None          # Minutes
@@ -27,20 +27,10 @@ class GarminMetrics:
     overnight_hrv: Optional[int] = None
     hrv_status: Optional[str] = None
     
-    # Heart Rate Zones (Daily Total in Minutes)
-    hr_zone_0: Optional[float] = None # Sedentary/Low
-    hr_zone_1: Optional[float] = None # Warm up
-    hr_zone_2: Optional[float] = None # Easy
-    hr_zone_3: Optional[float] = None # Aerobic
-    hr_zone_4: Optional[float] = None # Threshold
-    hr_zone_5: Optional[float] = None # Maximum
-
     # Performance & Training
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
     training_status: Optional[str] = None
-    lactate_threshold_pace: Optional[str] = None # MM:SS / km
-    lactate_threshold_hr: Optional[int] = None   # BPM
     
     # Activity Stats
     active_calories: Optional[int] = None
@@ -64,18 +54,14 @@ class GarminMetrics:
 HEADERS = [
     "Date",
     # Sleep
-    "Sleep Score", "Sleep Need (min)", "Sleep Length (hrs)", 
+    "Sleep Score", "Sleep Need (min)", "Sleep Length (min)", 
     "Fall Asleep Time", "Wake Up Time",
     "Deep Sleep (min)", "Light Sleep (min)", "REM Sleep (min)", "Awake/Restless (min)",
     "Overnight Respiration (brpm)", "Overnight Pulse Ox (%)",
     # Health
     "Resting Heart Rate", "HRV (ms)", "HRV Status", "Average Stress",
     "Weight (kg)", "Body Fat %",
-    # HR Zones
-    "HR Zone 0 (min)", "HR Zone 1 (min)", "HR Zone 2 (min)", 
-    "HR Zone 3 (min)", "HR Zone 4 (min)", "HR Zone 5 (min)",
     # Performance
-    "Lactate Threshold Pace (min/km)", "Lactate Threshold HR (bpm)",
     "VO2 Max Running", "VO2 Max Cycling", "Training Status",
     # Activity
     "Steps", "Floors Climbed", 
@@ -93,7 +79,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
     "Sleep Score": "sleep_score",
     "Sleep Need (min)": "sleep_need",
-    "Sleep Length (hrs)": "sleep_length",
+    "Sleep Length (min)": "sleep_length",
     "Fall Asleep Time": "sleep_start_time",
     "Wake Up Time": "sleep_end_time",
     "Deep Sleep (min)": "sleep_deep",
@@ -108,14 +94,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Average Stress": "average_stress",
     "Weight (kg)": "weight",
     "Body Fat %": "body_fat",
-    "HR Zone 0 (min)": "hr_zone_0",
-    "HR Zone 1 (min)": "hr_zone_1",
-    "HR Zone 2 (min)": "hr_zone_2",
-    "HR Zone 3 (min)": "hr_zone_3",
-    "HR Zone 4 (min)": "hr_zone_4",
-    "HR Zone 5 (min)": "hr_zone_5",
-    "Lactate Threshold Pace (min/km)": "lactate_threshold_pace",
-    "Lactate Threshold HR (bpm)": "lactate_threshold_hr",
     "VO2 Max Running": "vo2max_running",
     "VO2 Max Cycling": "vo2max_cycling",
     "Training Status": "training_status",
