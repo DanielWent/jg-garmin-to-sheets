@@ -233,11 +233,9 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
                 
-                # --- NEW: HR Zones ---
-                # 'timeInHeartRateZones' is usually a dict {0: seconds, 1: seconds...}
+                # HR Zones
                 zones_obj = summary.get('timeInHeartRateZones')
                 if zones_obj and isinstance(zones_obj, dict):
-                    # Helper to get minutes
                     def get_z_min(idx):
                         val = zones_obj.get(str(idx)) or zones_obj.get(idx)
                         return (val / 60) if val else 0
@@ -286,15 +284,58 @@ class GarminClient:
                 average_stress=avg_stress,
                 overnight_hrv=overnight_hrv_value,
                 hrv_status=hrv_status_value,
-                hr_zone_0=z0, # NEW
-                hr_zone_1=z1, # NEW
-                hr_zone_2=z2, # NEW
-                hr_zone_3=z3, # NEW
-                hr_zone_4=z4, # NEW
-                hr_zone_5=z5, # NEW
+                hr_zone_0=z0, 
+                hr_zone_1=z1, 
+                hr_zone_2=z2, 
+                hr_zone_3=z3, 
+                hr_zone_4=z4, 
+                hr_zone_5=z5, 
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
                 training_status=train_phrase,
                 lactate_threshold_pace=lactate_pace, 
                 lactate_threshold_hr=lactate_hr,     
                 active_calories=active_cal,
+                resting_calories=resting_cal,
+                intensity_minutes=intensity_min,
+                steps=steps,
+                floors_climbed=floors, 
+                all_activity_count=len(activities) if activities else 0,
+                running_activity_count=running_count,
+                running_distance=running_distance,
+                cycling_activity_count=cycling_count,
+                cycling_distance=cycling_distance,
+                strength_activity_count=strength_count,
+                strength_duration=strength_duration,
+                cardio_activity_count=cardio_count,
+                cardio_duration=cardio_duration,
+                tennis_activity_count=tennis_count,
+                tennis_activity_duration=tennis_duration
+            )
+
+        except Exception as e:
+            logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
+            return GarminMetrics(date=target_date)
+
+    async def submit_mfa_code(self, mfa_code: str):
+        if not self.mfa_ticket_dict:
+            raise Exception("MFA ticket not available.")
+        try:
+            loop = asyncio.get_event_loop()
+            resume_login_result = await loop.run_in_executor(
+                None, lambda: resume_login(self.mfa_ticket_dict, mfa_code)
+            )
+            
+            oauth1, oauth2 = resume_login_result
+            self.client.garth.oauth1_token = oauth1
+            self.client.garth.oauth2_token = oauth2
+            
+            self._authenticated = True
+            self.mfa_ticket_dict = None
+            return True
+        except Exception as e:
+            self._authenticated = False
+            self._auth_failed = True
+            raise Exception(f"MFA submission failed: {str(e)}")
+
+# END OF FILE
