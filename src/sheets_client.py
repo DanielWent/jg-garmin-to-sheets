@@ -1,36 +1,32 @@
 import logging
-from typing import List
+from typing import List, Any
 from datetime import date
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .config import GarminMetrics, HEADERS, HEADER_TO_ATTRIBUTE_MAP
+from .config import GarminMetrics, HEADERS, HEADER_TO_ATTRIBUTE_MAP, ACTIVITY_HEADERS
 
 logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
 class GoogleAuthTokenRefreshError(Exception):
-    """Raised when the Google API token refresh fails."""
     pass
 
 class GoogleSheetsClient:
     def __init__(self, credentials_path: str, spreadsheet_id: str, sheet_name: str):
         if not spreadsheet_id:
-            raise ValueError("Spreadsheet ID is missing. Please check your .env or GitHub Secrets configuration.")
+            raise ValueError("Spreadsheet ID is missing.")
             
         self.spreadsheet_id = spreadsheet_id
-        self.sheet_name = sheet_name
+        self.sheet_name = sheet_name # Daily Summary Sheet Name
+        self.activities_sheet_name = "Activities" # Hardcoded secondary tab
         self.credentials_path = credentials_path
         self.credentials = self._get_credentials()
         self.service = build('sheets', 'v4', credentials=self.credentials)
         self.spreadsheet_title = None 
 
     def _get_credentials(self) -> Credentials:
-        """
-        Authenticates using a Service Account JSON file.
-        This is the robust method for server-side automation (GitHub Actions).
-        """
         try:
             return Credentials.from_service_account_file(
                 self.credentials_path, 
@@ -41,7 +37,6 @@ class GoogleSheetsClient:
             raise
 
     def _get_spreadsheet_details(self):
-        """Fetches spreadsheet metadata to get sheet properties and title."""
         try:
             sheet_metadata = self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
             self.spreadsheet_title = sheet_metadata['properties']['title']
@@ -50,48 +45,56 @@ class GoogleSheetsClient:
             logger.error(f"An error occurred fetching spreadsheet details: {e}")
             raise
 
-    def _setup_sheet(self, all_sheets_properties):
-        """Ensures the sheet exists and has headers."""
-        sheet_exists = any(s['properties']['title'] == self.sheet_name for s in all_sheets_properties)
+    def _ensure_tab_exists(self, tab_name: str, headers: List[str], all_sheets_properties):
+        """Ensures a specific tab exists and has headers."""
+        sheet_exists = any(s['properties']['title'] == tab_name for s in all_sheets_properties)
         
         if not sheet_exists:
-            logger.info(f"Sheet '{self.sheet_name}' not found in '{self.spreadsheet_title}'. Creating it now.")
-            body = {'requests': [{'addSheet': {'properties': {'title': self.sheet_name}}}]}
+            logger.info(f"Sheet '{tab_name}' not found. Creating it now.")
+            body = {'requests': [{'addSheet': {'properties': {'title': tab_name}}}]}
             self.service.spreadsheets().batchUpdate(spreadsheetId=self.spreadsheet_id, body=body).execute()
 
-        range_to_check = f"'{self.sheet_name}'!A1"
+        range_to_check = f"'{tab_name}'!A1"
         result = self.service.spreadsheets().values().get(
             spreadsheetId=self.spreadsheet_id, range=range_to_check
         ).execute()
 
         if 'values' not in result:
-            logger.info(f"Sheet '{self.sheet_name}' is empty. Writing headers.")
+            logger.info(f"Sheet '{tab_name}' is empty. Writing headers.")
             self.service.spreadsheets().values().update(
                 spreadsheetId=self.spreadsheet_id,
                 range=range_to_check,
                 valueInputOption='RAW',
-                body={'values': [HEADERS]}
+                body={'values': [headers]}
             ).execute()
 
     def update_metrics(self, metrics: List[GarminMetrics]):
-        """Updates or appends metrics to the Google Sheet."""
+        """Updates Daily Summary AND Activities tabs."""
         all_sheets_properties = self._get_spreadsheet_details()
-        self._setup_sheet(all_sheets_properties)
         
+        # 1. Update Daily Summary Tab
+        self._ensure_tab_exists(self.sheet_name, HEADERS, all_sheets_properties)
+        self._update_daily_summary(metrics)
+
+        # 2. Update Activities Tab
+        self._ensure_tab_exists(self.activities_sheet_name, ACTIVITY_HEADERS, all_sheets_properties)
+        self._update_activities(metrics)
+
+    def _update_daily_summary(self, metrics: List[GarminMetrics]):
+        """Logic to update the Daily Summary tab."""
         try:
             date_column_range = f"'{self.sheet_name}'!A:A"
             result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=date_column_range).execute()
             existing_dates_list = result.get('values', [])
             date_to_row_map = {row[0]: i + 1 for i, row in enumerate(existing_dates_list) if row}
         except HttpError as e:
-            logger.error(f"Could not read existing dates from sheet: {e}")
+            logger.error(f"Could not read existing dates: {e}")
             return
 
         updates = []
         appends = []
 
         for metric in metrics:
-            # Convert the date object to an ISO format string
             metric_date_str = metric.date.isoformat() if isinstance(metric.date, date) else metric.date
             
             row_data = []
@@ -99,7 +102,6 @@ class GoogleSheetsClient:
                 attribute_name = HEADER_TO_ATTRIBUTE_MAP.get(header)
                 value = getattr(metric, attribute_name, "") if attribute_name else ""
                 
-                # Special handling for the date to ensure it's a string
                 if attribute_name == 'date':
                     value = metric_date_str
 
@@ -120,15 +122,12 @@ class GoogleSheetsClient:
                 appends.append(row_data)
 
         if updates:
-            logger.info(f"Updating {len(updates)} existing rows in '{self.spreadsheet_title}'.")
-            body = {
-                'valueInputOption': 'USER_ENTERED',
-                'data': updates
-            }
+            logger.info(f"Updating {len(updates)} rows in '{self.sheet_name}'.")
+            body = {'valueInputOption': 'USER_ENTERED', 'data': updates}
             self.service.spreadsheets().values().batchUpdate(spreadsheetId=self.spreadsheet_id, body=body).execute()
 
         if appends:
-            logger.info(f"Appending {len(appends)} new rows to '{self.spreadsheet_title}'.")
+            logger.info(f"Appending {len(appends)} rows to '{self.sheet_name}'.")
             self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range=f"'{self.sheet_name}'!A1",
@@ -137,5 +136,51 @@ class GoogleSheetsClient:
                 body={'values': appends}
             ).execute()
 
-        if not updates and not appends:
-            logger.info("No new data to update or append.")
+    def _update_activities(self, metrics: List[GarminMetrics]):
+        """Logic to update the Activities tab (No updates, only appends new IDs)."""
+        
+        # 1. Flatten all activities from all days into a single list
+        new_activities_buffer = []
+        for metric in metrics:
+            if metric.activities:
+                new_activities_buffer.extend(metric.activities)
+        
+        if not new_activities_buffer:
+            return
+
+        # 2. Get existing Activity IDs to prevent duplicates
+        try:
+            id_column_range = f"'{self.activities_sheet_name}'!A:A"
+            result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=id_column_range).execute()
+            existing_ids = set()
+            for row in result.get('values', []):
+                if row: existing_ids.add(str(row[0])) # Store as string
+        except HttpError as e:
+            logger.error(f"Could not read existing activity IDs: {e}")
+            return
+
+        # 3. Filter for unique new activities
+        appends = []
+        for act in new_activities_buffer:
+            act_id = str(act.get("Activity ID"))
+            if act_id not in existing_ids:
+                # Prepare row based on ACTIVITY_HEADERS
+                row_data = []
+                for header in ACTIVITY_HEADERS:
+                    val = act.get(header, "")
+                    row_data.append(val)
+                appends.append(row_data)
+                existing_ids.add(act_id) # Prevent dupes within the same batch
+
+        # 4. Write to sheet
+        if appends:
+            logger.info(f"Appending {len(appends)} new activities to '{self.activities_sheet_name}'.")
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"'{self.activities_sheet_name}'!A1",
+                valueInputOption='USER_ENTERED',
+                insertDataOption='INSERT_ROWS',
+                body={'values': appends}
+            ).execute()
+        else:
+            logger.info("No new unique activities found.")
