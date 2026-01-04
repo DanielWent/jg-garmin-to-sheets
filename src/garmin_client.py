@@ -97,8 +97,16 @@ class GarminClient:
                 sleep_dto = sleep_data.get('dailySleepDTO', {})
                 if sleep_dto:
                     sleep_score = sleep_dto.get('sleepScores', {}).get('overall', {}).get('value')
-                    sleep_need = sleep_dto.get('sleepNeed') # Minutes
                     
+                    # --- FIX: Handle Sleep Need (Complex Object vs Int) ---
+                    sleep_need_obj = sleep_dto.get('sleepNeed')
+                    if isinstance(sleep_need_obj, dict):
+                        # Extract the 'actual' value (minutes)
+                        sleep_need = sleep_need_obj.get('actual')
+                    else:
+                        # Fallback if it's a direct number
+                        sleep_need = sleep_need_obj
+
                     # Overnight Vitals
                     overnight_respiration = sleep_dto.get('averageRespirationValue')
                     overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
@@ -122,11 +130,10 @@ class GarminClient:
                     sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
                     sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
-            # 4. Process Lactate Threshold (With Backup Check)
+            # 4. Process Lactate Threshold
             lactate_pace = None
             lactate_hr = None
             
-            # Helper to extract from a dictionary
             def extract_lt(data_dict):
                 val = data_dict.get('value') # Speed m/s
                 hr = data_dict.get('hrValue')
@@ -135,18 +142,11 @@ class GarminClient:
             lt_speed = None
             lt_hr_raw = None
 
-            # Primary Source: Training Status
             if training_status:
                 lt_obj = training_status.get('mostRecentLactateThreshold', {})
                 if lt_obj:
                     lt_speed, lt_hr_raw = extract_lt(lt_obj)
             
-            # Secondary Source: User Summary (if primary failed)
-            if not lt_speed and summary:
-                # Sometimes user summary has it under a different key, but often it mirrors training status
-                # Checking generic 'latestLactateThreshold' if it exists in your specific API version
-                pass 
-
             if lt_hr_raw:
                 lactate_hr = lt_hr_raw
 
@@ -242,7 +242,7 @@ class GarminClient:
             return GarminMetrics(
                 date=target_date,
                 sleep_score=sleep_score,
-                sleep_need=sleep_need,             # NEW
+                sleep_need=sleep_need,             
                 sleep_length=sleep_length,
                 sleep_start_time=sleep_start_time, 
                 sleep_end_time=sleep_end_time,     
@@ -250,8 +250,8 @@ class GarminClient:
                 sleep_light=sleep_light,           
                 sleep_rem=sleep_rem,               
                 sleep_awake=sleep_awake,
-                overnight_respiration=overnight_respiration, # NEW
-                overnight_pulse_ox=overnight_pulse_ox,       # NEW
+                overnight_respiration=overnight_respiration, 
+                overnight_pulse_ox=overnight_pulse_ox,       
                 weight=weight,
                 body_fat=body_fat,
                 resting_heart_rate=resting_hr,
@@ -267,7 +267,7 @@ class GarminClient:
                 resting_calories=resting_cal,
                 intensity_minutes=intensity_min,
                 steps=steps,
-                floors_climbed=floors, # NEW
+                floors_climbed=floors, 
                 all_activity_count=len(activities) if activities else 0,
                 running_activity_count=running_count,
                 running_distance=running_distance,
