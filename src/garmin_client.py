@@ -107,9 +107,10 @@ class GarminClient:
                     overnight_respiration = sleep_dto.get('averageRespirationValue')
                     overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
 
+                    # UPDATED: Convert seconds to minutes and round
                     sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
                     if sleep_time_seconds:
-                        sleep_length = sleep_time_seconds / 3600  # Hours
+                        sleep_length = round(sleep_time_seconds / 60)  # Minutes
                     
                     start_ts_local = sleep_dto.get('sleepStartTimestampLocal')
                     end_ts_local = sleep_dto.get('sleepEndTimestampLocal')
@@ -124,40 +125,7 @@ class GarminClient:
                     sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
                     sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
-            # 4. Process Lactate Threshold
-            lactate_pace = None
-            lactate_hr = None
-            lt_speed = None
-            lt_hr_raw = None
-
-            def parse_lt_obj(obj):
-                if not obj: return None, None
-                s = obj.get('value') or obj.get('speed')
-                h = obj.get('hrValue') or obj.get('bpm') or obj.get('hr')
-                return s, h
-
-            if training_status:
-                lt_obj = training_status.get('mostRecentLactateThreshold', {})
-                s, h = parse_lt_obj(lt_obj)
-                if s: lt_speed = s
-                if h: lt_hr_raw = h
-            
-            if (not lt_speed or not lt_hr_raw) and summary:
-                lt_obj = summary.get('latestLactateThreshold', {})
-                s, h = parse_lt_obj(lt_obj)
-                if not lt_speed and s: lt_speed = s
-                if not lt_hr_raw and h: lt_hr_raw = h
-
-            if lt_hr_raw:
-                lactate_hr = lt_hr_raw
-
-            if lt_speed and lt_speed > 0:
-                seconds_per_km = 1000 / lt_speed
-                minutes = int(seconds_per_km // 60)
-                seconds = int(seconds_per_km % 60)
-                lactate_pace = f"{minutes}:{seconds:02d}"
-
-            # 5. Process HRV
+            # 4. Process HRV
             overnight_hrv_value = None
             hrv_status_value = None
             if hrv_payload and 'hrvSummary' in hrv_payload:
@@ -165,7 +133,7 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # 6. Process Activities
+            # 5. Process Activities
             running_count = 0
             running_distance = 0
             cycling_count = 0
@@ -199,7 +167,7 @@ class GarminClient:
                         tennis_count += 1
                         tennis_duration += activity.get('duration', 0) / 60
 
-            # 7. Process General Stats & HR Zones
+            # 6. Process General Stats
             weight = None
             body_fat = None
             if stats:
@@ -214,42 +182,6 @@ class GarminClient:
             steps = None
             floors = None
             
-            # Init Zones
-            z0 = z1 = z2 = z3 = z4 = z5 = None
-
-            # --- SEARCH FOR HR ZONES ---
-            zones_obj = None
-            
-            # Strategy 1: Look in User Summary
-            if summary:
-                zones_obj = summary.get('timeInHeartRateZones')
-            
-            # Strategy 2: Look in Stats (fallback)
-            if not zones_obj and stats:
-                # Sometimes nested in userDailySummary or direct
-                zones_obj = stats.get('timeInHeartRateZones')
-            
-            # Strategy 3: Check for dailyHeartRateZones key
-            if not zones_obj and summary:
-                 zones_obj = summary.get('dailyHeartRateZones')
-
-            # Logging for debugging if empty
-            if not zones_obj:
-                logger.info(f"DEBUG: HR Zones missing. Summary Keys: {list(summary.keys()) if summary else 'None'}")
-            else:
-                # If found, parse it
-                if isinstance(zones_obj, dict):
-                    def get_z_min(idx):
-                        val = zones_obj.get(str(idx)) or zones_obj.get(idx)
-                        return (val / 60) if val else 0
-                    
-                    z0 = get_z_min(0)
-                    z1 = get_z_min(1)
-                    z2 = get_z_min(2)
-                    z3 = get_z_min(3)
-                    z4 = get_z_min(4)
-                    z5 = get_z_min(5)
-
             if summary:
                 active_cal = summary.get('activeKilocalories')
                 resting_cal = summary.get('bmrKilocalories')
@@ -266,7 +198,7 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
 
-            # 8. Training Status / VO2 Max
+            # 7. Training Status / VO2 Max
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
@@ -302,17 +234,9 @@ class GarminClient:
                 average_stress=avg_stress,
                 overnight_hrv=overnight_hrv_value,
                 hrv_status=hrv_status_value,
-                hr_zone_0=z0, 
-                hr_zone_1=z1, 
-                hr_zone_2=z2, 
-                hr_zone_3=z3, 
-                hr_zone_4=z4, 
-                hr_zone_5=z5, 
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
                 training_status=train_phrase,
-                lactate_threshold_pace=lactate_pace, 
-                lactate_threshold_hr=lactate_hr,     
                 active_calories=active_cal,
                 resting_calories=resting_cal,
                 intensity_minutes=intensity_min,
