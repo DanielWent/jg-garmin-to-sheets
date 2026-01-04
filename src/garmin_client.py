@@ -83,26 +83,31 @@ class GarminClient:
             # 3. Process Sleep Data
             sleep_score = None
             sleep_length = None
+            sleep_need = None
             sleep_start_time = None
             sleep_end_time = None
             sleep_deep = None
             sleep_light = None
             sleep_rem = None
             sleep_awake = None
+            overnight_respiration = None
+            overnight_pulse_ox = None
 
             if sleep_data:
                 sleep_dto = sleep_data.get('dailySleepDTO', {})
                 if sleep_dto:
                     sleep_score = sleep_dto.get('sleepScores', {}).get('overall', {}).get('value')
+                    sleep_need = sleep_dto.get('sleepNeed') # Minutes
                     
+                    # Overnight Vitals
+                    overnight_respiration = sleep_dto.get('averageRespirationValue')
+                    overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
+
                     # Times
                     sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
                     if sleep_time_seconds:
                         sleep_length = sleep_time_seconds / 3600  # Hours
                     
-                    # Start/End Times (Format HH:MM)
-                    start_ts = sleep_dto.get('sleepStartTimestampGMT') # Using GMT usually works best with Garmin's offset logic, or check for local
-                    # Actually, Garmin provides 'sleepStartTimestampLocal' which is safer for display
                     start_ts_local = sleep_dto.get('sleepStartTimestampLocal')
                     end_ts_local = sleep_dto.get('sleepEndTimestampLocal')
                     
@@ -117,23 +122,39 @@ class GarminClient:
                     sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
                     sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
-            # 4. Process Lactate Threshold
+            # 4. Process Lactate Threshold (With Backup Check)
             lactate_pace = None
             lactate_hr = None
             
+            # Helper to extract from a dictionary
+            def extract_lt(data_dict):
+                val = data_dict.get('value') # Speed m/s
+                hr = data_dict.get('hrValue')
+                return val, hr
+
+            lt_speed = None
+            lt_hr_raw = None
+
+            # Primary Source: Training Status
             if training_status:
-                lt_data = training_status.get('mostRecentLactateThreshold', {})
-                if lt_data:
-                    # Heart Rate
-                    lactate_hr = lt_data.get('hrValue')
-                    
-                    # Pace (Speed is m/s. Need min/km)
-                    speed_mps = lt_data.get('value')
-                    if speed_mps and speed_mps > 0:
-                        seconds_per_km = 1000 / speed_mps
-                        minutes = int(seconds_per_km // 60)
-                        seconds = int(seconds_per_km % 60)
-                        lactate_pace = f"{minutes}:{seconds:02d}"
+                lt_obj = training_status.get('mostRecentLactateThreshold', {})
+                if lt_obj:
+                    lt_speed, lt_hr_raw = extract_lt(lt_obj)
+            
+            # Secondary Source: User Summary (if primary failed)
+            if not lt_speed and summary:
+                # Sometimes user summary has it under a different key, but often it mirrors training status
+                # Checking generic 'latestLactateThreshold' if it exists in your specific API version
+                pass 
+
+            if lt_hr_raw:
+                lactate_hr = lt_hr_raw
+
+            if lt_speed and lt_speed > 0:
+                seconds_per_km = 1000 / lt_speed
+                minutes = int(seconds_per_km // 60)
+                seconds = int(seconds_per_km % 60)
+                lactate_pace = f"{minutes}:{seconds:02d}"
 
             # 5. Process HRV
             overnight_hrv_value = None
@@ -161,7 +182,6 @@ class GarminClient:
                     type_key = atype.get('typeKey', '').lower()
                     parent_id = atype.get('parentTypeId')
                     
-                    # Activity Logic
                     if 'run' in type_key or parent_id == 1:
                         running_count += 1
                         running_distance += activity.get('distance', 0) / 1000
@@ -181,13 +201,9 @@ class GarminClient:
             # 7. Process General Stats
             weight = None
             body_fat = None
-            bp_sys = None
-            bp_dia = None
             if stats:
                 if stats.get('weight'): weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
-                bp_sys = stats.get('systolic')
-                bp_dia = stats.get('diastolic')
 
             active_cal = None
             resting_cal = None
@@ -195,6 +211,7 @@ class GarminClient:
             resting_hr = None
             avg_stress = None
             steps = None
+            floors = None
             
             if summary:
                 active_cal = summary.get('activeKilocalories')
@@ -203,6 +220,7 @@ class GarminClient:
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
                 steps = summary.get('totalSteps')
+                floors = summary.get('floorsClimbed')
 
             # 8. Training Status / VO2 Max
             vo2_run = None
@@ -214,10 +232,8 @@ class GarminClient:
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
                 if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
                 
-                # Phrase logic
                 ts_data = training_status.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
                 if ts_data:
-                    # Just grab the first available device's status
                     for dev_data in ts_data.values():
                         train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
                         break
@@ -226,13 +242,16 @@ class GarminClient:
             return GarminMetrics(
                 date=target_date,
                 sleep_score=sleep_score,
+                sleep_need=sleep_need,             # NEW
                 sleep_length=sleep_length,
-                sleep_start_time=sleep_start_time, # NEW
-                sleep_end_time=sleep_end_time,     # NEW
-                sleep_deep=sleep_deep,             # NEW
-                sleep_light=sleep_light,           # NEW
-                sleep_rem=sleep_rem,               # NEW
-                sleep_awake=sleep_awake,           # NEW
+                sleep_start_time=sleep_start_time, 
+                sleep_end_time=sleep_end_time,     
+                sleep_deep=sleep_deep,             
+                sleep_light=sleep_light,           
+                sleep_rem=sleep_rem,               
+                sleep_awake=sleep_awake,
+                overnight_respiration=overnight_respiration, # NEW
+                overnight_pulse_ox=overnight_pulse_ox,       # NEW
                 weight=weight,
                 body_fat=body_fat,
                 resting_heart_rate=resting_hr,
@@ -242,12 +261,13 @@ class GarminClient:
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
                 training_status=train_phrase,
-                lactate_threshold_pace=lactate_pace, # NEW
-                lactate_threshold_hr=lactate_hr,     # NEW
+                lactate_threshold_pace=lactate_pace, 
+                lactate_threshold_hr=lactate_hr,     
                 active_calories=active_cal,
                 resting_calories=resting_cal,
                 intensity_minutes=intensity_min,
                 steps=steps,
+                floors_climbed=floors, # NEW
                 all_activity_count=len(activities) if activities else 0,
                 running_activity_count=running_count,
                 running_distance=running_distance,
@@ -263,7 +283,6 @@ class GarminClient:
 
         except Exception as e:
             logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
-            # Return basic object with date to prevent crash
             return GarminMetrics(date=target_date)
 
     async def submit_mfa_code(self, mfa_code: str):
