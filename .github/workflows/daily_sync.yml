@@ -28,6 +28,6 @@ jobs:
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
-        SHEET_ID: ${{ secrets.SHEET_ID }}
+        USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
       run: |
         python -m src.main
