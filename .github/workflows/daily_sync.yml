@@ -30,4 +30,4 @@ jobs:
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         SHEET_ID: ${{ secrets.SHEET_ID }}
       run: |
-        python src/main.py
+        python -m src.main
