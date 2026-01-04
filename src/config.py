@@ -9,12 +9,15 @@ class GarminMetrics:
     # Sleep Details
     sleep_score: Optional[float] = None
     sleep_length: Optional[float] = None
-    sleep_start_time: Optional[str] = None    # NEW: HH:MM
-    sleep_end_time: Optional[str] = None      # NEW: HH:MM
-    sleep_deep: Optional[float] = None        # NEW: Minutes
-    sleep_light: Optional[float] = None       # NEW: Minutes
-    sleep_rem: Optional[float] = None         # NEW: Minutes
-    sleep_awake: Optional[float] = None       # NEW: Minutes
+    sleep_start_time: Optional[str] = None    # HH:MM
+    sleep_end_time: Optional[str] = None      # HH:MM
+    sleep_need: Optional[int] = None          # NEW: Minutes
+    sleep_deep: Optional[float] = None        # Minutes
+    sleep_light: Optional[float] = None       # Minutes
+    sleep_rem: Optional[float] = None         # Minutes
+    sleep_awake: Optional[float] = None       # Minutes
+    overnight_respiration: Optional[float] = None # NEW: brpm
+    overnight_pulse_ox: Optional[float] = None    # NEW: %
     
     # Body & Health
     weight: Optional[float] = None
@@ -28,14 +31,15 @@ class GarminMetrics:
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
     training_status: Optional[str] = None
-    lactate_threshold_pace: Optional[str] = None # NEW: MM:SS / km
-    lactate_threshold_hr: Optional[int] = None   # NEW: BPM
+    lactate_threshold_pace: Optional[str] = None # MM:SS / km
+    lactate_threshold_hr: Optional[int] = None   # BPM
     
     # Activity Stats
     active_calories: Optional[int] = None
     resting_calories: Optional[int] = None
     intensity_minutes: Optional[int] = None
     steps: Optional[int] = None
+    floors_climbed: Optional[float] = None # NEW
     all_activity_count: Optional[int] = None
     running_activity_count: Optional[int] = None
     running_distance: Optional[float] = None
@@ -52,8 +56,10 @@ class GarminMetrics:
 HEADERS = [
     "Date",
     # Sleep
-    "Sleep Score", "Sleep Length (hrs)", "Fall Asleep Time", "Wake Up Time",
+    "Sleep Score", "Sleep Need (min)", "Sleep Length (hrs)", 
+    "Fall Asleep Time", "Wake Up Time",
     "Deep Sleep (min)", "Light Sleep (min)", "REM Sleep (min)", "Awake/Restless (min)",
+    "Overnight Respiration (brpm)", "Overnight Pulse Ox (%)",
     # Health
     "Resting Heart Rate", "HRV (ms)", "HRV Status", "Average Stress",
     "Weight (kg)", "Body Fat %",
@@ -61,7 +67,8 @@ HEADERS = [
     "Lactate Threshold Pace (min/km)", "Lactate Threshold HR (bpm)",
     "VO2 Max Running", "VO2 Max Cycling", "Training Status",
     # Activity
-    "Steps", "Active Calories", "Resting Calories", "Intensity Minutes",
+    "Steps", "Floors Climbed", 
+    "Active Calories", "Resting Calories", "Intensity Minutes",
     "All Activity Count",
     "Running Activity Count", "Running Distance (km)",
     "Cycling Activity Count", "Cycling Distance (km)",
@@ -74,6 +81,7 @@ HEADERS = [
 HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
     "Sleep Score": "sleep_score",
+    "Sleep Need (min)": "sleep_need",
     "Sleep Length (hrs)": "sleep_length",
     "Fall Asleep Time": "sleep_start_time",
     "Wake Up Time": "sleep_end_time",
@@ -81,6 +89,8 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Light Sleep (min)": "sleep_light",
     "REM Sleep (min)": "sleep_rem",
     "Awake/Restless (min)": "sleep_awake",
+    "Overnight Respiration (brpm)": "overnight_respiration",
+    "Overnight Pulse Ox (%)": "overnight_pulse_ox",
     "Resting Heart Rate": "resting_heart_rate",
     "HRV (ms)": "overnight_hrv",
     "HRV Status": "hrv_status",
@@ -93,6 +103,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "VO2 Max Cycling": "vo2max_cycling",
     "Training Status": "training_status",
     "Steps": "steps",
+    "Floors Climbed": "floors_climbed",
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
     "Intensity Minutes": "intensity_minutes",
