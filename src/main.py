@@ -209,17 +209,21 @@ async def run_interactive_sync():
     selected_profile_data = user_profiles[selected_profile_name]
     logger.info(f"Using profile: {selected_profile_name}")
 
-    # ---------------------------------------------------------
+# ---------------------------------------------------------
     # AUTOMATION CONFIGURATION: DATE RANGE
     # ---------------------------------------------------------
-    FORCE_BACKFILL = True 
+    # Set to False for daily 8am sync of previous day's data
+    FORCE_BACKFILL = False 
 
     if FORCE_BACKFILL:
         start_date = date(2023, 1, 1)
+        end_date = date.today()
     else:
-        start_date = date.today() - timedelta(days=1)
+        # Surgical sync: Only fetch the full day just completed
+        yesterday = date.today() - timedelta(days=1)
+        start_date = yesterday
+        end_date = yesterday
 
-    end_date = date.today()
     logger.info(f"Date range selected: {start_date} to {end_date}")
     # ---------------------------------------------------------
 
