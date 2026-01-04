@@ -61,7 +61,7 @@ class GarminClient:
             await self.authenticate()
 
         try:
-            # 1. Define async fetchers
+            # 1. Define async fetchers (Original Method)
             async def get_stats():
                 return await asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_date.isoformat())
             async def get_sleep():
@@ -76,13 +76,13 @@ class GarminClient:
                 return await self._fetch_hrv_data(target_date.isoformat())
 
             # 2. Fetch all concurrently
-            # Added return_exceptions=True to ensure partial failures don't crash the script
+            # Added return_exceptions=True so a single failure (e.g. Training Status) doesn't crash the Activity sync
             results = await asyncio.gather(
                 get_stats(), get_sleep(), get_activities(), get_user_summary(), get_training_status(), get_hrv(),
                 return_exceptions=True
             )
 
-            # Unpack results safely
+            # Unpack safely
             stats = results[0] if not isinstance(results[0], Exception) else None
             sleep_data = results[1] if not isinstance(results[1], Exception) else None
             activities = results[2] if not isinstance(results[2], Exception) else None
@@ -119,7 +119,7 @@ class GarminClient:
 
                     sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
                     if sleep_time_seconds:
-                        sleep_length = round(sleep_time_seconds / 60)  # Minutes
+                        sleep_length = round(sleep_time_seconds / 60)
                     
                     start_ts_local = sleep_dto.get('sleepStartTimestampLocal')
                     end_ts_local = sleep_dto.get('sleepEndTimestampLocal')
@@ -154,59 +154,61 @@ class GarminClient:
             tennis_count = 0
             tennis_duration = 0
             
-            # List to store processed activities for the second tab
             processed_activities = []
 
             if activities:
-                for activity in activities:
-                    atype = activity.get('activityType', {})
+                for activity_summary in activities:
+                    atype = activity_summary.get('activityType', {})
                     type_key = atype.get('typeKey', '').lower()
                     parent_id = atype.get('parentTypeId')
                     
-                    # Daily Summary Aggregation
+                    # Totals Aggregation
                     if 'run' in type_key or parent_id == 1:
                         running_count += 1
-                        running_distance += activity.get('distance', 0) / 1000
+                        running_distance += activity_summary.get('distance', 0) / 1000
                     elif 'cycling' in type_key or parent_id == 2:
                         cycling_count += 1
-                        cycling_distance += activity.get('distance', 0) / 1000
+                        cycling_distance += activity_summary.get('distance', 0) / 1000
                     elif 'strength' in type_key:
                         strength_count += 1
-                        strength_duration += activity.get('duration', 0) / 60
+                        strength_duration += activity_summary.get('duration', 0) / 60
                     elif 'cardio' in type_key:
                         cardio_count += 1
-                        cardio_duration += activity.get('duration', 0) / 60
+                        cardio_duration += activity_summary.get('duration', 0) / 60
                     elif 'tennis' in type_key:
                         tennis_count += 1
-                        tennis_duration += activity.get('duration', 0) / 60
+                        tennis_duration += activity_summary.get('duration', 0) / 60
                     
-                    # --- NEW LOGIC: Fetch Activity Details for HR Zones ---
+                    # --- FETCH DETAILS FOR HR ZONES ---
                     try:
-                        act_id = activity.get('activityId')
+                        act_id = activity_summary.get('activityId')
                         
-                        # We use the same 'run_in_executor' pattern the original author used
-                        # to fetch the full details for this specific activity.
-                        detailed_data = await asyncio.get_event_loop().run_in_executor(
-                            None, self.client.get_activity_details, act_id
-                        )
+                        # 1. Direct call (Blocking is fine here as we are in a loop)
+                        # This fetches the full JSON for the activity
+                        detailed_data = self.client.get_activity_details(act_id)
                         
-                        # Use the detailed summary if available, otherwise fallback to the basic one
-                        detailed_activity = detailed_data.get('summaryDTO') or activity
+                        # 2. Aggressive Extraction
+                        # Usually it is in 'summaryDTO', but sometimes at the root
+                        activity = detailed_data.get('summaryDTO')
+                        if not activity:
+                            # If summaryDTO is missing, maybe the detailed_data IS the data?
+                            if 'timeInHRZones' in detailed_data:
+                                activity = detailed_data
+                            else:
+                                # Only fall back to the basic summary if we absolutely have to
+                                activity = activity_summary
 
-                        act_name = detailed_activity.get('activityName')
-                        act_start_local = detailed_activity.get('startTimeLocal') # "YYYY-MM-DD HH:MM:SS"
+                        # 3. Process Metrics
+                        act_name = activity.get('activityName')
+                        act_start_local = activity.get('startTimeLocal')
                         
-                        # Parse time
                         act_time_str = ""
                         if act_start_local:
-                             # Garmin often sends "2024-01-01 10:00:00"
                              act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
                         
-                        # Metrics
-                        dist_km = (detailed_activity.get('distance') or 0) / 1000
-                        dur_min = (detailed_activity.get('duration') or 0) / 60
+                        dist_km = (activity.get('distance') or 0) / 1000
+                        dur_min = (activity.get('duration') or 0) / 60
                         
-                        # Pace (min/km)
                         pace_str = ""
                         if dist_km > 0 and dur_min > 0:
                              pace_decimal = dur_min / dist_km
@@ -214,29 +216,15 @@ class GarminClient:
                              p_sec = int((pace_decimal - p_min) * 60)
                              pace_str = f"{p_min}:{p_sec:02d}"
 
-                        # HR
-                        avg_hr = detailed_activity.get('averageHR')
-                        max_hr = detailed_activity.get('maxHR')
+                        # 4. Extract HR Zones
+                        # We specifically look for this key. If missing, it defaults to empty list.
+                        hr_zones = activity.get('timeInHRZones', [])
                         
-                        # HR ZONES (Now extracting from detailed data)
-                        hr_zones = detailed_activity.get('timeInHRZones', [])
-                        # Create safe list
                         z_m = []
                         for i in range(6):
+                            # Safe extraction: check length before accessing index
                             val = hr_zones[i] if hr_zones and len(hr_zones) > i else 0
                             z_m.append(round((val or 0) / 60, 2))
-
-                        # Cadence
-                        avg_cadence = detailed_activity.get('averageRunningCadenceInStepsPerMinute')
-                        if not avg_cadence:
-                            avg_cadence = detailed_activity.get('averageBikingCadenceInRevPerMinute') 
-
-                        cal = detailed_activity.get('calories')
-                        elev = detailed_activity.get('elevationGain') # meters
-                        
-                        # TE
-                        aerobic_te = detailed_activity.get('aerobicTrainingEffect')
-                        anaerobic_te = detailed_activity.get('anaerobicTrainingEffect')
 
                         processed_activities.append({
                             "Activity ID": act_id,
@@ -247,13 +235,13 @@ class GarminClient:
                             "Distance (km)": round(dist_km, 2) if dist_km else 0,
                             "Duration (min)": round(dur_min, 1) if dur_min else 0,
                             "Avg Pace (min/km)": pace_str,
-                            "Avg HR": int(avg_hr) if avg_hr else "",
-                            "Max HR": int(max_hr) if max_hr else "",
-                            "Calories": int(cal) if cal else "",
-                            "Avg Cadence (spm)": int(avg_cadence) if avg_cadence else "",
-                            "Elevation Gain (m)": int(elev) if elev else "",
-                            "Aerobic TE": aerobic_te,
-                            "Anaerobic TE": anaerobic_te,
+                            "Avg HR": int(activity.get('averageHR') or 0),
+                            "Max HR": int(activity.get('maxHR') or 0),
+                            "Calories": int(activity.get('calories') or 0),
+                            "Avg Cadence (spm)": int(activity.get('averageRunningCadenceInStepsPerMinute') or activity.get('averageBikingCadenceInRevPerMinute') or 0),
+                            "Elevation Gain (m)": int(activity.get('elevationGain') or 0),
+                            "Aerobic TE": activity.get('aerobicTrainingEffect'),
+                            "Anaerobic TE": activity.get('anaerobicTrainingEffect'),
                             "Z1 Time (min)": z_m[1],
                             "Z2 Time (min)": z_m[2],
                             "Z3 Time (min)": z_m[3],
@@ -287,7 +275,6 @@ class GarminClient:
                 avg_stress = summary.get('averageStressLevel')
                 steps = summary.get('totalSteps')
                 
-                # Floors
                 raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
                 if raw_floors is not None:
                     try:
@@ -311,7 +298,6 @@ class GarminClient:
                         train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
                         break
 
-            # Return populated object
             return GarminMetrics(
                 date=target_date,
                 sleep_score=sleep_score,
@@ -350,7 +336,7 @@ class GarminClient:
                 cardio_duration=cardio_duration,
                 tennis_activity_count=tennis_count,
                 tennis_activity_duration=tennis_duration,
-                activities=processed_activities # PASS LIST TO METRICS
+                activities=processed_activities
             )
 
         except Exception as e:
