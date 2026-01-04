@@ -4,6 +4,7 @@ import csv
 import logging
 import re
 import asyncio
+import json
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,45 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer()
 
+def ensure_credentials_file_exists():
+    """
+    Checks if credentials/client_secret.json exists.
+    If not, tries to create it from the GOOGLE_SHEETS_CREDENTIALS environment variable.
+    """
+    creds_path = Path('credentials/client_secret.json')
+    
+    if creds_path.exists():
+        return
+
+    logger.info("client_secret.json not found. Attempting to create from environment variable...")
+    
+    # Retrieve the JSON string from the environment
+    raw_json = os.environ.get('GOOGLE_SHEETS_CREDENTIALS')
+    
+    if not raw_json:
+        logger.error("CRITICAL: 'credentials/client_secret.json' is missing and 'GOOGLE_SHEETS_CREDENTIALS' env var is empty.")
+        logger.error("Please ensure you have added the contents of client_secret.json to your GitHub Secrets.")
+        sys.exit(1)
+
+    try:
+        # Ensure the directory exists
+        creds_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Verify it's valid JSON before writing
+        json_content = json.loads(raw_json)
+        
+        with open(creds_path, 'w') as f:
+            json.dump(json_content, f, indent=2)
+            
+        logger.info(f"Successfully created {creds_path} from environment secret.")
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse GOOGLE_SHEETS_CREDENTIALS: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Failed to write credentials file: {e}")
+        sys.exit(1)
+
 async def sync(email: str, password: str, start_date: date, end_date: date, output_type: str, profile_data: dict, profile_name: str = ""):
     """Core sync logic. Fetches data and writes to the specified output."""
     try:
@@ -32,9 +72,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         await garmin_client.authenticate()
 
     except MFARequiredException as e:
-        # In an automated environment, we can't prompt for MFA.
-        # This will fail if MFA is triggered, but that is expected behavior for headless scripts
-        # unless you have a mechanism to handle it (like a static secret, which Garmin doesn't support easily).
         logger.error("MFA required but cannot be entered in headless mode.")
         sys.exit(1)
         
@@ -56,6 +93,9 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         return
 
     if output_type == 'sheets':
+        # >>> CRITICAL FIX: Ensure the file exists before the client looks for it <<<
+        ensure_credentials_file_exists()
+
         sheets_id = profile_data.get('sheet_id')
         sheet_name = profile_data.get('sheet_name', 'Raw Data')
         display_name = profile_data.get('spreadsheet_name', f"ID: {sheets_id}")
@@ -79,7 +119,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             sys.exit(1)
 
     elif output_type == 'csv':
-        # Use configured CSV path or default to output directory with profile name
         if 'csv_path' in profile_data and profile_data['csv_path']:
             csv_path = Path(profile_data['csv_path'])
         else:
@@ -92,14 +131,14 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         
         with open(csv_path, 'a', newline='') as f:
             writer = csv.writer(f)
-            if f.tell() == 0: # Write header if file is new/empty
+            if f.tell() == 0: 
                 writer.writerow(HEADERS)
             for metric in metrics_to_write:
                 writer.writerow([getattr(metric, HEADER_TO_ATTRIBUTE_MAP.get(h, ""), "") for h in HEADERS])
         logger.info("CSV file sync completed successfully!")
 
 def load_user_profiles():
-    """Parses .env for user profiles, now including SPREADSHEET_NAME."""
+    """Parses .env for user profiles."""
     profiles = {}
     profile_pattern = re.compile(r"^(USER\d+)_(GARMIN_EMAIL|GARMIN_PASSWORD|SHEET_ID|SHEET_NAME|SPREADSHEET_NAME|CSV_PATH)$")
 
@@ -154,50 +193,36 @@ def cli_sync(
     ))
 
 async def run_interactive_sync():
-    """
-    Handles the automated session logic for GitHub Actions.
-    Previously 'interactive', this now defaults all choices for automation.
-    """
+    """Automated session logic for GitHub Actions."""
     logger.info("Starting automated sync setup...")
 
-    # 1. Output Type: Always Google Sheets
     output_type = "sheets"
     logger.info(f"Selected output type: {output_type}")
 
-    # 2. User Profiles: Load and Select First Available
     user_profiles = load_user_profiles()
     if not user_profiles:
-        logger.error("No user profiles found in .env file. Please define at least one profile (e.g., USER1_GARMIN_EMAIL=...).")
+        logger.error("No user profiles found. Check your secrets.")
         sys.exit(1)
     
     profile_names = list(user_profiles.keys())
-    # Automatically select the first profile (USER1)
     selected_profile_name = profile_names[0]
     selected_profile_data = user_profiles[selected_profile_name]
-    logger.info(f"Loaded {len(user_profiles)} user profiles. Using: {selected_profile_name}")
+    logger.info(f"Using profile: {selected_profile_name}")
 
-    # 3. Date Range Configuration
     # ---------------------------------------------------------
     # AUTOMATION CONFIGURATION: DATE RANGE
     # ---------------------------------------------------------
-    
-    # TOGGLE THIS: Set to True for the first big sync, then False for daily updates
     FORCE_BACKFILL = True 
 
     if FORCE_BACKFILL:
-        # First run: Fetch everything from Jan 1st, 2023
         start_date = date(2023, 1, 1)
     else:
-        # Daily run: Fetch only yesterday's data
         start_date = date.today() - timedelta(days=1)
 
-    # Always end 'today'
     end_date = date.today()
-
     logger.info(f"Date range selected: {start_date} to {end_date}")
     # ---------------------------------------------------------
 
-    # Call Core Sync Logic
     await sync(
         email=selected_profile_data.get('email'),
         password=selected_profile_data.get('password'),
@@ -209,24 +234,17 @@ async def run_interactive_sync():
     )
 
 def main():
-    """Main entry point for the application."""
     env_file_path = find_dotenv(usecwd=True)
     if env_file_path:
         load_dotenv(dotenv_path=env_file_path)
-    else:
-        logger.warning(".env file not found. Please ensure it's in the root directory.")
     
     try:
-        # Check if any CLI arguments were provided
         if len(sys.argv) > 1:
-            # CLI mode: use typer to parse arguments
             app()
         else:
-            # Automated mode: run the pre-configured sync
             print("\nWelcome to GarminGo (Automated Mode)!")
             asyncio.run(run_interactive_sync())
     except KeyboardInterrupt:
-        print("\nOperation cancelled by user.")
         sys.exit(0)
 
 if __name__ == "__main__":
