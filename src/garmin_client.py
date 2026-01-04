@@ -98,13 +98,11 @@ class GarminClient:
                 if sleep_dto:
                     sleep_score = sleep_dto.get('sleepScores', {}).get('overall', {}).get('value')
                     
-                    # --- FIX: Handle Sleep Need (Complex Object vs Int) ---
+                    # Sleep Need (Handle Dict or Int)
                     sleep_need_obj = sleep_dto.get('sleepNeed')
                     if isinstance(sleep_need_obj, dict):
-                        # Extract the 'actual' value (minutes)
                         sleep_need = sleep_need_obj.get('actual')
                     else:
-                        # Fallback if it's a direct number
                         sleep_need = sleep_need_obj
 
                     # Overnight Vitals
@@ -130,23 +128,37 @@ class GarminClient:
                     sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
                     sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
-            # 4. Process Lactate Threshold
+            # 4. Process Lactate Threshold (Robust Logic)
             lactate_pace = None
             lactate_hr = None
             
-            def extract_lt(data_dict):
-                val = data_dict.get('value') # Speed m/s
-                hr = data_dict.get('hrValue')
-                return val, hr
-
             lt_speed = None
             lt_hr_raw = None
 
+            # Helper to check different keys (Garmin is inconsistent here)
+            def parse_lt_obj(obj):
+                if not obj: return None, None
+                # Try 'value' (m/s) or 'speed' (m/s)
+                s = obj.get('value') or obj.get('speed')
+                # Try 'hrValue' (bpm) or 'bpm' or 'hr'
+                h = obj.get('hrValue') or obj.get('bpm') or obj.get('hr')
+                return s, h
+
+            # Source A: Training Status
             if training_status:
                 lt_obj = training_status.get('mostRecentLactateThreshold', {})
-                if lt_obj:
-                    lt_speed, lt_hr_raw = extract_lt(lt_obj)
+                s, h = parse_lt_obj(lt_obj)
+                if s: lt_speed = s
+                if h: lt_hr_raw = h
             
+            # Source B: User Summary (Fallback)
+            if (not lt_speed or not lt_hr_raw) and summary:
+                lt_obj = summary.get('latestLactateThreshold', {})
+                s, h = parse_lt_obj(lt_obj)
+                # Only overwrite if we didn't find it in Source A
+                if not lt_speed and s: lt_speed = s
+                if not lt_hr_raw and h: lt_hr_raw = h
+
             if lt_hr_raw:
                 lactate_hr = lt_hr_raw
 
@@ -220,7 +232,10 @@ class GarminClient:
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
                 steps = summary.get('totalSteps')
-                floors = summary.get('floorsClimbed')
+                
+                # --- FIX: Floors Climbed ---
+                # "floorsAscended" is usually the key for raw count, "floorsClimbed" sometimes appears
+                floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
 
             # 8. Training Status / VO2 Max
             vo2_run = None
