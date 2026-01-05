@@ -213,7 +213,7 @@ async def run_interactive_sync():
     # AUTOMATION CONFIGURATION: DATE RANGE
     # ---------------------------------------------------------
     # Set to False for daily 8am sync of previous day's data
-    FORCE_BACKFILL = False
+    FORCE_BACKFILL = True
 
     if FORCE_BACKFILL:
         start_date = date(2023, 1, 1)
