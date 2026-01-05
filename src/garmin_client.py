@@ -79,7 +79,6 @@ class GarminClient:
                  return await asyncio.get_event_loop().run_in_executor(None, self.client.get_body_battery, target_date.isoformat())
 
             # 2. Fetch all concurrently
-            # We keep return_exceptions=True for stability
             results = await asyncio.gather(
                 get_stats(), get_sleep(), get_activities(), get_user_summary(), 
                 get_training_status(), get_hrv(), get_body_battery(),
@@ -99,6 +98,7 @@ class GarminClient:
             sleep_score = None
             sleep_length = None
             sleep_need = None
+            sleep_efficiency = None
             sleep_start_time = None
             sleep_end_time = None
             sleep_deep = None
@@ -139,6 +139,12 @@ class GarminClient:
                     sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
                     sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
+                    # NEW: Calculate Sleep Efficiency
+                    if sleep_time_seconds and sleep_time_seconds > 0:
+                        awake_sec = sleep_dto.get('awakeSleepSeconds') or 0
+                        # Efficiency = (Total Time - Awake Time) / Total Time * 100
+                        sleep_efficiency = round(((sleep_time_seconds - awake_sec) / sleep_time_seconds) * 100)
+
             # 4. Process HRV
             overnight_hrv_value = None
             hrv_status_value = None
@@ -147,28 +153,24 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # 5. Process Activities (Activity Counts removed for Tab 1, Details kept for Tab 2)
+            # 5. Process Activities (Counts Removed, List preserved for Tab 2)
             processed_activities = []
             if activities:
                 for activity in activities:
                     atype = activity.get('activityType', {})
                     
-                    # Process Individual Activity Data (No HR Zones)
                     try:
                         act_id = activity.get('activityId')
                         act_name = activity.get('activityName')
                         act_start_local = activity.get('startTimeLocal') # "YYYY-MM-DD HH:MM:SS"
                         
-                        # Parse time
                         act_time_str = ""
                         if act_start_local:
                              act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
                         
-                        # Metrics
                         dist_km = (activity.get('distance') or 0) / 1000
                         dur_min = (activity.get('duration') or 0) / 60
                         
-                        # Pace (min/km)
                         pace_str = ""
                         if dist_km > 0 and dur_min > 0:
                              pace_decimal = dur_min / dist_km
@@ -176,19 +178,15 @@ class GarminClient:
                              p_sec = int((pace_decimal - p_min) * 60)
                              pace_str = f"{p_min}:{p_sec:02d}"
 
-                        # HR
                         avg_hr = activity.get('averageHR')
                         max_hr = activity.get('maxHR')
 
-                        # Cadence
                         avg_cadence = activity.get('averageRunningCadenceInStepsPerMinute')
                         if not avg_cadence:
                             avg_cadence = activity.get('averageBikingCadenceInRevPerMinute') 
 
                         cal = activity.get('calories')
-                        elev = activity.get('elevationGain') # meters
-                        
-                        # TE
+                        elev = activity.get('elevationGain')
                         aerobic_te = activity.get('aerobicTrainingEffect')
                         anaerobic_te = activity.get('anaerobicTrainingEffect')
 
@@ -213,12 +211,14 @@ class GarminClient:
                         logger.error(f"Error parsing activity detail: {e_act}")
                         continue
 
-            # 6. Process General Stats
+            # 6. Process General Stats & BMI
             weight = None
             body_fat = None
+            bmi = None
             if stats:
                 if stats.get('weight'): weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
+                bmi = stats.get('bmi') # NEW
 
             active_cal = None
             resting_cal = None
@@ -227,6 +227,10 @@ class GarminClient:
             avg_stress = None
             steps = None
             floors = None
+            rest_stress_dur = None
+            low_stress_dur = None
+            med_stress_dur = None
+            high_stress_dur = None
             
             if summary:
                 active_cal = summary.get('activeKilocalories')
@@ -236,7 +240,12 @@ class GarminClient:
                 avg_stress = summary.get('averageStressLevel')
                 steps = summary.get('totalSteps')
                 
-                # Floors
+                # NEW: Stress Durations
+                rest_stress_dur = summary.get('restStressDuration')
+                low_stress_dur = summary.get('lowStressDuration')
+                med_stress_dur = summary.get('mediumStressDuration')
+                high_stress_dur = summary.get('highStressDuration')
+
                 raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
                 if raw_floors is not None:
                     try:
@@ -260,11 +269,10 @@ class GarminClient:
                         train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
                         break
 
-            # 8. NEW: Process Body Battery
+            # 8. Process Body Battery
             max_bb = None
             min_bb = None
             if bb_data:
-                # Typically returns a dict with 'bodyBatteryValuesArray'
                 values_list = bb_data if isinstance(bb_data, list) else bb_data.get('bodyBatteryValuesArray', [])
                 valid_values = [v[1] for v in values_list if v and len(v) > 1 and v[1] is not None]
                 if valid_values:
@@ -275,7 +283,8 @@ class GarminClient:
             return GarminMetrics(
                 date=target_date,
                 sleep_score=sleep_score,
-                sleep_need=sleep_need,             
+                sleep_need=sleep_need,
+                sleep_efficiency=sleep_efficiency, # NEW
                 sleep_length=sleep_length,
                 sleep_start_time=sleep_start_time, 
                 sleep_end_time=sleep_end_time,     
@@ -286,9 +295,16 @@ class GarminClient:
                 overnight_respiration=overnight_respiration, 
                 overnight_pulse_ox=overnight_pulse_ox,       
                 weight=weight,
+                bmi=bmi, # NEW
                 body_fat=body_fat,
                 resting_heart_rate=resting_hr,
                 average_stress=avg_stress,
+                # NEW Stress Durations
+                rest_stress_duration=rest_stress_dur,
+                low_stress_duration=low_stress_dur,
+                medium_stress_duration=med_stress_dur,
+                high_stress_duration=high_stress_dur,
+                
                 overnight_hrv=overnight_hrv_value,
                 hrv_status=hrv_status_value,
                 vo2max_running=vo2_run,
@@ -299,10 +315,8 @@ class GarminClient:
                 intensity_minutes=intensity_min,
                 steps=steps,
                 floors_climbed=floors,
-                # New Body Battery Fields
                 max_body_battery=max_bb,
                 min_body_battery=min_bb,
-                # List for Tab 2
                 activities=processed_activities
             )
 
