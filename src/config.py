@@ -11,7 +11,7 @@ class GarminMetrics:
     sleep_start_time: Optional[str] = None
     sleep_end_time: Optional[str] = None
     sleep_need: Optional[int] = None
-    sleep_efficiency: Optional[float] = None # NEW
+    sleep_efficiency: Optional[float] = None
     sleep_deep: Optional[float] = None
     sleep_light: Optional[float] = None
     sleep_rem: Optional[float] = None
@@ -19,14 +19,14 @@ class GarminMetrics:
     overnight_respiration: Optional[float] = None
     overnight_pulse_ox: Optional[float] = None
     weight: Optional[float] = None
-    bmi: Optional[float] = None # NEW
+    bmi: Optional[float] = None
     body_fat: Optional[float] = None
     resting_heart_rate: Optional[int] = None
     average_stress: Optional[int] = None
-    rest_stress_duration: Optional[int] = None # NEW
-    low_stress_duration: Optional[int] = None # NEW
-    medium_stress_duration: Optional[int] = None # NEW
-    high_stress_duration: Optional[int] = None # NEW
+    rest_stress_duration: Optional[int] = None
+    low_stress_duration: Optional[int] = None
+    medium_stress_duration: Optional[int] = None
+    high_stress_duration: Optional[int] = None
     overnight_hrv: Optional[int] = None
     hrv_status: Optional[str] = None
     vo2max_running: Optional[float] = None
@@ -38,14 +38,12 @@ class GarminMetrics:
     steps: Optional[int] = None
     floors_climbed: Optional[float] = None
     
-    # Body Battery
-    max_body_battery: Optional[int] = None
-    min_body_battery: Optional[int] = None
+    # Body Battery REMOVED to prevent API failure
 
     # List to hold individual activities for the secondary tab
     activities: List[Dict[str, Any]] = field(default_factory=list)
 
-# Headers for Daily Summary Tab (Renamed for AI Clarity)
+# Headers for Daily Summary Tab
 HEADERS = [
     "Date",
     "Sleep Score", "Recommended Sleep Need (min)", "Sleep Length (min)", "Sleep Efficiency (%)",
@@ -59,11 +57,10 @@ HEADERS = [
     "Weight (kg)", "BMI", "Body Fat %",
     "VO2 Max Running", "VO2 Max Cycling", "Training Status Phase",
     "Steps", "Floors Climbed", 
-    "Active Calories (kcal)", "BMR Calories (kcal)", "Daily Intensity Minutes",
-    "Max Body Battery", "Min Body Battery"
+    "Active Calories (kcal)", "BMR Calories (kcal)", "Daily Intensity Minutes"
+    # Body Battery Headers REMOVED
 ]
 
-# Activity Headers (Unchanged)
 ACTIVITY_HEADERS = [
     "Activity ID", "Date", "Time", "Type", "Name",
     "Distance (km)", "Duration (min)", "Avg Pace (min/km)",
@@ -103,7 +100,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Floors Climbed": "floors_climbed",
     "Active Calories (kcal)": "active_calories",
     "BMR Calories (kcal)": "resting_calories",
-    "Daily Intensity Minutes": "intensity_minutes",
-    "Max Body Battery": "max_body_battery",
-    "Min Body Battery": "min_body_battery"
+    "Daily Intensity Minutes": "intensity_minutes"
+    # Body Battery Map REMOVED
 }
