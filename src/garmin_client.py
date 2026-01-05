@@ -74,11 +74,15 @@ class GarminClient:
                 return await asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_date.isoformat())
             async def get_hrv():
                 return await self._fetch_hrv_data(target_date.isoformat())
+            # NEW: Fetch Body Battery
+            async def get_body_battery():
+                 return await asyncio.get_event_loop().run_in_executor(None, self.client.get_body_battery, target_date.isoformat())
 
             # 2. Fetch all concurrently
             # We keep return_exceptions=True for stability
             results = await asyncio.gather(
-                get_stats(), get_sleep(), get_activities(), get_user_summary(), get_training_status(), get_hrv(),
+                get_stats(), get_sleep(), get_activities(), get_user_summary(), 
+                get_training_status(), get_hrv(), get_body_battery(),
                 return_exceptions=True
             )
 
@@ -89,6 +93,7 @@ class GarminClient:
             summary = results[3] if not isinstance(results[3], Exception) else None
             training_status = results[4] if not isinstance(results[4], Exception) else None
             hrv_payload = results[5] if not isinstance(results[5], Exception) else None
+            bb_data = results[6] if not isinstance(results[6], Exception) else None
 
             # 3. Process Sleep Data
             sleep_score = None
@@ -142,43 +147,11 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # 5. Process Activities
-            running_count = 0
-            running_distance = 0
-            cycling_count = 0
-            cycling_distance = 0
-            strength_count = 0
-            strength_duration = 0
-            cardio_count = 0
-            cardio_duration = 0
-            tennis_count = 0
-            tennis_duration = 0
-            
-            # List to store processed activities for the second tab
+            # 5. Process Activities (Activity Counts removed for Tab 1, Details kept for Tab 2)
             processed_activities = []
-
             if activities:
                 for activity in activities:
                     atype = activity.get('activityType', {})
-                    type_key = atype.get('typeKey', '').lower()
-                    parent_id = atype.get('parentTypeId')
-                    
-                    # Daily Summary Aggregation
-                    if 'run' in type_key or parent_id == 1:
-                        running_count += 1
-                        running_distance += activity.get('distance', 0) / 1000
-                    elif 'cycling' in type_key or parent_id == 2:
-                        cycling_count += 1
-                        cycling_distance += activity.get('distance', 0) / 1000
-                    elif 'strength' in type_key:
-                        strength_count += 1
-                        strength_duration += activity.get('duration', 0) / 60
-                    elif 'cardio' in type_key:
-                        cardio_count += 1
-                        cardio_duration += activity.get('duration', 0) / 60
-                    elif 'tennis' in type_key:
-                        tennis_count += 1
-                        tennis_duration += activity.get('duration', 0) / 60
                     
                     # Process Individual Activity Data (No HR Zones)
                     try:
@@ -287,6 +260,17 @@ class GarminClient:
                         train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
                         break
 
+            # 8. NEW: Process Body Battery
+            max_bb = None
+            min_bb = None
+            if bb_data:
+                # Typically returns a dict with 'bodyBatteryValuesArray'
+                values_list = bb_data if isinstance(bb_data, list) else bb_data.get('bodyBatteryValuesArray', [])
+                valid_values = [v[1] for v in values_list if v and len(v) > 1 and v[1] is not None]
+                if valid_values:
+                    max_bb = max(valid_values)
+                    min_bb = min(valid_values)
+
             # Return populated object
             return GarminMetrics(
                 date=target_date,
@@ -314,19 +298,12 @@ class GarminClient:
                 resting_calories=resting_cal,
                 intensity_minutes=intensity_min,
                 steps=steps,
-                floors_climbed=floors, 
-                all_activity_count=len(activities) if activities else 0,
-                running_activity_count=running_count,
-                running_distance=running_distance,
-                cycling_activity_count=cycling_count,
-                cycling_distance=cycling_distance,
-                strength_activity_count=strength_count,
-                strength_duration=strength_duration,
-                cardio_activity_count=cardio_count,
-                cardio_duration=cardio_duration,
-                tennis_activity_count=tennis_count,
-                tennis_activity_duration=tennis_duration,
-                activities=processed_activities # PASS LIST TO METRICS
+                floors_climbed=floors,
+                # New Body Battery Fields
+                max_body_battery=max_bb,
+                min_body_battery=min_bb,
+                # List for Tab 2
+                activities=processed_activities
             )
 
         except Exception as e:
