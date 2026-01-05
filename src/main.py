@@ -212,17 +212,17 @@ async def run_interactive_sync():
 # ---------------------------------------------------------
     # AUTOMATION CONFIGURATION: DATE RANGE
     # ---------------------------------------------------------
-    # Set to False for daily 8am sync of previous day's data
-    FORCE_BACKFILL = True
+    # Set to False for daily sync (now configured for a rolling 7-day window)
+    FORCE_BACKFILL = False
 
     if FORCE_BACKFILL:
         start_date = date(2023, 1, 1)
         end_date = date.today()
     else:
-        # Surgical sync: Only fetch the full day just completed
-        yesterday = date.today() - timedelta(days=1)
-        start_date = yesterday
-        end_date = yesterday
+        # Rolling sync: Fetch the previous 7 days (including today)
+        # This catches any data that might have updated recently (e.g., sleep edits)
+        end_date = date.today()
+        start_date = end_date - timedelta(days=6)
 
     logger.info(f"Date range selected: {start_date} to {end_date}")
     # ---------------------------------------------------------
