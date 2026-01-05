@@ -2,11 +2,10 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional, List, Dict, Any
 
-# 1. The Dataclass defines the data structure
 @dataclass
 class GarminMetrics:
     date: date
-    # Daily Totals (Existing)
+    # Daily Totals
     sleep_score: Optional[float] = None
     sleep_length: Optional[float] = None
     sleep_start_time: Optional[str] = None
@@ -32,22 +31,15 @@ class GarminMetrics:
     intensity_minutes: Optional[int] = None
     steps: Optional[int] = None
     floors_climbed: Optional[float] = None
-    all_activity_count: Optional[int] = None
-    running_activity_count: Optional[int] = None
-    running_distance: Optional[float] = None
-    cycling_activity_count: Optional[int] = None
-    cycling_distance: Optional[float] = None
-    strength_activity_count: Optional[int] = None
-    strength_duration: Optional[float] = None
-    cardio_activity_count: Optional[int] = None
-    cardio_duration: Optional[float] = None
-    tennis_activity_count: Optional[int] = None
-    tennis_activity_duration: Optional[float] = None
+    
+    # NEW FIELDS
+    max_body_battery: Optional[int] = None
+    min_body_battery: Optional[int] = None
 
     # List to hold individual activities for the secondary tab
     activities: List[Dict[str, Any]] = field(default_factory=list)
 
-# 2. Daily Summary Headers (Tab 1)
+# Headers for Daily Summary Tab
 HEADERS = [
     "Date",
     "Sleep Score", "Sleep Need (min)", "Sleep Length (min)", 
@@ -59,16 +51,11 @@ HEADERS = [
     "VO2 Max Running", "VO2 Max Cycling", "Training Status",
     "Steps", "Floors Climbed", 
     "Active Calories", "Resting Calories", "Intensity Minutes",
-    "All Activity Count",
-    "Running Activity Count", "Running Distance (km)",
-    "Cycling Activity Count", "Cycling Distance (km)",
-    "Strength Activity Count", "Strength Duration (min)",
-    "Cardio Activity Count", "Cardio Duration (min)",
-    "Tennis Activity Count", "Tennis Duration (min)"
+    # DELETED: All Activity Count columns (AA-AK)
+    # ADDED: Body Battery
+    "Max Body Battery", "Min Body Battery"
 ]
 
-# 3. Activity Headers (Tab 2)
-# HR Zones removed to match the client logic
 ACTIVITY_HEADERS = [
     "Activity ID", "Date", "Time", "Type", "Name",
     "Distance (km)", "Duration (min)", "Avg Pace (min/km)",
@@ -76,7 +63,6 @@ ACTIVITY_HEADERS = [
     "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE"
 ]
 
-# 4. Daily Summary Map
 HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
     "Sleep Score": "sleep_score",
@@ -104,15 +90,8 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
     "Intensity Minutes": "intensity_minutes",
-    "All Activity Count": "all_activity_count",
-    "Running Activity Count": "running_activity_count",
-    "Running Distance (km)": "running_distance",
-    "Cycling Activity Count": "cycling_activity_count",
-    "Cycling Distance (km)": "cycling_distance",
-    "Strength Activity Count": "strength_activity_count",
-    "Strength Duration (min)": "strength_duration",
-    "Cardio Activity Count": "cardio_activity_count",
-    "Cardio Duration (min)": "cardio_duration",
-    "Tennis Activity Count": "tennis_activity_count",
-    "Tennis Duration (min)": "tennis_activity_duration"
+    
+    # NEW MAPPINGS
+    "Max Body Battery": "max_body_battery",
+    "Min Body Battery": "min_body_battery"
 }
