@@ -2,8 +2,8 @@ name: Daily Garmin Sync
 
 on:
   schedule:
-    # Runs at 23:00 UTC (11pm GMT / Midnight BST)
-    - cron: '0 23 * * *'
+    # Runs at 07:00 UTC
+    - cron: '0 07 * * *'
   workflow_dispatch: # Allows you to click a button to run it manually
 
 jobs:
