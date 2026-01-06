@@ -2,8 +2,10 @@ name: Daily Garmin Sync
 
 on:
   schedule:
-    # Runs at 07:00 UTC
-    - cron: '0 07 * * *'
+    # Runs at 06:00, 07:00, 08:00, 09:00, and 10:00 UTC daily.
+    # This covers your 8am/10am local targets for both Winter (GMT) and Summer (BST)
+    # plus an early 6am UTC check.
+    - cron: '0 6,7,8,9,10 * * *'
   workflow_dispatch: # Allows you to click a button to run it manually
 
 jobs:
