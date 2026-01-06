@@ -219,9 +219,9 @@ async def run_interactive_sync():
         start_date = date(2023, 1, 1)
         end_date = date.today()
     else:
-        # Rolling sync: Fetch the previous 7 COMPLETED days (excluding today)
-        # We stop at yesterday to ensure we never write partial/incomplete data.
-        end_date = date.today() - timedelta(days=1)
+        # Rolling sync: Fetch the last 7 days INCLUDING today
+        # Today = Day 0. Today minus 6 days = 7 days total.
+        end_date = date.today()
         start_date = end_date - timedelta(days=6)
 
     logger.info(f"Date range selected: {start_date} to {end_date}")
