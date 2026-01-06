@@ -108,6 +108,11 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 sheet_name=sheet_name
             )
             sheets_client.update_metrics(metrics_to_write)
+            
+            # --- NEW: Prune old data (retention: 1 year) ---
+            sheets_client.prune_old_data(days_to_keep=365)
+            # -----------------------------------------------
+
             logger.info("Google Sheets sync completed successfully!")
         
         except GoogleAuthTokenRefreshError as auth_error:
