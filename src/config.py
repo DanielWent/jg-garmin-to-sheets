@@ -38,33 +38,47 @@ class GarminMetrics:
     steps: Optional[int] = None
     floors_climbed: Optional[float] = None
     
-    # Body Battery REMOVED to prevent API failure
-
     # List to hold individual activities for the secondary tab
     activities: List[Dict[str, Any]] = field(default_factory=list)
 
-# Headers for Daily Summary Tab
-HEADERS = [
+# --- NEW TAB HEADER DEFINITIONS ---
+
+SLEEP_HEADERS = [
     "Date",
-    "Sleep Score", "Recommended Sleep Need (min)", "Sleep Length (min)", "Sleep Efficiency (%)",
+    "Sleep Score", "Recommended Sleep Need (min)", "Sleep Length (min)",
     "Fall Asleep Time", "Wake Up Time",
-    "Deep Sleep (min)", "Light Sleep (min)", "REM Sleep (min)", "Awake/Restless (min)",
-    "Avg Overnight Respiration (breaths/min)", "Avg Overnight SpO2 (%)",
+    "Deep Sleep (min)", "Light Sleep (min)", "REM Sleep (min)", "Awake/Restless (min)"
+]
+
+STRESS_HEADERS = [
+    "Date",
     "Resting Heart Rate", "HRV (ms)", "HRV Status", 
     "Daily Avg Stress Score (0-100)", 
     "Rest Stress Duration (sec)", "Low Stress Duration (sec)", 
-    "Medium Stress Duration (sec)", "High Stress Duration (sec)",
-    "Weight (kg)", "BMI", "Body Fat %",
-    "VO2 Max Running", "VO2 Max Cycling", "Training Status Phase",
-    "Steps", "Floors Climbed", 
-    "Active Calories (kcal)", "BMR Calories (kcal)", "Daily Intensity Minutes"
-    # Body Battery Headers REMOVED
+    "Medium Stress Duration (sec)", "High Stress Duration (sec)"
 ]
 
+BODY_COMP_HEADERS = [
+    "Date",
+    "Weight (kg)", "BMI", "Body Fat %"
+]
+
+ACTIVITY_SUMMARY_HEADERS = [
+    "Date",
+    "Active Calories (kcal)", "BMR Calories (kcal)", "Daily Intensity Minutes",
+    "Steps", "Floors Climbed", 
+    "VO2 Max Running", "Training Status Phase"
+]
+
+# Consolidated HEADERS for CSV output (combining all above)
+HEADERS = sorted(list(set(SLEEP_HEADERS + STRESS_HEADERS + BODY_COMP_HEADERS + ACTIVITY_SUMMARY_HEADERS)), key=lambda x: x != "Date")
+
+# Updated ACTIVITY_HEADERS (Removed Name and Calories)
 ACTIVITY_HEADERS = [
-    "Activity ID", "Date", "Time", "Type", "Name",
+    "Activity ID", "Date", "Time", "Type",
     "Distance (km)", "Duration (min)", "Avg Pace (min/km)",
-    "Avg HR", "Max HR", "Calories", "Avg Cadence (spm)",
+    "Avg HR", "Max HR", 
+    "Avg Cadence (spm)",
     "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE"
 ]
 
@@ -101,5 +115,4 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Active Calories (kcal)": "active_calories",
     "BMR Calories (kcal)": "resting_calories",
     "Daily Intensity Minutes": "intensity_minutes"
-    # Body Battery Map REMOVED
 }
