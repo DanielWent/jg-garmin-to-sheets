@@ -36,6 +36,7 @@ class GoogleSheetsClient:
         self.service = build('sheets', 'v4', credentials=self.credentials)
 
     def _get_credentials(self) -> Credentials:
+        """Authenticates using the service account file."""
         try:
             return Credentials.from_service_account_file(
                 self.credentials_path, 
@@ -46,6 +47,7 @@ class GoogleSheetsClient:
             raise
 
     def _get_spreadsheet_details(self):
+        """Fetches metadata for all sheets in the spreadsheet."""
         try:
             sheet_metadata = self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
             return sheet_metadata.get('sheets', [])
@@ -80,7 +82,7 @@ class GoogleSheetsClient:
         """Updates the five distinct tabs with appropriate data filtering."""
         all_sheets_properties = self._get_spreadsheet_details()
         
-        # Filter for historical data (excluding today) for specific tabs
+        # Filter for historical data (excluding today) for Stress and Activity Summary tabs
         today = date.today()
         metrics_historical = []
         for m in metrics:
@@ -109,12 +111,12 @@ class GoogleSheetsClient:
         self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
         self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_historical)
 
-        # 5. Update List of Tracked Activities (Secondary Tab)
+        # 5. Update List of Tracked Activities (Appends new activities only)
         self._ensure_tab_exists(self.activities_sheet_name, ACTIVITY_HEADERS, all_sheets_properties)
         self._update_activities(metrics)
 
     def _update_sheet_generic(self, tab_name: str, headers: List[str], metrics: List[GarminMetrics]):
-        """Generic logic to update any summary-style tab based on provided headers."""
+        """Generic logic to update or append rows in summary-style tabs."""
         try:
             date_column_range = f"'{tab_name}'!A:A"
             result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=date_column_range).execute()
@@ -170,7 +172,7 @@ class GoogleSheetsClient:
             ).execute()
 
     def _update_activities(self, metrics: List[GarminMetrics]):
-        """Logic to update the List of Tracked Activities tab."""
+        """Logic to update the List of Tracked Activities tab by appending unique Activity IDs."""
         new_activities_buffer = []
         for metric in metrics:
             if metric.activities:
