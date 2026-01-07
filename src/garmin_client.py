@@ -223,39 +223,35 @@ class GarminClient:
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
 
-            # --- NEW: Process Blood Pressure (ROBUST & LOGGED) ---
+            # --- NEW: Process Blood Pressure with Correct Parsing ---
             bp_systolic = None
             bp_diastolic = None
             
             if bp_payload:
-                # DEBUG LOGGING: Print exactly what we received!
-                logger.info(f"BP Payload found for {target_date}: {bp_payload}")
+                logger.info(f"BP Payload found for {target_date}")
                 
-                readings = None
+                readings = []
                 
-                # Case A: It's a direct list of readings
-                if isinstance(bp_payload, list):
+                # Check for the structure seen in your logs:
+                # payload -> measurementSummaries -> [list] -> measurements -> [list]
+                if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
+                    summaries = bp_payload.get('measurementSummaries', [])
+                    if isinstance(summaries, list):
+                        for summary in summaries:
+                            if isinstance(summary, dict) and 'measurements' in summary:
+                                batch = summary['measurements']
+                                if isinstance(batch, list):
+                                    readings.extend(batch)
+
+                # Fallback: check for direct list or 'userDailyBloodPressureDTOList'
+                elif isinstance(bp_payload, list):
                     readings = bp_payload
-                
-                # Case B: It's a dictionary container
                 elif isinstance(bp_payload, dict):
-                    # Try the most common keys
-                    possible_keys = ['userDailyBloodPressureDTOList', 'dailyBloodPressureDTO', 'measurements', 'bloodPressure']
-                    for key in possible_keys:
-                        if key in bp_payload and bp_payload[key]:
-                            readings = bp_payload[key]
-                            break
-                    
-                    # Fallback: If no known key, just grab the first list we find in the values
-                    if not readings:
-                         for v in bp_payload.values():
-                             if isinstance(v, list) and v:
-                                 readings = v
-                                 break
-                
+                    if 'userDailyBloodPressureDTOList' in bp_payload:
+                        readings = bp_payload['userDailyBloodPressureDTOList']
+
                 if readings:
                     try:
-                        # Calculate average if there are multiple readings for the day
                         sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
                         dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
                         
@@ -268,7 +264,7 @@ class GarminClient:
                     except Exception as e:
                         logger.error(f"Error calculating BP average: {e}")
                 else:
-                    logger.info("BP Payload exists but could not extract readings list.")
+                    logger.info("BP Payload exists but no readings found in known keys.")
 
             # 7. Summary Stats
             active_cal = None
