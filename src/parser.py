@@ -75,7 +75,7 @@ class GarminClient:
             async def get_hrv():
                 return await self._fetch_hrv_data(target_date.isoformat())
             
-            # --- NEW: Specific fetcher for Blood Pressure ---
+            # --- Specific fetcher for Blood Pressure ---
             async def get_bp():
                 try:
                     return await asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_date.isoformat())
@@ -84,21 +84,24 @@ class GarminClient:
                     logger.debug(f"Could not fetch BP for {target_date}: {e}")
                     return None
 
-            # 2. Fetch all concurrently
-            results = await asyncio.gather(
-                get_stats(), get_sleep(), get_activities(), get_user_summary(), 
-                get_training_status(), get_hrv(), get_bp(),
-                return_exceptions=True
-            )
+            # 2. Fetch sequentially to avoid thread-safety issues (Race Conditions)
+            async def safe_fetch(coro):
+                try:
+                    return await coro
+                except Exception as e:
+                    logger.warning(f"Failed to fetch metric: {e}")
+                    return None
 
-            # Unpack safely
-            stats = results[0] if not isinstance(results[0], Exception) else None
-            sleep_data = results[1] if not isinstance(results[1], Exception) else None
-            activities = results[2] if not isinstance(results[2], Exception) else None
-            summary = results[3] if not isinstance(results[3], Exception) else None
-            training_status = results[4] if not isinstance(results[4], Exception) else None
-            hrv_payload = results[5] if not isinstance(results[5], Exception) else None
-            bp_payload = results[6] if not isinstance(results[6], Exception) else None
+            stats = await safe_fetch(get_stats())
+            sleep_data = await safe_fetch(get_sleep())
+            activities = await safe_fetch(get_activities())
+            summary = await safe_fetch(get_user_summary())
+            training_status = await safe_fetch(get_training_status())
+            
+            # get_hrv and get_bp already handle their own exceptions internally,
+            # but awaiting them sequentially ensures they don't clash with the above.
+            hrv_payload = await get_hrv()
+            bp_payload = await get_bp()
 
             # 3. Process Sleep Data (Includes Efficiency)
             sleep_score = None
@@ -224,7 +227,7 @@ class GarminClient:
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
 
-            # --- NEW: Process Blood Pressure ---
+            # --- Process Blood Pressure ---
             bp_systolic = None
             bp_diastolic = None
             
