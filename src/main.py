@@ -85,12 +85,61 @@ def aggregate_monthly_metrics(metrics: list[GarminMetrics], month_date: date) ->
         val = get_avg(attr_name)
         return int(val) if val is not None else None
 
+    # --- NEW: Helper to calculate average TIME strings (HH:MM) ---
+    def get_avg_time(attr_name, is_start_time=False):
+        minutes_list = []
+        for m in metrics:
+            val = getattr(m, attr_name)
+            if val and isinstance(val, str) and ":" in val:
+                try:
+                    hh, mm = map(int, val.split(':'))
+                    total_min = hh * 60 + mm
+                    
+                    # Logic for sleep start crossing midnight:
+                    # If time is early morning (e.g., < 12:00 PM) and it's a start time,
+                    # treat it as the next day (add 24h) to average correctly with late night times.
+                    # e.g. Average of 23:00 (1380m) and 01:00 (1500m) -> 1440m (24:00/00:00)
+                    if is_start_time and total_min < 12 * 60:
+                        total_min += 24 * 60
+                        
+                    minutes_list.append(total_min)
+                except ValueError:
+                    continue
+
+        if not minutes_list:
+            return None
+
+        avg_min = mean(minutes_list)
+        
+        # Normalize back to 0-24h range if we added 24h
+        if avg_min >= 24 * 60:
+            avg_min -= 24 * 60
+            
+        # Convert back to HH:MM
+        avg_hh = int(avg_min // 60)
+        avg_mm = int(round(avg_min % 60))
+        
+        # Handle rounding edge case (e.g. 23:59.9 -> 23:60 -> 24:00)
+        if avg_mm == 60:
+            avg_hh += 1
+            avg_mm = 0
+        if avg_hh >= 24:
+            avg_hh -= 24
+            
+        return f"{avg_hh:02d}:{avg_mm:02d}"
+
     return GarminMetrics(
         date=month_date,  # This will be the 1st of the month
         
         # Averages
         sleep_score=get_avg("sleep_score"),
         sleep_length=get_avg("sleep_length"),
+        
+        # --- NEW: Time Averages ---
+        sleep_start_time=get_avg_time("sleep_start_time", is_start_time=True),
+        sleep_end_time=get_avg_time("sleep_end_time", is_start_time=False),
+        # --------------------------
+
         sleep_need=get_avg_int("sleep_need"),
         sleep_efficiency=get_avg("sleep_efficiency"),
         sleep_deep=get_avg("sleep_deep"),
