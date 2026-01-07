@@ -1,193 +1,333 @@
+from datetime import date, datetime
+from typing import Dict, Any, Optional, List
+import asyncio
 import logging
-from datetime import date
-from typing import Dict, Any, Tuple
+import garminconnect
+from garth.sso import resume_login
+import garth
+from .exceptions import MFARequiredException
 from .config import GarminMetrics
-
-# Suppress the noisy, non-error traceback from the http2 library
-logging.getLogger("hpack").setLevel(logging.WARNING)
+from statistics import mean
 
 logger = logging.getLogger(__name__)
 
-def parse_garmin_data(
-    target_date: date,
-    stats: Dict[str, Any],
-    sleep_data: Dict[str, Any],
-    activities: list,
-    summary: Dict[str, Any],
-    training_status: Dict[str, Any],
-    hrv_payload: Dict[str, Any]
-) -> GarminMetrics:
-    """
-    Parses raw data from Garmin API calls and returns a clean GarminMetrics object.
-    """
-    try:
-        # --- Process Activities ---
-        (
-            running_count, running_distance, cycling_count, cycling_distance,
-            strength_count, strength_duration, cardio_count, cardio_duration,
-            tennis_count, tennis_duration
-        ) = _parse_activities(activities)
+class GarminClient:
+    def __init__(self, email: str, password: str):
+        self.client = garminconnect.Garmin(email, password)
+        self._authenticated = False
+        self.mfa_ticket_dict = None
+        self._auth_failed = False
 
-        # --- Process Sleep ---
-        sleep_score, sleep_length = _parse_sleep(sleep_data, target_date)
+    async def authenticate(self):
+        try:
+            def login_wrapper():
+                return self.client.login()
+            
+            await asyncio.get_event_loop().run_in_executor(None, login_wrapper)
+            self._authenticated = True
+            self.mfa_ticket_dict = None
 
-        # --- Process HRV ---
-        overnight_hrv, hrv_status = _parse_hrv(hrv_payload, target_date)
+        except AttributeError as e:
+            if "'dict' object has no attribute 'expired'" in str(e):
+                logger.info("Caught AttributeError indicating MFA challenge.")
+                if hasattr(self.client.garth, 'oauth2_token') and isinstance(self.client.garth.oauth2_token, dict):
+                    self.mfa_ticket_dict = self.client.garth.oauth2_token
+                    raise MFARequiredException(message="MFA code is required.", mfa_data=self.mfa_ticket_dict)
+                raise
+            raise
+        except garminconnect.GarminConnectAuthenticationError as e:
+            if "MFA-required" in str(e) or "Authentication failed" in str(e):
+                if hasattr(self.client.garth, 'oauth2_token') and isinstance(self.client.garth.oauth2_token, dict):
+                    self.mfa_ticket_dict = self.client.garth.oauth2_token 
+                    raise MFARequiredException(message="MFA code is required.", mfa_data=self.mfa_ticket_dict)
+            raise
+        except Exception as e:
+            logger.error(f"Authentication error: {str(e)}")
+            raise garminconnect.GarminConnectAuthenticationError(f"Authentication error: {str(e)}") from e
 
-        # --- Process Training Status & VO2 Max ---
-        training_status_phrase, vo2max_running, vo2max_cycling = _parse_training_status(training_status, target_date)
+    async def _fetch_hrv_data(self, target_date_iso: str) -> Optional[Dict[str, Any]]:
+        try:
+            return await asyncio.get_event_loop().run_in_executor(
+                None, self.client.get_hrv_data, target_date_iso
+            )
+        except Exception as e:
+            logger.error(f"Error fetching HRV data: {str(e)}")
+            return None
 
-        # --- Process Stats (Weight, Body Fat, BP) ---
-        weight, body_fat, bp_systolic, bp_diastolic = _parse_stats(stats, target_date)
+    async def get_metrics(self, target_date: date) -> GarminMetrics:
+        if not self._authenticated:
+            if self._auth_failed:
+                raise Exception("Authentication previously failed.")
+            await self.authenticate()
 
-        # --- Process Daily Summary (Calories, Steps, etc.) ---
-        active_cals, resting_cals, steps, intensity_mins, rhr, avg_stress = _parse_summary(summary, target_date)
+        try:
+            # 1. Define async fetchers
+            async def get_stats():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_date.isoformat())
+            async def get_sleep():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_date.isoformat())
+            async def get_activities():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_date.isoformat(), target_date.isoformat())
+            async def get_user_summary():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_date.isoformat())
+            async def get_training_status():
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_date.isoformat())
+            async def get_hrv():
+                return await self._fetch_hrv_data(target_date.isoformat())
+            
+            # --- NEW: Specific fetcher for Blood Pressure ---
+            async def get_bp():
+                try:
+                    return await asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_date.isoformat())
+                except Exception as e:
+                    # BP call might fail if no data or permission, so we handle it gracefully
+                    logger.debug(f"Could not fetch BP for {target_date}: {e}")
+                    return None
 
-        return GarminMetrics(
-            date=target_date.isoformat(), # Convert date to string here
-            sleep_score=sleep_score,
-            sleep_length=sleep_length,
-            weight=weight,
-            body_fat=body_fat,
-            blood_pressure_systolic=bp_systolic,
-            blood_pressure_diastolic=bp_diastolic,
-            active_calories=active_cals,
-            resting_calories=resting_cals,
-            resting_heart_rate=rhr,
-            average_stress=avg_stress,
-            training_status=training_status_phrase,
-            vo2max_running=vo2max_running,
-            vo2max_cycling=vo2max_cycling,
-            intensity_minutes=intensity_mins,
-            all_activity_count=len(activities) if activities else 0,
-            running_activity_count=running_count,
-            running_distance=running_distance,
-            cycling_activity_count=cycling_count,
-            cycling_distance=cycling_distance,
-            strength_activity_count=strength_count,
-            strength_duration=strength_duration,
-            cardio_activity_count=cardio_count,
-            cardio_duration=cardio_duration,
-            tennis_activity_count=tennis_count,
-            tennis_activity_duration=tennis_duration,
-            overnight_hrv=overnight_hrv,
-            hrv_status=hrv_status,
-            steps=steps
-        )
-    except Exception as e:
-        logger.error(f"Error parsing metrics for {target_date}: {e}", exc_info=True)
-        return GarminMetrics(date=target_date.isoformat()) # Also convert here for safety
+            # 2. Fetch all concurrently
+            results = await asyncio.gather(
+                get_stats(), get_sleep(), get_activities(), get_user_summary(), 
+                get_training_status(), get_hrv(), get_bp(),
+                return_exceptions=True
+            )
 
-def _parse_activities(activities: list) -> Tuple:
-    """Helper to parse the activities list."""
-    if not activities:
-        return 0, 0.0, 0, 0.0, 0, 0.0, 0, 0.0, 0, 0.0
+            # Unpack safely
+            stats = results[0] if not isinstance(results[0], Exception) else None
+            sleep_data = results[1] if not isinstance(results[1], Exception) else None
+            activities = results[2] if not isinstance(results[2], Exception) else None
+            summary = results[3] if not isinstance(results[3], Exception) else None
+            training_status = results[4] if not isinstance(results[4], Exception) else None
+            hrv_payload = results[5] if not isinstance(results[5], Exception) else None
+            bp_payload = results[6] if not isinstance(results[6], Exception) else None
 
-    running_count, running_distance = 0, 0.0
-    cycling_count, cycling_distance = 0, 0.0
-    strength_count, strength_duration = 0, 0.0
-    cardio_count, cardio_duration = 0, 0.0
-    tennis_count, tennis_duration = 0, 0.0
+            # 3. Process Sleep Data (Includes Efficiency)
+            sleep_score = None
+            sleep_length = None
+            sleep_need = None
+            sleep_efficiency = None
+            sleep_start_time = None
+            sleep_end_time = None
+            sleep_deep = None
+            sleep_light = None
+            sleep_rem = None
+            sleep_awake = None
+            overnight_respiration = None
+            overnight_pulse_ox = None
 
-    for activity in activities:
-        activity_type = activity.get('activityType', {})
-        type_key = activity_type.get('typeKey', '').lower()
+            if sleep_data:
+                sleep_dto = sleep_data.get('dailySleepDTO', {})
+                if sleep_dto:
+                    sleep_score = sleep_dto.get('sleepScores', {}).get('overall', {}).get('value')
+                    
+                    sleep_need_obj = sleep_dto.get('sleepNeed')
+                    if isinstance(sleep_need_obj, dict):
+                        sleep_need = sleep_need_obj.get('actual')
+                    else:
+                        sleep_need = sleep_need_obj
 
-        if 'run' in type_key:
-            running_count += 1
-            running_distance += activity.get('distance', 0) / 1000.0
-        elif 'cycling' in type_key or 'virtual_ride' in type_key:
-            cycling_count += 1
-            cycling_distance += activity.get('distance', 0) / 1000.0
-        elif 'strength' in type_key:
-            strength_count += 1
-            strength_duration += activity.get('duration', 0) / 60.0
-        elif 'cardio' in type_key:
-            cardio_count += 1
-            cardio_duration += activity.get('duration', 0) / 60.0
-        elif 'tennis' in type_key:
-            tennis_count += 1
-            tennis_duration += activity.get('duration', 0) / 60.0
-    
-    return (running_count, running_distance, cycling_count, cycling_distance,
-            strength_count, strength_duration, cardio_count, cardio_duration,
-            tennis_count, tennis_duration)
+                    overnight_respiration = sleep_dto.get('averageRespirationValue')
+                    overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
 
-def _parse_sleep(sleep_data: Dict[str, Any], target_date: date) -> Tuple:
-    """Helper to parse sleep data safely."""
-    if not sleep_data:
-        logger.warning(f"Sleep data for {target_date} is None.")
-        return None, None
-    
-    sleep_dto = sleep_data.get('dailySleepDTO')
-    if not sleep_dto:
-        logger.warning(f"Daily sleep DTO not found for {target_date}.")
-        return None, None
-        
-    sleep_scores = sleep_dto.get('sleepScores')
-    score = sleep_scores.get('overall', {}).get('value') if sleep_scores else None
-    
-    seconds = sleep_dto.get('sleepTimeSeconds')
-    length = seconds / 3600.0 if seconds else None
-    return score, length
+                    sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
+                    if sleep_time_seconds:
+                        sleep_length = round(sleep_time_seconds / 60)
+                    
+                    start_ts_local = sleep_dto.get('sleepStartTimestampLocal')
+                    end_ts_local = sleep_dto.get('sleepEndTimestampLocal')
+                    
+                    if start_ts_local:
+                        sleep_start_time = datetime.fromtimestamp(start_ts_local/1000).strftime('%H:%M')
+                    if end_ts_local:
+                        sleep_end_time = datetime.fromtimestamp(end_ts_local/1000).strftime('%H:%M')
+                    
+                    sleep_deep = (sleep_dto.get('deepSleepSeconds') or 0) / 60
+                    sleep_light = (sleep_dto.get('lightSleepSeconds') or 0) / 60
+                    sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
+                    sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
-def _parse_hrv(hrv_payload: Dict[str, Any], target_date: date) -> Tuple:
-    """Helper to parse HRV data safely."""
-    if not hrv_payload:
-        logger.warning(f"HRV payload for {target_date} is None.")
-        return None, None
-        
-    hrv_summary = hrv_payload.get('hrvSummary')
-    if not hrv_summary:
-        logger.warning(f"hrvSummary not found for {target_date}.")
-        return None, None
-        
-    return hrv_summary.get('lastNightAvg'), hrv_summary.get('status')
+                    # Sleep Efficiency Calculation
+                    if sleep_time_seconds and sleep_time_seconds > 0:
+                        awake_sec = sleep_dto.get('awakeSleepSeconds') or 0
+                        sleep_efficiency = round(((sleep_time_seconds - awake_sec) / sleep_time_seconds) * 100)
 
-def _parse_training_status(training_status: Dict[str, Any], target_date: date) -> Tuple:
-    """Helper to parse training status and VO2 Max safely."""
-    if not training_status:
-        logger.warning(f"Training status data for {target_date} is None.")
-        return None, None, None
+            # 4. Process HRV
+            overnight_hrv_value = None
+            hrv_status_value = None
+            if hrv_payload and 'hrvSummary' in hrv_payload:
+                hrv_summary = hrv_payload['hrvSummary']
+                overnight_hrv_value = hrv_summary.get('lastNightAvg')
+                hrv_status_value = hrv_summary.get('status')
 
-    vo2_max_running, vo2_max_cycling = None, None
-    most_recent_vo2max = training_status.get('mostRecentVO2Max')
-    if most_recent_vo2max:
-        generic_vo2max = most_recent_vo2max.get('generic')
-        if generic_vo2max:
-            vo2_max_running = generic_vo2max.get('vo2MaxValue')
+            # 5. Process Activities
+            processed_activities = []
+            if activities:
+                for activity in activities:
+                    atype = activity.get('activityType', {})
+                    try:
+                        act_id = activity.get('activityId')
+                        act_name = activity.get('activityName')
+                        act_start_local = activity.get('startTimeLocal')
+                        
+                        act_time_str = ""
+                        if act_start_local:
+                             act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
+                        
+                        dist_km = (activity.get('distance') or 0) / 1000
+                        dur_min = (activity.get('duration') or 0) / 60
+                        
+                        pace_str = ""
+                        if dist_km > 0 and dur_min > 0:
+                             pace_decimal = dur_min / dist_km
+                             p_min = int(pace_decimal)
+                             p_sec = int((pace_decimal - p_min) * 60)
+                             pace_str = f"{p_min}:{p_sec:02d}"
 
-        cycling_vo2max = most_recent_vo2max.get('cycling')
-        if cycling_vo2max:
-            vo2_max_cycling = cycling_vo2max.get('vo2MaxValue')
+                        avg_hr = activity.get('averageHR')
+                        max_hr = activity.get('maxHR')
+                        avg_cadence = activity.get('averageRunningCadenceInStepsPerMinute')
+                        if not avg_cadence:
+                            avg_cadence = activity.get('averageBikingCadenceInRevPerMinute') 
 
-    most_recent_status = training_status.get('mostRecentTrainingStatus')
-    status_phrase = most_recent_status.get('trainingStatusFeedbackPhrase') if most_recent_status else None
-    
-    return status_phrase, vo2_max_running, vo2_max_cycling
+                        cal = activity.get('calories')
+                        elev = activity.get('elevationGain')
+                        aerobic_te = activity.get('aerobicTrainingEffect')
+                        anaerobic_te = activity.get('anaerobicTrainingEffect')
 
-def _parse_stats(stats: Dict[str, Any], target_date: date) -> Tuple:
-    """Helper to parse weight, body fat, and blood pressure."""
-    if not stats:
-        logger.warning(f"Stats data for {target_date} is None.")
-        return None, None, None, None
-    
-    weight = stats.get('weight') / 1000.0 if stats.get('weight') else None
-    body_fat = stats.get('bodyFat')
-    bp_systolic = stats.get('systolic')
-    bp_diastolic = stats.get('diastolic')
-    return weight, body_fat, bp_systolic, bp_diastolic
+                        processed_activities.append({
+                            "Activity ID": act_id,
+                            "Date": target_date.isoformat(),
+                            "Time": act_time_str,
+                            "Type": atype.get('typeKey', 'Unknown'),
+                            "Name": act_name,
+                            "Distance (km)": round(dist_km, 2) if dist_km else 0,
+                            "Duration (min)": round(dur_min, 1) if dur_min else 0,
+                            "Avg Pace (min/km)": pace_str,
+                            "Avg HR": int(avg_hr) if avg_hr else "",
+                            "Max HR": int(max_hr) if max_hr else "",
+                            "Calories": int(cal) if cal else "",
+                            "Avg Cadence (spm)": int(avg_cadence) if avg_cadence else "",
+                            "Elevation Gain (m)": int(elev) if elev else "",
+                            "Aerobic TE": aerobic_te,
+                            "Anaerobic TE": anaerobic_te
+                        })
+                    except Exception as e_act:
+                        logger.error(f"Error parsing activity detail: {e_act}")
+                        continue
 
-def _parse_summary(summary: Dict[str, Any], target_date: date) -> Tuple:
-    """Helper to parse daily summary stats like calories and steps."""
-    if not summary:
-        logger.warning(f"User summary data for {target_date} is None.")
-        return None, None, None, None, None, None
-    
-    active_cals = summary.get('activeKilocalories')
-    resting_cals = summary.get('bmrKilocalories')
-    steps = summary.get('totalSteps')
-    intensity_mins = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
-    rhr = summary.get('restingHeartRate')
-    avg_stress = summary.get('averageStressLevel')
-    return active_cals, resting_cals, steps, intensity_mins, rhr, avg_stress
+            # 6. Process General Stats (BMI / Weight)
+            weight = None
+            body_fat = None
+            bmi = None
+            
+            if stats:
+                if stats.get('weight'): weight = stats.get('weight') / 1000
+                body_fat = stats.get('bodyFat')
+                bmi = stats.get('bmi')
+
+            # --- NEW: Process Blood Pressure ---
+            bp_systolic = None
+            bp_diastolic = None
+            
+            if bp_payload and 'userDailyBloodPressureDTOList' in bp_payload:
+                readings = bp_payload['userDailyBloodPressureDTOList']
+                if readings:
+                    # Calculate average if there are multiple readings for the day
+                    sys_values = [r['systolic'] for r in readings if r.get('systolic')]
+                    dia_values = [r['diastolic'] for r in readings if r.get('diastolic')]
+                    
+                    if sys_values:
+                        bp_systolic = int(round(mean(sys_values)))
+                    if dia_values:
+                        bp_diastolic = int(round(mean(dia_values)))
+
+            # 7. Summary Stats
+            active_cal = None
+            resting_cal = None
+            intensity_min = None
+            resting_hr = None
+            avg_stress = None
+            steps = None
+            floors = None
+            rest_stress_dur = None
+            low_stress_dur = None
+            med_stress_dur = None
+            high_stress_dur = None
+            
+            if summary:
+                active_cal = summary.get('activeKilocalories')
+                resting_cal = summary.get('bmrKilocalories')
+                intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
+                resting_hr = summary.get('restingHeartRate')
+                avg_stress = summary.get('averageStressLevel')
+                steps = summary.get('totalSteps')
+                
+                # Stress Durations
+                rest_stress_dur = summary.get('restStressDuration')
+                low_stress_dur = summary.get('lowStressDuration')
+                med_stress_dur = summary.get('mediumStressDuration')
+                high_stress_dur = summary.get('highStressDuration')
+
+                raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
+                if raw_floors is not None:
+                    try:
+                        floors = round(float(raw_floors))
+                    except (ValueError, TypeError):
+                        floors = raw_floors
+
+            # 8. Training Status
+            vo2_run = None
+            vo2_cycle = None
+            train_phrase = None
+            
+            if training_status:
+                mr_vo2 = training_status.get('mostRecentVO2Max', {})
+                if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
+                if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
+                
+                ts_data = training_status.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
+                if ts_data:
+                    for dev_data in ts_data.values():
+                        train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
+                        break
+
+            return GarminMetrics(
+                date=target_date,
+                sleep_score=sleep_score,
+                sleep_need=sleep_need,
+                sleep_efficiency=sleep_efficiency,
+                sleep_length=sleep_length,
+                sleep_start_time=sleep_start_time, 
+                sleep_end_time=sleep_end_time,     
+                sleep_deep=sleep_deep,             
+                sleep_light=sleep_light,           
+                sleep_rem=sleep_rem,               
+                sleep_awake=sleep_awake,
+                overnight_respiration=overnight_respiration, 
+                overnight_pulse_ox=overnight_pulse_ox,       
+                weight=weight,
+                bmi=bmi,
+                body_fat=body_fat,
+                blood_pressure_systolic=bp_systolic,
+                blood_pressure_diastolic=bp_diastolic,
+                resting_heart_rate=resting_hr,
+                average_stress=avg_stress,
+                rest_stress_duration=rest_stress_dur,
+                low_stress_duration=low_stress_dur,
+                medium_stress_duration=med_stress_dur,
+                high_stress_duration=high_stress_dur,
+                overnight_hrv=overnight_hrv_value,
+                hrv_status=hrv_status_value,
+                vo2max_running=vo2_run,
+                vo2max_cycling=vo2_cycle,
+                training_status=train_phrase,
+                active_calories=active_cal,
+                resting_calories=resting_cal,
+                intensity_minutes=intensity_min,
+                steps=steps,
+                floors_climbed=floors,
+                activities=processed_activities
+            )
+
+        except Exception as e:
+            logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
+            return GarminMetrics(date=target_date)
