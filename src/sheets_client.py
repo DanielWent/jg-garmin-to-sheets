@@ -12,7 +12,6 @@ from .config import (
     SLEEP_HEADERS, 
     STRESS_HEADERS, 
     BODY_COMP_HEADERS, 
-    BP_HEADERS,
     ACTIVITY_SUMMARY_HEADERS
 )
 
@@ -33,7 +32,6 @@ class GoogleSheetsClient:
         self.sleep_tab_name = "Sleep Data"
         self.stress_tab_name = "Stress Data"
         self.body_tab_name = "Body Composition Data"
-        self.bp_tab_name = "Blood Pressure Data"
         self.activity_sum_tab_name = "Activity Summary Data"
         self.activities_sheet_name = "List of Tracked Activities"
         
@@ -105,9 +103,6 @@ class GoogleSheetsClient:
         self._ensure_tab_exists(self.body_tab_name, BODY_COMP_HEADERS, all_sheets_properties)
         self._update_sheet_generic(self.body_tab_name, BODY_COMP_HEADERS, metrics)
         
-        self._ensure_tab_exists(self.bp_tab_name, BP_HEADERS, all_sheets_properties)
-        self._update_sheet_generic(self.bp_tab_name, BP_HEADERS, metrics)
-
         self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
         self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_historical)
 
@@ -211,7 +206,6 @@ class GoogleSheetsClient:
             (self.sleep_tab_name, 0),
             (self.stress_tab_name, 0),
             (self.body_tab_name, 0),
-            (self.bp_tab_name, 0),
             (self.activity_sum_tab_name, 0),
             (self.activities_sheet_name, 1)
         ]
