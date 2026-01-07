@@ -21,6 +21,8 @@ class GarminMetrics:
     weight: Optional[float] = None
     bmi: Optional[float] = None
     body_fat: Optional[float] = None
+    blood_pressure_systolic: Optional[int] = None
+    blood_pressure_diastolic: Optional[int] = None
     resting_heart_rate: Optional[int] = None
     average_stress: Optional[int] = None
     rest_stress_duration: Optional[int] = None
@@ -63,6 +65,11 @@ BODY_COMP_HEADERS = [
     "Weight (kg)", "BMI", "Body Fat %"
 ]
 
+BP_HEADERS = [
+    "Date",
+    "Systolic Blood Pressure (mmHg)", "Diastolic Blood Pressure (mmHg)"
+]
+
 ACTIVITY_SUMMARY_HEADERS = [
     "Date",
     "Active Calories (kcal)", "BMR Calories (kcal)", "Daily Intensity Minutes",
@@ -71,7 +78,7 @@ ACTIVITY_SUMMARY_HEADERS = [
 ]
 
 # Consolidated HEADERS for CSV output (combining all above)
-HEADERS = sorted(list(set(SLEEP_HEADERS + STRESS_HEADERS + BODY_COMP_HEADERS + ACTIVITY_SUMMARY_HEADERS)), key=lambda x: x != "Date")
+HEADERS = sorted(list(set(SLEEP_HEADERS + STRESS_HEADERS + BODY_COMP_HEADERS + BP_HEADERS + ACTIVITY_SUMMARY_HEADERS)), key=lambda x: x != "Date")
 
 # Updated ACTIVITY_HEADERS (Removed Name and Calories)
 ACTIVITY_HEADERS = [
@@ -107,6 +114,8 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Weight (kg)": "weight",
     "BMI": "bmi",
     "Body Fat %": "body_fat",
+    "Systolic Blood Pressure (mmHg)": "blood_pressure_systolic",
+    "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic",
     "VO2 Max Running": "vo2max_running",
     "VO2 Max Cycling": "vo2max_cycling",
     "Training Status Phase": "training_status",
