@@ -60,50 +60,42 @@ class GarminClient:
                 raise Exception("Authentication previously failed.")
             await self.authenticate()
 
+        # Helper for sequential fetching with delays and logging
+        async def safe_fetch(name, coro):
+            try:
+                # Add a tiny delay to reset the connection state
+                await asyncio.sleep(0.2) 
+                return await coro
+            except Exception as e:
+                logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
+                return None
+
         try:
-            # 1. Define async fetchers
-            async def get_stats():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_date.isoformat())
-            async def get_sleep():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_date.isoformat())
-            async def get_activities():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_date.isoformat(), target_date.isoformat())
-            async def get_user_summary():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_date.isoformat())
-            async def get_training_status():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_date.isoformat())
-            async def get_hrv():
-                return await self._fetch_hrv_data(target_date.isoformat())
+            target_iso = target_date.isoformat()
+
+            # 1. Fetch Data Sequentially (REORDERED for Stability)
+            # We fetch 'User Summary' FIRST because it contains the most critical daily stats (Steps, Stress, RHR).
+            # Heavy calls like 'Activities' are moved to the end to prevent them from timing out the session early.
             
-            # --- Specific fetcher for Blood Pressure ---
-            async def get_bp():
-                try:
-                    return await asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_date.isoformat())
-                except Exception as e:
-                    # BP call might fail if no data or permission, so we handle it gracefully
-                    logger.debug(f"Could not fetch BP for {target_date}: {e}")
-                    return None
-
-            # 2. Fetch sequentially to avoid thread-safety issues (Race Conditions)
-            async def safe_fetch(coro):
-                try:
-                    return await coro
-                except Exception as e:
-                    logger.warning(f"Failed to fetch metric: {e}")
-                    return None
-
-            stats = await safe_fetch(get_stats())
-            sleep_data = await safe_fetch(get_sleep())
-            activities = await safe_fetch(get_activities())
-            summary = await safe_fetch(get_user_summary())
-            training_status = await safe_fetch(get_training_status())
+            summary = await safe_fetch("User Summary", asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_iso))
             
-            # get_hrv and get_bp already handle their own exceptions internally,
-            # but awaiting them sequentially ensures they don't clash with the above.
-            hrv_payload = await get_hrv()
-            bp_payload = await get_bp()
+            stats = await safe_fetch("Stats", asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_iso))
+            
+            sleep_data = await safe_fetch("Sleep", asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_iso))
+            
+            training_status = await safe_fetch("Training Status", asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_iso))
+            
+            hrv_payload = await self._fetch_hrv_data(target_iso)
+            
+            bp_payload = await safe_fetch("Blood Pressure", asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_iso))
 
-            # 3. Process Sleep Data (Includes Efficiency)
+            # Fetch Activities last as it is the heaviest payload
+            activities = await safe_fetch("Activities", asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
+
+
+            # 2. Extract Data
+            
+            # --- Sleep Data ---
             sleep_score = None
             sleep_length = None
             sleep_need = None
@@ -148,12 +140,11 @@ class GarminClient:
                     sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
                     sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
 
-                    # Sleep Efficiency Calculation
                     if sleep_time_seconds and sleep_time_seconds > 0:
                         awake_sec = sleep_dto.get('awakeSleepSeconds') or 0
                         sleep_efficiency = round(((sleep_time_seconds - awake_sec) / sleep_time_seconds) * 100)
 
-            # 4. Process HRV
+            # --- HRV ---
             overnight_hrv_value = None
             hrv_status_value = None
             if hrv_payload and 'hrvSummary' in hrv_payload:
@@ -161,7 +152,7 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # 5. Process Activities
+            # --- Activities ---
             processed_activities = []
             if activities:
                 for activity in activities:
@@ -217,33 +208,28 @@ class GarminClient:
                         logger.error(f"Error parsing activity detail: {e_act}")
                         continue
 
-            # 6. Process General Stats (BMI / Weight)
+            # --- Stats (Weight/Body) ---
             weight = None
             body_fat = None
             bmi = None
-            
             if stats:
                 if stats.get('weight'): weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
 
-            # --- Process Blood Pressure ---
+            # --- Blood Pressure ---
             bp_systolic = None
             bp_diastolic = None
-            
             if bp_payload and 'userDailyBloodPressureDTOList' in bp_payload:
                 readings = bp_payload['userDailyBloodPressureDTOList']
                 if readings:
-                    # Calculate average if there are multiple readings for the day
                     sys_values = [r['systolic'] for r in readings if r.get('systolic')]
                     dia_values = [r['diastolic'] for r in readings if r.get('diastolic')]
-                    
-                    if sys_values:
-                        bp_systolic = int(round(mean(sys_values)))
-                    if dia_values:
-                        bp_diastolic = int(round(mean(dia_values)))
+                    if sys_values: bp_systolic = int(round(mean(sys_values)))
+                    if dia_values: bp_diastolic = int(round(mean(dia_values)))
 
-            # 7. Summary Stats
+            # --- Summary Stats (Steps, HR, Stress) ---
+            # If summary is None (failed), these default to None.
             active_cal = None
             resting_cal = None
             intensity_min = None
@@ -264,7 +250,6 @@ class GarminClient:
                 avg_stress = summary.get('averageStressLevel')
                 steps = summary.get('totalSteps')
                 
-                # Stress Durations
                 rest_stress_dur = summary.get('restStressDuration')
                 low_stress_dur = summary.get('lowStressDuration')
                 med_stress_dur = summary.get('mediumStressDuration')
@@ -276,12 +261,23 @@ class GarminClient:
                         floors = round(float(raw_floors))
                     except (ValueError, TypeError):
                         floors = raw_floors
+            else:
+                # FALLBACKS: If 'summary' failed, try alternate sources for critical data
+                try:
+                    # Fallback for Steps
+                    daily_steps_data = await safe_fetch("Fallback Steps", asyncio.get_event_loop().run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
+                    if daily_steps_data and isinstance(daily_steps_data, list) and len(daily_steps_data) > 0:
+                        steps = daily_steps_data[0].get('totalSteps')
+                        logger.info(f"Retrieved steps ({steps}) via fallback method.")
+                    
+                except Exception as fb_err:
+                    logger.warning(f"Fallback fetch also failed: {fb_err}")
 
-            # 8. Training Status
+
+            # --- Training Status ---
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
-            
             if training_status:
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
