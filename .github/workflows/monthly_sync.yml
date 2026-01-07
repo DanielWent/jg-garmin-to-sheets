@@ -4,7 +4,7 @@ on:
   schedule:
     # "cron" defines the schedule.
     # '0 8 1 * *' means: At minute 0, hour 8, on day 1 of the month.
-    - cron: '0 8 1 * *'
+    - cron: '0 12 1 * *'
   workflow_dispatch: # This allows you to click a "Run Now" button manually if needed
 
 jobs:
