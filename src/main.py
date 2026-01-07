@@ -8,6 +8,8 @@ import json
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
+from statistics import mean
+import calendar
 
 import typer
 from dotenv import load_dotenv, find_dotenv
@@ -65,6 +67,71 @@ def ensure_credentials_file_exists():
         logger.error(f"Failed to write credentials file: {e}")
         sys.exit(1)
 
+def aggregate_monthly_metrics(metrics: list[GarminMetrics], month_date: date) -> Optional[GarminMetrics]:
+    """
+    Takes a list of daily GarminMetrics and returns a single GarminMetrics object
+    containing the average of all numeric fields.
+    """
+    if not metrics:
+        return None
+
+    # Helper to calculate average of a specific attribute, ignoring None values
+    def get_avg(attr_name):
+        values = [getattr(m, attr_name) for m in metrics if getattr(m, attr_name) is not None]
+        return round(mean(values), 2) if values else None
+
+    # Helper to cast average to int
+    def get_avg_int(attr_name):
+        val = get_avg(attr_name)
+        return int(val) if val is not None else None
+
+    return GarminMetrics(
+        date=month_date,  # This will be the 1st of the month
+        
+        # Averages
+        sleep_score=get_avg("sleep_score"),
+        sleep_length=get_avg("sleep_length"),
+        sleep_need=get_avg_int("sleep_need"),
+        sleep_efficiency=get_avg("sleep_efficiency"),
+        sleep_deep=get_avg("sleep_deep"),
+        sleep_light=get_avg("sleep_light"),
+        sleep_rem=get_avg("sleep_rem"),
+        sleep_awake=get_avg("sleep_awake"),
+        overnight_respiration=get_avg("overnight_respiration"),
+        overnight_pulse_ox=get_avg("overnight_pulse_ox"),
+        weight=get_avg("weight"),
+        bmi=get_avg("bmi"),
+        body_fat=get_avg("body_fat"),
+        blood_pressure_systolic=get_avg_int("blood_pressure_systolic"),
+        blood_pressure_diastolic=get_avg_int("blood_pressure_diastolic"),
+        resting_heart_rate=get_avg_int("resting_heart_rate"),
+        average_stress=get_avg_int("average_stress"),
+        rest_stress_duration=get_avg_int("rest_stress_duration"),
+        low_stress_duration=get_avg_int("low_stress_duration"),
+        medium_stress_duration=get_avg_int("medium_stress_duration"),
+        high_stress_duration=get_avg_int("high_stress_duration"),
+        overnight_hrv=get_avg_int("overnight_hrv"),
+        vo2max_running=get_avg("vo2max_running"),
+        vo2max_cycling=get_avg("vo2max_cycling"),
+        active_calories=get_avg_int("active_calories"),
+        resting_calories=get_avg_int("resting_calories"),
+        intensity_minutes=get_avg_int("intensity_minutes"),
+        steps=get_avg_int("steps"),
+        floors_climbed=get_avg("floors_climbed"),
+
+        # Non-numeric placeholders
+        training_status="Monthly Avg",
+        hrv_status="Monthly Avg",
+        activities=[] 
+    )
+
+def get_month_dates(year: int, month: int):
+    """Returns the start and end date objects for a specific month."""
+    _, last_day = calendar.monthrange(year, month)
+    start_date = date(year, month, 1)
+    end_date = date(year, month, last_day)
+    return start_date, end_date
+
 async def sync(email: str, password: str, start_date: date, end_date: date, output_type: str, profile_data: dict, profile_name: str = ""):
     """Core sync logic. Fetches data and writes to the specified output."""
     try:
@@ -109,7 +176,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             )
             sheets_client.update_metrics(metrics_to_write)
             
-            # --- NEW: Prune old data (retention: 1 year) ---
+            # --- Prune old data (retention: 1 year) ---
             sheets_client.prune_old_data(days_to_keep=365)
             # -----------------------------------------------
 
@@ -145,7 +212,8 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
 def load_user_profiles():
     """Parses .env for user profiles."""
     profiles = {}
-    profile_pattern = re.compile(r"^(USER\d+)_(GARMIN_EMAIL|GARMIN_PASSWORD|SHEET_ID|SHEET_NAME|SPREADSHEET_NAME|CSV_PATH)$")
+    # UPDATED REGEX to include MONTHLY_SHEET_ID
+    profile_pattern = re.compile(r"^(USER\d+)_(GARMIN_EMAIL|GARMIN_PASSWORD|SHEET_ID|MONTHLY_SHEET_ID|SHEET_NAME|SPREADSHEET_NAME|CSV_PATH)$")
 
     for key, value in os.environ.items():
         match = profile_pattern.match(key)
@@ -158,6 +226,7 @@ def load_user_profiles():
                 "GARMIN_EMAIL": "email",
                 "GARMIN_PASSWORD": "password",
                 "SHEET_ID": "sheet_id",
+                "MONTHLY_SHEET_ID": "monthly_sheet_id",
                 "SHEET_NAME": "sheet_name",
                 "SPREADSHEET_NAME": "spreadsheet_name",
                 "CSV_PATH": "csv_path"
@@ -197,6 +266,127 @@ def cli_sync(
         profile_name=profile
     ))
 
+@app.command()
+def cli_monthly_sync(
+    profile: str = typer.Option("USER1", help="The user profile from .env to use."),
+    start_month: str = typer.Option(None, help="YYYY-MM format. Start of historical range (inclusive)."),
+    end_month: str = typer.Option(None, help="YYYY-MM format. End of historical range (inclusive).")
+):
+    """
+    Calculates monthly averages.
+    If no dates provided: Defaults to the PREVIOUS month (standard automation mode).
+    If dates provided: Backfills that specific range (e.g., 2023-09 to 2024-01).
+    """
+    user_profiles = load_user_profiles()
+    selected_profile_data = user_profiles.get(profile)
+
+    if not selected_profile_data:
+        logger.error(f"Profile '{profile}' not found in .env file.")
+        sys.exit(1)
+
+    # --- 1. Determine the Range of Months to Process ---
+    months_to_process = []
+    
+    if start_month:
+        # Historical / Manual Mode
+        try:
+            s_year, s_month = map(int, start_month.split('-'))
+            
+            if end_month:
+                e_year, e_month = map(int, end_month.split('-'))
+            else:
+                # If only start provided, just do that one month
+                e_year, e_month = s_year, s_month
+
+            # Loop from start to end
+            curr_y, curr_m = s_year, s_month
+            while (curr_y < e_year) or (curr_y == e_year and curr_m <= e_month):
+                months_to_process.append((curr_y, curr_m))
+                
+                # Increment month
+                curr_m += 1
+                if curr_m > 12:
+                    curr_m = 1
+                    curr_y += 1
+        except ValueError:
+            logger.error("Invalid date format. Please use YYYY-MM (e.g., 2023-09)")
+            sys.exit(1)
+    else:
+        # Default / Automated Mode: Previous Month
+        today = date.today()
+        first_current = today.replace(day=1)
+        prev_month_date = first_current - timedelta(days=1)
+        months_to_process.append((prev_month_date.year, prev_month_date.month))
+
+    logger.info(f"Processing {len(months_to_process)} month(s)...")
+
+    # --- 2. Authenticate Once ---
+    email = selected_profile_data.get('email')
+    password = selected_profile_data.get('password')
+    garmin_client = GarminClient(email, password)
+    try:
+        asyncio.run(garmin_client.authenticate())
+    except Exception as e:
+        logger.error(f"Auth failed: {e}")
+        sys.exit(1)
+
+    metrics_buffer = []
+
+    # --- 3. Loop Through Each Month ---
+    for (year, month) in months_to_process:
+        m_start, m_end = get_month_dates(year, month)
+        logger.info(f"Fetching data for {m_start.strftime('%B %Y')} ({m_start} to {m_end})...")
+        
+        daily_metrics_list = []
+        current_date = m_start
+        
+        # Fetch daily data for this specific month
+        while current_date <= m_end:
+            # We use print here for a simple progress indicator on the same line
+            print(f"  - Fetching {current_date.isoformat()}...", end='\r')
+            try:
+                # Use standard asyncio run for the single call
+                daily_metrics = asyncio.run(garmin_client.get_metrics(current_date))
+                daily_metrics_list.append(daily_metrics)
+            except Exception as e:
+                logger.error(f"\nFailed to fetch {current_date}: {e}")
+            
+            current_date += timedelta(days=1)
+        
+        print("") # Clear the progress line
+        
+        # Aggregate
+        monthly_avg = aggregate_monthly_metrics(daily_metrics_list, m_start)
+        if monthly_avg:
+            metrics_buffer.append(monthly_avg)
+
+    if not metrics_buffer:
+        logger.warning("No metrics generated.")
+        return
+
+    # --- 4. Write to Google Sheets ---
+    monthly_sheet_id = selected_profile_data.get('monthly_sheet_id')
+    if not monthly_sheet_id:
+        logger.error(f"MONTHLY_SHEET_ID not set for {profile} in .env")
+        sys.exit(1)
+
+    ensure_credentials_file_exists()
+    
+    try:
+        logger.info(f"Writing {len(metrics_buffer)} monthly rows to Sheet ID: {monthly_sheet_id}")
+        sheets_client = GoogleSheetsClient(
+            credentials_path='credentials/client_secret.json',
+            spreadsheet_id=monthly_sheet_id,
+            sheet_name='Monthly Averages'
+        )
+        # Update metrics handles lists, so we pass the whole buffer
+        sheets_client.update_metrics(metrics_buffer)
+        logger.info("Monthly sync completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"Error writing to Google Sheets: {e}", exc_info=True)
+        sys.exit(1)
+
 async def run_interactive_sync():
     """Automated session logic for GitHub Actions."""
     logger.info("Starting automated sync setup...")
@@ -214,7 +404,7 @@ async def run_interactive_sync():
     selected_profile_data = user_profiles[selected_profile_name]
     logger.info(f"Using profile: {selected_profile_name}")
 
-# ---------------------------------------------------------
+    # ---------------------------------------------------------
     # AUTOMATION CONFIGURATION: DATE RANGE
     # ---------------------------------------------------------
     # Set to False for daily sync (now configured for a rolling 7-day window)
