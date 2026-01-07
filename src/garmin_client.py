@@ -60,7 +60,7 @@ class GarminClient:
             await self.authenticate()
 
         try:
-            # 1. Define async fetchers (Reverted to 6 safe calls)
+            # 1. Define async fetchers
             async def get_stats():
                 return await asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_date.isoformat())
             async def get_sleep():
@@ -203,14 +203,19 @@ class GarminClient:
                         logger.error(f"Error parsing activity detail: {e_act}")
                         continue
 
-            # 6. Process General Stats (Includes BMI)
+            # 6. Process General Stats (Includes BMI and BP)
             weight = None
             body_fat = None
             bmi = None
+            bp_systolic = None
+            bp_diastolic = None
+            
             if stats:
                 if stats.get('weight'): weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
+                bp_systolic = stats.get('systolic')
+                bp_diastolic = stats.get('diastolic')
 
             active_cal = None
             resting_cal = None
@@ -278,6 +283,8 @@ class GarminClient:
                 weight=weight,
                 bmi=bmi,
                 body_fat=body_fat,
+                blood_pressure_systolic=bp_systolic,
+                blood_pressure_diastolic=bp_diastolic,
                 resting_heart_rate=resting_hr,
                 average_stress=avg_stress,
                 rest_stress_duration=rest_stress_dur,
@@ -294,7 +301,6 @@ class GarminClient:
                 intensity_minutes=intensity_min,
                 steps=steps,
                 floors_climbed=floors,
-                # Body Battery REMOVED
                 activities=processed_activities
             )
 
