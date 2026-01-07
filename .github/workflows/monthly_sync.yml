@@ -2,10 +2,20 @@ name: Monthly Garmin Sync
 
 on:
   schedule:
-    # "cron" defines the schedule.
-    # '0 8 1 * *' means: At minute 0, hour 8, on day 1 of the month.
-    - cron: '0 12 1 * *'
-  workflow_dispatch: # This allows you to click a "Run Now" button manually if needed
+    # Runs at 08:00 UTC on the 1st of every month
+    - cron: '0 8 1 * *'
+  
+  # UPDATED: This allows you to type in dates manually when you click "Run"
+  workflow_dispatch:
+    inputs:
+      start_month:
+        description: 'Start Month (YYYY-MM)'
+        required: false
+        default: ''
+      end_month:
+        description: 'End Month (YYYY-MM)'
+        required: false
+        default: ''
 
 jobs:
   monthly_sync:
@@ -26,12 +36,26 @@ jobs:
 
     - name: Run Monthly Sync Script
       env:
-        # These pull the passwords/IDs from your GitHub Repository Settings > Secrets
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         USER1_MONTHLY_SHEET_ID: ${{ secrets.MONTHLY_SHEET_ID }}
         
       run: |
-        # This executes your python script with the monthly command
-        python -m src.main cli-monthly-sync --profile USER1
+        # Initialize empty strings for arguments
+        START_ARG=""
+        END_ARG=""
+
+        # Check if manual inputs were provided (from workflow_dispatch)
+        if [ -n "${{ inputs.start_month }}" ]; then
+          START_ARG="--start-month ${{ inputs.start_month }}"
+        fi
+
+        if [ -n "${{ inputs.end_month }}" ]; then
+          END_ARG="--end-month ${{ inputs.end_month }}"
+        fi
+
+        # Run the script with dynamic arguments
+        # If no inputs provided (scheduled run), it runs with default (prev month).
+        # If inputs provided, it uses them for backfill.
+        python -m src.main cli-monthly-sync --profile USER1 $START_ARG $END_ARG
