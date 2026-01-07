@@ -64,23 +64,55 @@ class GarminClient:
         async def safe_fetch(name, coro):
             try:
                 # Add a tiny delay to reset the connection state
-                await asyncio.sleep(0.2) 
+                await asyncio.sleep(0.5) 
                 return await coro
             except Exception as e:
+                # PRINT the error so you can see it in the console
+                print(f"⚠️ WARNING: Failed to fetch {name}: {e}")
                 logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
                 return None
 
         try:
             target_iso = target_date.isoformat()
 
-            # 1. Fetch Data Sequentially (Reordered for stability)
+            # 1. Fetch Data Sequentially
+            
+            # --- User Summary (Steps, Stress, RHR) ---
             summary = await safe_fetch("User Summary", asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_iso))
+            
+            # --- Stats (Weight, Body Fat) ---
             stats = await safe_fetch("Stats", asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_iso))
+            
+            # --- Sleep ---
             sleep_data = await safe_fetch("Sleep", asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_iso))
+            
+            # --- Training Status ---
             training_status = await safe_fetch("Training Status", asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_iso))
+            
+            # --- HRV ---
             hrv_payload = await self._fetch_hrv_data(target_iso)
+            
+            # --- Blood Pressure ---
             bp_payload = await safe_fetch("Blood Pressure", asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_iso))
+            
+            # --- Activities ---
             activities = await safe_fetch("Activities", asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
+
+            # --- Lactate Threshold (Direct Fetch) ---
+            # This fetches the latest known value from your biometric profile
+            async def get_lactate_direct():
+                try:
+                    return await asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        self.client.connectapi, 
+                        "biometric-service/biometric/latestLactateThreshold"
+                    )
+                except Exception as e:
+                    logger.debug(f"Direct Lactate Threshold fetch failed: {e}")
+                    return None
+            
+            lactate_data = await get_lactate_direct()
+
 
             # 2. Extract Data
             
@@ -250,14 +282,14 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
             else:
-                # FALLBACKS
+                # FALLBACKS (Try fetching steps specifically if summary failed)
                 try:
                     daily_steps_data = await safe_fetch("Fallback Steps", asyncio.get_event_loop().run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
                     if daily_steps_data and isinstance(daily_steps_data, list) and len(daily_steps_data) > 0:
                         steps = daily_steps_data[0].get('totalSteps')
                         logger.info(f"Retrieved steps ({steps}) via fallback method.")
                 except Exception as fb_err:
-                    logger.warning(f"Fallback fetch also failed: {fb_err}")
+                    print(f"Fallback step fetch failed: {fb_err}")
 
             # --- Training Status & Lactate Threshold ---
             vo2_run = None
@@ -266,6 +298,20 @@ class GarminClient:
             lactate_bpm = None
             lactate_pace = None
 
+            # 1. Try DIRECT fetch (Best for current value)
+            if lactate_data:
+                # API usually returns: {'heartRate': 165, 'speed': 3.5, ...}
+                if 'heartRate' in lactate_data:
+                    lactate_bpm = lactate_data['heartRate']
+                if 'speed' in lactate_data:
+                    speed_ms = lactate_data['speed']
+                    if speed_ms and speed_ms > 0:
+                        sec_per_km = 1000 / speed_ms
+                        p_min = int(sec_per_km / 60)
+                        p_sec = int(sec_per_km % 60)
+                        lactate_pace = f"{p_min}:{p_sec:02d}"
+
+            # 2. Extract VO2 Max and Status
             if training_status:
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
@@ -275,17 +321,6 @@ class GarminClient:
                 if ts_data:
                     for dev_data in ts_data.values():
                         train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
-                        # Extract Lactate Threshold
-                        if 'lactateThresholdHeartRate' in dev_data:
-                            lactate_bpm = dev_data['lactateThresholdHeartRate']
-                        if 'lactateThresholdSpeed' in dev_data:
-                            # Speed is usually m/s, convert to min/km
-                            speed_ms = dev_data['lactateThresholdSpeed']
-                            if speed_ms and speed_ms > 0:
-                                sec_per_km = 1000 / speed_ms
-                                p_min = int(sec_per_km / 60)
-                                p_sec = int(sec_per_km % 60)
-                                lactate_pace = f"{p_min}:{p_sec:02d}"
                         break
 
             return GarminMetrics(
@@ -317,8 +352,8 @@ class GarminClient:
                 hrv_status=hrv_status_value,
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
-                lactate_threshold_bpm=lactate_bpm,    # <--- NEW
-                lactate_threshold_pace=lactate_pace,  # <--- NEW
+                lactate_threshold_bpm=lactate_bpm,
+                lactate_threshold_pace=lactate_pace,
                 training_status=train_phrase,
                 active_calories=active_cal,
                 resting_calories=resting_cal,
