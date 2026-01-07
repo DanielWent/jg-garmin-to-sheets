@@ -7,6 +7,7 @@ from garth.sso import resume_login
 import garth
 from .exceptions import MFARequiredException
 from .config import GarminMetrics
+from statistics import mean
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +74,20 @@ class GarminClient:
                 return await asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_date.isoformat())
             async def get_hrv():
                 return await self._fetch_hrv_data(target_date.isoformat())
+            
+            # --- NEW: Specific fetcher for Blood Pressure ---
+            async def get_bp():
+                try:
+                    # Your version 0.2.26 definitely has this method
+                    return await asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_date.isoformat())
+                except Exception as e:
+                    logger.warning(f"Could not fetch BP for {target_date}: {e}")
+                    return None
 
             # 2. Fetch all concurrently
             results = await asyncio.gather(
                 get_stats(), get_sleep(), get_activities(), get_user_summary(), 
-                get_training_status(), get_hrv(),
+                get_training_status(), get_hrv(), get_bp(),
                 return_exceptions=True
             )
 
@@ -88,6 +98,7 @@ class GarminClient:
             summary = results[3] if not isinstance(results[3], Exception) else None
             training_status = results[4] if not isinstance(results[4], Exception) else None
             hrv_payload = results[5] if not isinstance(results[5], Exception) else None
+            bp_payload = results[6] if not isinstance(results[6], Exception) else None
 
             # 3. Process Sleep Data (Includes Efficiency)
             sleep_score = None
@@ -203,20 +214,41 @@ class GarminClient:
                         logger.error(f"Error parsing activity detail: {e_act}")
                         continue
 
-            # 6. Process General Stats (Includes BMI and BP)
+            # 6. Process General Stats (BMI / Weight)
             weight = None
             body_fat = None
             bmi = None
-            bp_systolic = None
-            bp_diastolic = None
             
             if stats:
                 if stats.get('weight'): weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
-                bp_systolic = stats.get('systolic')
-                bp_diastolic = stats.get('diastolic')
 
+            # --- NEW: Process Blood Pressure ---
+            bp_systolic = None
+            bp_diastolic = None
+            
+            if bp_payload:
+                # Based on standard Garmin endpoints, the key is usually 'userDailyBloodPressureDTOList'
+                # or similar. We check specifically for it.
+                readings = bp_payload.get('userDailyBloodPressureDTOList')
+                
+                if readings:
+                    # Calculate average if there are multiple readings for the day
+                    sys_values = [r['systolic'] for r in readings if r.get('systolic')]
+                    dia_values = [r['diastolic'] for r in readings if r.get('diastolic')]
+                    
+                    if sys_values:
+                        bp_systolic = int(round(mean(sys_values)))
+                    if dia_values:
+                        bp_diastolic = int(round(mean(dia_values)))
+                        
+                    logger.info(f"BP Data found for {target_date}: {bp_systolic}/{bp_diastolic}")
+                else:
+                    # Debug log if payload exists but list is empty (common if no reading taken that day)
+                    pass 
+
+            # 7. Summary Stats
             active_cal = None
             resting_cal = None
             intensity_min = None
@@ -250,7 +282,7 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
 
-            # 7. Training Status
+            # 8. Training Status
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
