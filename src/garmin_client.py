@@ -75,10 +75,9 @@ class GarminClient:
             async def get_hrv():
                 return await self._fetch_hrv_data(target_date.isoformat())
             
-            # --- NEW: Specific fetcher for Blood Pressure ---
+            # --- Specific fetcher for Blood Pressure ---
             async def get_bp():
                 try:
-                    # Your version 0.2.26 definitely has this method
                     return await asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_date.isoformat())
                 except Exception as e:
                     logger.warning(f"Could not fetch BP for {target_date}: {e}")
@@ -224,29 +223,52 @@ class GarminClient:
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
 
-            # --- NEW: Process Blood Pressure ---
+            # --- NEW: Process Blood Pressure (ROBUST & LOGGED) ---
             bp_systolic = None
             bp_diastolic = None
             
             if bp_payload:
-                # Based on standard Garmin endpoints, the key is usually 'userDailyBloodPressureDTOList'
-                # or similar. We check specifically for it.
-                readings = bp_payload.get('userDailyBloodPressureDTOList')
+                # DEBUG LOGGING: Print exactly what we received!
+                logger.info(f"BP Payload found for {target_date}: {bp_payload}")
+                
+                readings = None
+                
+                # Case A: It's a direct list of readings
+                if isinstance(bp_payload, list):
+                    readings = bp_payload
+                
+                # Case B: It's a dictionary container
+                elif isinstance(bp_payload, dict):
+                    # Try the most common keys
+                    possible_keys = ['userDailyBloodPressureDTOList', 'dailyBloodPressureDTO', 'measurements', 'bloodPressure']
+                    for key in possible_keys:
+                        if key in bp_payload and bp_payload[key]:
+                            readings = bp_payload[key]
+                            break
+                    
+                    # Fallback: If no known key, just grab the first list we find in the values
+                    if not readings:
+                         for v in bp_payload.values():
+                             if isinstance(v, list) and v:
+                                 readings = v
+                                 break
                 
                 if readings:
-                    # Calculate average if there are multiple readings for the day
-                    sys_values = [r['systolic'] for r in readings if r.get('systolic')]
-                    dia_values = [r['diastolic'] for r in readings if r.get('diastolic')]
-                    
-                    if sys_values:
-                        bp_systolic = int(round(mean(sys_values)))
-                    if dia_values:
-                        bp_diastolic = int(round(mean(dia_values)))
+                    try:
+                        # Calculate average if there are multiple readings for the day
+                        sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
+                        dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
                         
-                    logger.info(f"BP Data found for {target_date}: {bp_systolic}/{bp_diastolic}")
+                        if sys_values:
+                            bp_systolic = int(round(mean(sys_values)))
+                        if dia_values:
+                            bp_diastolic = int(round(mean(dia_values)))
+                        
+                        logger.info(f"Calculated BP: {bp_systolic}/{bp_diastolic}")
+                    except Exception as e:
+                        logger.error(f"Error calculating BP average: {e}")
                 else:
-                    # Debug log if payload exists but list is empty (common if no reading taken that day)
-                    pass 
+                    logger.info("BP Payload exists but could not extract readings list.")
 
             # 7. Summary Stats
             active_cal = None
