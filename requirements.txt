@@ -1,4 +1,4 @@
-garminconnect==0.2.26
+garminconnect==0.2.38
 garth==0.5.3
 google-api-python-client>=2.0.0
 google-auth-httplib2>=0.1.0
