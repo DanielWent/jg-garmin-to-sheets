@@ -1,359 +1,279 @@
-from datetime import date, datetime
-from typing import Dict, Any, Optional, List
-import asyncio
 import logging
-import garminconnect
-from garth.sso import resume_login
-import garth
-from .exceptions import MFARequiredException
-from .config import GarminMetrics
-from statistics import mean
+from typing import List, Any
+from datetime import date, timedelta
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+from .config import (
+    GarminMetrics, 
+    HEADER_TO_ATTRIBUTE_MAP, 
+    ACTIVITY_HEADERS,
+    SLEEP_HEADERS, 
+    STRESS_HEADERS, 
+    BODY_COMP_HEADERS, 
+    BP_HEADERS,
+    ACTIVITY_SUMMARY_HEADERS
+)
 
 logger = logging.getLogger(__name__)
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-class GarminClient:
-    def __init__(self, email: str, password: str):
-        self.client = garminconnect.Garmin(email, password)
-        self._authenticated = False
-        self.mfa_ticket_dict = None
-        self._auth_failed = False
+# Define the missing exception class
+class GoogleAuthTokenRefreshError(Exception):
+    pass
 
-    async def authenticate(self):
-        try:
-            def login_wrapper():
-                return self.client.login()
+class GoogleSheetsClient:
+    def __init__(self, credentials_path: str, spreadsheet_id: str, sheet_name: str):
+        if not spreadsheet_id:
+            raise ValueError("Spreadsheet ID is missing.")
             
-            await asyncio.get_event_loop().run_in_executor(None, login_wrapper)
-            self._authenticated = True
-            self.mfa_ticket_dict = None
+        self.spreadsheet_id = spreadsheet_id
+        # Define fixed tab names
+        self.sleep_tab_name = "Sleep Data"
+        self.stress_tab_name = "Stress Data"
+        self.body_tab_name = "Body Composition Data"
+        self.bp_tab_name = "Blood Pressure Data"
+        self.activity_sum_tab_name = "Activity Summary Data"
+        self.activities_sheet_name = "List of Tracked Activities"
+        
+        self.credentials_path = credentials_path
+        self.credentials = self._get_credentials()
+        self.service = build('sheets', 'v4', credentials=self.credentials)
 
-        except AttributeError as e:
-            if "'dict' object has no attribute 'expired'" in str(e):
-                logger.info("Caught AttributeError indicating MFA challenge.")
-                if hasattr(self.client.garth, 'oauth2_token') and isinstance(self.client.garth.oauth2_token, dict):
-                    self.mfa_ticket_dict = self.client.garth.oauth2_token
-                    raise MFARequiredException(message="MFA code is required.", mfa_data=self.mfa_ticket_dict)
-                raise
-            raise
-        except garminconnect.GarminConnectAuthenticationError as e:
-            if "MFA-required" in str(e) or "Authentication failed" in str(e):
-                if hasattr(self.client.garth, 'oauth2_token') and isinstance(self.client.garth.oauth2_token, dict):
-                    self.mfa_ticket_dict = self.client.garth.oauth2_token 
-                    raise MFARequiredException(message="MFA code is required.", mfa_data=self.mfa_ticket_dict)
-            raise
-        except Exception as e:
-            logger.error(f"Authentication error: {str(e)}")
-            raise garminconnect.GarminConnectAuthenticationError(f"Authentication error: {str(e)}") from e
-
-    async def _fetch_hrv_data(self, target_date_iso: str) -> Optional[Dict[str, Any]]:
+    def _get_credentials(self) -> Credentials:
         try:
-            return await asyncio.get_event_loop().run_in_executor(
-                None, self.client.get_hrv_data, target_date_iso
+            return Credentials.from_service_account_file(
+                self.credentials_path, 
+                scopes=SCOPES
             )
         except Exception as e:
-            logger.error(f"Error fetching HRV data: {str(e)}")
-            return None
+            logger.error(f"Failed to authenticate with Service Account: {e}")
+            raise
 
-    async def get_metrics(self, target_date: date) -> GarminMetrics:
-        if not self._authenticated:
-            if self._auth_failed:
-                raise Exception("Authentication previously failed.")
-            await self.authenticate()
-
+    def _get_spreadsheet_details(self):
         try:
-            # 1. Define async fetchers
-            async def get_stats():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_date.isoformat())
-            async def get_sleep():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_date.isoformat())
-            async def get_activities():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_date.isoformat(), target_date.isoformat())
-            async def get_user_summary():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_date.isoformat())
-            async def get_training_status():
-                return await asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_date.isoformat())
-            async def get_hrv():
-                return await self._fetch_hrv_data(target_date.isoformat())
-            
-            # --- Specific fetcher for Blood Pressure ---
-            async def get_bp():
+            sheet_metadata = self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
+            return sheet_metadata.get('sheets', [])
+        except HttpError as e:
+            logger.error(f"An error occurred fetching spreadsheet details: {e}")
+            raise
+
+    def _ensure_tab_exists(self, tab_name: str, headers: List[str], all_sheets_properties):
+        sheet_exists = any(s['properties']['title'] == tab_name for s in all_sheets_properties)
+        
+        if not sheet_exists:
+            logger.info(f"Sheet '{tab_name}' not found. Creating it now.")
+            body = {'requests': [{'addSheet': {'properties': {'title': tab_name}}}]}
+            self.service.spreadsheets().batchUpdate(spreadsheetId=self.spreadsheet_id, body=body).execute()
+
+        range_to_check = f"'{tab_name}'!A1"
+        result = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id, range=range_to_check
+        ).execute()
+
+        if 'values' not in result:
+            logger.info(f"Sheet '{tab_name}' is empty. Writing headers.")
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_to_check,
+                valueInputOption='RAW',
+                body={'values': [headers]}
+            ).execute()
+
+    def update_metrics(self, metrics: List[GarminMetrics]):
+        all_sheets_properties = self._get_spreadsheet_details()
+        
+        today = date.today()
+        metrics_historical = []
+        for m in metrics:
+            m_date = m.date
+            if isinstance(m_date, str):
                 try:
-                    return await asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_date.isoformat())
-                except Exception as e:
-                    logger.warning(f"Could not fetch BP for {target_date}: {e}")
-                    return None
+                    m_date = date.fromisoformat(m_date)
+                except ValueError:
+                    pass
+            if m_date != today:
+                metrics_historical.append(m)
 
-            # 2. Fetch all concurrently
-            results = await asyncio.gather(
-                get_stats(), get_sleep(), get_activities(), get_user_summary(), 
-                get_training_status(), get_hrv(), get_bp(),
-                return_exceptions=True
-            )
+        self._ensure_tab_exists(self.sleep_tab_name, SLEEP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.sleep_tab_name, SLEEP_HEADERS, metrics)
 
-            # Unpack safely
-            stats = results[0] if not isinstance(results[0], Exception) else None
-            sleep_data = results[1] if not isinstance(results[1], Exception) else None
-            activities = results[2] if not isinstance(results[2], Exception) else None
-            summary = results[3] if not isinstance(results[3], Exception) else None
-            training_status = results[4] if not isinstance(results[4], Exception) else None
-            hrv_payload = results[5] if not isinstance(results[5], Exception) else None
-            bp_payload = results[6] if not isinstance(results[6], Exception) else None
+        self._ensure_tab_exists(self.stress_tab_name, STRESS_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.stress_tab_name, STRESS_HEADERS, metrics_historical)
 
-            # 3. Process Sleep Data (Includes Efficiency)
-            sleep_score = None
-            sleep_length = None
-            sleep_need = None
-            sleep_efficiency = None
-            sleep_start_time = None
-            sleep_end_time = None
-            sleep_deep = None
-            sleep_light = None
-            sleep_rem = None
-            sleep_awake = None
-            overnight_respiration = None
-            overnight_pulse_ox = None
+        self._ensure_tab_exists(self.body_tab_name, BODY_COMP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.body_tab_name, BODY_COMP_HEADERS, metrics)
+        
+        self._ensure_tab_exists(self.bp_tab_name, BP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.bp_tab_name, BP_HEADERS, metrics)
 
-            if sleep_data:
-                sleep_dto = sleep_data.get('dailySleepDTO', {})
-                if sleep_dto:
-                    sleep_score = sleep_dto.get('sleepScores', {}).get('overall', {}).get('value')
-                    
-                    sleep_need_obj = sleep_dto.get('sleepNeed')
-                    if isinstance(sleep_need_obj, dict):
-                        sleep_need = sleep_need_obj.get('actual')
+        self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_historical)
+
+        self._ensure_tab_exists(self.activities_sheet_name, ACTIVITY_HEADERS, all_sheets_properties)
+        self._update_activities(metrics)
+
+    def _update_sheet_generic(self, tab_name: str, headers: List[str], metrics: List[GarminMetrics]):
+        try:
+            date_column_range = f"'{tab_name}'!A:A"
+            result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=date_column_range).execute()
+            existing_dates_list = result.get('values', [])
+            date_to_row_map = {row[0]: i + 1 for i, row in enumerate(existing_dates_list) if row}
+        except HttpError as e:
+            logger.error(f"Could not read existing dates for {tab_name}: {e}")
+            return
+
+        updates = []
+        appends = []
+
+        for metric in metrics:
+            metric_date_str = metric.date.isoformat() if isinstance(metric.date, date) else metric.date
+            
+            row_data = []
+            for header in headers:
+                attribute_name = HEADER_TO_ATTRIBUTE_MAP.get(header)
+                value = getattr(metric, attribute_name, "") if attribute_name else ""
+                
+                if attribute_name == 'date':
+                    value = metric_date_str
+
+                if value is None:
+                    value = ""
+                elif isinstance(value, float):
+                    value = round(value, 2)
+                
+                row_data.append(value)
+
+            if metric_date_str in date_to_row_map:
+                row_number = date_to_row_map[metric_date_str]
+                updates.append({
+                    'range': f"'{tab_name}'!A{row_number}",
+                    'values': [row_data]
+                })
+            else:
+                appends.append(row_data)
+
+        if updates:
+            body = {'valueInputOption': 'USER_ENTERED', 'data': updates}
+            self.service.spreadsheets().values().batchUpdate(spreadsheetId=self.spreadsheet_id, body=body).execute()
+
+        if appends:
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"'{tab_name}'!A1",
+                valueInputOption='USER_ENTERED',
+                insertDataOption='INSERT_ROWS',
+                body={'values': appends}
+            ).execute()
+
+    def _update_activities(self, metrics: List[GarminMetrics]):
+        new_activities_buffer = []
+        for metric in metrics:
+            if metric.activities:
+                new_activities_buffer.extend(metric.activities)
+        
+        if not new_activities_buffer:
+            return
+
+        try:
+            id_column_range = f"'{self.activities_sheet_name}'!A:A"
+            result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=id_column_range).execute()
+            existing_ids = {str(row[0]) for row in result.get('values', []) if row}
+        except HttpError as e:
+            logger.error(f"Could not read existing activity IDs: {e}")
+            return
+
+        appends = []
+        for act in new_activities_buffer:
+            act_id = str(act.get("Activity ID"))
+            if act_id not in existing_ids:
+                row_data = [act.get(header, "") for header in ACTIVITY_HEADERS]
+                appends.append(row_data)
+                existing_ids.add(act_id)
+
+        if appends:
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"'{self.activities_sheet_name}'!A1",
+                valueInputOption='USER_ENTERED',
+                insertDataOption='INSERT_ROWS',
+                body={'values': appends}
+            ).execute()
+
+    def prune_old_data(self, days_to_keep: int = 365):
+        """Removes rows older than the retention period from all managed sheets."""
+        cutoff_date = date.today() - timedelta(days=days_to_keep)
+        logger.info(f"Pruning data older than {cutoff_date.isoformat()}...")
+
+        # Configuration: List of (Tab Name, Date Column Index)
+        sheet_configs = [
+            (self.sleep_tab_name, 0),
+            (self.stress_tab_name, 0),
+            (self.body_tab_name, 0),
+            (self.bp_tab_name, 0),
+            (self.activity_sum_tab_name, 0),
+            (self.activities_sheet_name, 1)
+        ]
+
+        for tab_name, date_col_idx in sheet_configs:
+            self._prune_single_sheet(tab_name, date_col_idx, cutoff_date)
+
+    def _prune_single_sheet(self, tab_name: str, date_col_idx: int, cutoff_date: date):
+        try:
+            # 1. Read all data from the sheet
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id, 
+                range=f"'{tab_name}'" 
+            ).execute()
+            
+            rows = result.get('values', [])
+            if not rows or len(rows) < 2:
+                return # Empty or just headers, nothing to prune
+
+            headers = rows[0]
+            data_rows = rows[1:]
+            
+            kept_rows = []
+            rows_removed = 0
+
+            # 2. Filter rows locally
+            for row in data_rows:
+                # If row is too short to have a date, keep it to be safe (or drop it)
+                if len(row) <= date_col_idx:
+                    kept_rows.append(row)
+                    continue
+                
+                date_str = row[date_col_idx]
+                try:
+                    # Parse YYYY-MM-DD
+                    row_date = date.fromisoformat(date_str)
+                    if row_date >= cutoff_date:
+                        kept_rows.append(row)
                     else:
-                        sleep_need = sleep_need_obj
+                        rows_removed += 1
+                except ValueError:
+                    # If date parsing fails, keep the row to prevent accidental data loss
+                    kept_rows.append(row)
 
-                    overnight_respiration = sleep_dto.get('averageRespirationValue')
-                    overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
-
-                    sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
-                    if sleep_time_seconds:
-                        sleep_length = round(sleep_time_seconds / 60)
-                    
-                    start_ts_local = sleep_dto.get('sleepStartTimestampLocal')
-                    end_ts_local = sleep_dto.get('sleepEndTimestampLocal')
-                    
-                    if start_ts_local:
-                        sleep_start_time = datetime.fromtimestamp(start_ts_local/1000).strftime('%H:%M')
-                    if end_ts_local:
-                        sleep_end_time = datetime.fromtimestamp(end_ts_local/1000).strftime('%H:%M')
-                    
-                    sleep_deep = (sleep_dto.get('deepSleepSeconds') or 0) / 60
-                    sleep_light = (sleep_dto.get('lightSleepSeconds') or 0) / 60
-                    sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
-                    sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
-
-                    # Sleep Efficiency Calculation
-                    if sleep_time_seconds and sleep_time_seconds > 0:
-                        awake_sec = sleep_dto.get('awakeSleepSeconds') or 0
-                        sleep_efficiency = round(((sleep_time_seconds - awake_sec) / sleep_time_seconds) * 100)
-
-            # 4. Process HRV
-            overnight_hrv_value = None
-            hrv_status_value = None
-            if hrv_payload and 'hrvSummary' in hrv_payload:
-                hrv_summary = hrv_payload['hrvSummary']
-                overnight_hrv_value = hrv_summary.get('lastNightAvg')
-                hrv_status_value = hrv_summary.get('status')
-
-            # 5. Process Activities
-            processed_activities = []
-            if activities:
-                for activity in activities:
-                    atype = activity.get('activityType', {})
-                    try:
-                        act_id = activity.get('activityId')
-                        act_name = activity.get('activityName')
-                        act_start_local = activity.get('startTimeLocal')
-                        
-                        act_time_str = ""
-                        if act_start_local:
-                             act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
-                        
-                        dist_km = (activity.get('distance') or 0) / 1000
-                        dur_min = (activity.get('duration') or 0) / 60
-                        
-                        pace_str = ""
-                        if dist_km > 0 and dur_min > 0:
-                             pace_decimal = dur_min / dist_km
-                             p_min = int(pace_decimal)
-                             p_sec = int((pace_decimal - p_min) * 60)
-                             pace_str = f"{p_min}:{p_sec:02d}"
-
-                        avg_hr = activity.get('averageHR')
-                        max_hr = activity.get('maxHR')
-                        avg_cadence = activity.get('averageRunningCadenceInStepsPerMinute')
-                        if not avg_cadence:
-                            avg_cadence = activity.get('averageBikingCadenceInRevPerMinute') 
-
-                        cal = activity.get('calories')
-                        elev = activity.get('elevationGain')
-                        aerobic_te = activity.get('aerobicTrainingEffect')
-                        anaerobic_te = activity.get('anaerobicTrainingEffect')
-
-                        processed_activities.append({
-                            "Activity ID": act_id,
-                            "Date": target_date.isoformat(),
-                            "Time": act_time_str,
-                            "Type": atype.get('typeKey', 'Unknown'),
-                            "Name": act_name,
-                            "Distance (km)": round(dist_km, 2) if dist_km else 0,
-                            "Duration (min)": round(dur_min, 1) if dur_min else 0,
-                            "Avg Pace (min/km)": pace_str,
-                            "Avg HR": int(avg_hr) if avg_hr else "",
-                            "Max HR": int(max_hr) if max_hr else "",
-                            "Calories": int(cal) if cal else "",
-                            "Avg Cadence (spm)": int(avg_cadence) if avg_cadence else "",
-                            "Elevation Gain (m)": int(elev) if elev else "",
-                            "Aerobic TE": aerobic_te,
-                            "Anaerobic TE": anaerobic_te
-                        })
-                    except Exception as e_act:
-                        logger.error(f"Error parsing activity detail: {e_act}")
-                        continue
-
-            # 6. Process General Stats (BMI / Weight)
-            weight = None
-            body_fat = None
-            bmi = None
-            
-            if stats:
-                if stats.get('weight'): weight = stats.get('weight') / 1000
-                body_fat = stats.get('bodyFat')
-                bmi = stats.get('bmi')
-
-            # --- NEW: Process Blood Pressure (Fixed Structure) ---
-            bp_systolic = None
-            bp_diastolic = None
-            
-            if bp_payload:
-                logger.info(f"BP Payload found for {target_date}: {bp_payload}")
+            # 3. If we removed data, clear and rewrite the sheet
+            if rows_removed > 0:
+                logger.info(f"Removing {rows_removed} old rows from '{tab_name}'.")
                 
-                readings = []
+                # Clear existing content
+                self.service.spreadsheets().values().clear(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"'{tab_name}'"
+                ).execute()
                 
-                # Check for the structure seen in your logs:
-                # payload -> measurementSummaries -> [list] -> measurements -> [list]
-                if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
-                    summaries = bp_payload.get('measurementSummaries', [])
-                    if isinstance(summaries, list):
-                        for summary in summaries:
-                            if isinstance(summary, dict) and 'measurements' in summary:
-                                batch = summary['measurements']
-                                if isinstance(batch, list):
-                                    readings.extend(batch)
-
-                # Fallback: check for direct list or other common keys
-                elif isinstance(bp_payload, list):
-                    readings = bp_payload
-                elif isinstance(bp_payload, dict):
-                    if 'userDailyBloodPressureDTOList' in bp_payload:
-                        readings = bp_payload['userDailyBloodPressureDTOList']
-
-                if readings:
-                    try:
-                        sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
-                        dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
-                        
-                        if sys_values:
-                            bp_systolic = int(round(mean(sys_values)))
-                        if dia_values:
-                            bp_diastolic = int(round(mean(dia_values)))
-                        
-                        logger.info(f"Calculated BP: {bp_systolic}/{bp_diastolic}")
-                    except Exception as e:
-                        logger.error(f"Error calculating BP average: {e}")
-                else:
-                    logger.info("BP Payload exists but no readings found in known keys.")
-
-            # 7. Summary Stats
-            active_cal = None
-            resting_cal = None
-            intensity_min = None
-            resting_hr = None
-            avg_stress = None
-            steps = None
-            floors = None
-            rest_stress_dur = None
-            low_stress_dur = None
-            med_stress_dur = None
-            high_stress_dur = None
-            
-            if summary:
-                active_cal = summary.get('activeKilocalories')
-                resting_cal = summary.get('bmrKilocalories')
-                intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
-                resting_hr = summary.get('restingHeartRate')
-                avg_stress = summary.get('averageStressLevel')
-                steps = summary.get('totalSteps')
-                
-                # Stress Durations
-                rest_stress_dur = summary.get('restStressDuration')
-                low_stress_dur = summary.get('lowStressDuration')
-                med_stress_dur = summary.get('mediumStressDuration')
-                high_stress_dur = summary.get('highStressDuration')
-
-                raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
-                if raw_floors is not None:
-                    try:
-                        floors = round(float(raw_floors))
-                    except (ValueError, TypeError):
-                        floors = raw_floors
-
-            # 8. Training Status
-            vo2_run = None
-            vo2_cycle = None
-            train_phrase = None
-            
-            if training_status:
-                mr_vo2 = training_status.get('mostRecentVO2Max', {})
-                if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
-                if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
-                
-                ts_data = training_status.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
-                if ts_data:
-                    for dev_data in ts_data.values():
-                        train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
-                        break
-
-            return GarminMetrics(
-                date=target_date,
-                sleep_score=sleep_score,
-                sleep_need=sleep_need,
-                sleep_efficiency=sleep_efficiency,
-                sleep_length=sleep_length,
-                sleep_start_time=sleep_start_time, 
-                sleep_end_time=sleep_end_time,     
-                sleep_deep=sleep_deep,             
-                sleep_light=sleep_light,           
-                sleep_rem=sleep_rem,               
-                sleep_awake=sleep_awake,
-                overnight_respiration=overnight_respiration, 
-                overnight_pulse_ox=overnight_pulse_ox,       
-                weight=weight,
-                bmi=bmi,
-                body_fat=body_fat,
-                blood_pressure_systolic=bp_systolic,
-                blood_pressure_diastolic=bp_diastolic,
-                resting_heart_rate=resting_hr,
-                average_stress=avg_stress,
-                rest_stress_duration=rest_stress_dur,
-                low_stress_duration=low_stress_dur,
-                medium_stress_duration=med_stress_dur,
-                high_stress_duration=high_stress_dur,
-                overnight_hrv=overnight_hrv_value,
-                hrv_status=hrv_status_value,
-                vo2max_running=vo2_run,
-                vo2max_cycling=vo2_cycle,
-                training_status=train_phrase,
-                active_calories=active_cal,
-                resting_calories=resting_cal,
-                intensity_minutes=intensity_min,
-                steps=steps,
-                floors_climbed=floors,
-                activities=processed_activities
-            )
+                # Write back headers + kept rows
+                body = {'values': [headers] + kept_rows}
+                self.service.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"'{tab_name}'!A1",
+                    valueInputOption='USER_ENTERED',
+                    body=body
+                ).execute()
 
         except Exception as e:
-            logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
-            return GarminMetrics(date=target_date)
+            logger.warning(f"Could not prune sheet '{tab_name}': {e}")
