@@ -8,6 +8,7 @@ import garth
 from .exceptions import MFARequiredException
 from .config import GarminMetrics
 from statistics import mean
+from functools import partial  # <--- NEW IMPORT
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,13 @@ class GarminClient:
             # 1. Summary (Steps, Stress, RHR)
             summary = await safe_fetch("User Summary", asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_iso))
             
+            # --- DEBUG LOGGING FOR DIAGNOSIS ---
+            if summary:
+                logger.debug(f"User Summary Data for {target_iso}: Steps={summary.get('totalSteps')}, Stress={summary.get('averageStressLevel')}")
+            else:
+                logger.debug(f"User Summary Data for {target_iso} is NONE/EMPTY.")
+            # -----------------------------------
+
             # 2. Stats (Weight, Body Fat)
             stats = await safe_fetch("Stats", asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_iso))
             
@@ -110,14 +118,17 @@ class GarminClient:
                     logger.debug(f"Direct Lactate fetch failed: {e}")
                     return None
             
-            # 9. Lactate Threshold (Method B: Range Query) - NEW!
+            # 9. Lactate Threshold (Method B: Range Query) - FIXED!
             async def get_lactate_range():
                 try:
                     # Fetches the specific day's stats directly
                     url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
                     params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
+                    
+                    # FIX: Use functools.partial to pass keyword arguments correctly
                     return await asyncio.get_event_loop().run_in_executor(
-                        None, self.client.connectapi, url, params=params
+                        None, 
+                        partial(self.client.connectapi, url, params=params)
                     )
                 except Exception as e:
                     logger.debug(f"Range Lactate fetch failed: {e}")
@@ -313,8 +324,7 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
             
-            # >>> CRITICAL FIX: Decoupled Fallback Logic <<<
-            # We check if 'steps' is None regardless of whether 'summary' was found or not.
+            # Decoupled Fallback Logic
             if steps is None:
                 try:
                     daily_steps_data = await safe_fetch("Fallback Steps", asyncio.get_event_loop().run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
