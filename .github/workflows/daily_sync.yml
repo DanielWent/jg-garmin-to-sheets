@@ -3,10 +3,17 @@ name: Daily Garmin Sync
 on:
   schedule:
     # Runs at 06:00, 07:00, 08:00, 09:00, and 10:00 UTC daily.
-    # This covers your 8am/10am local targets for both Winter (GMT) and Summer (BST)
-    # plus an early 6am UTC check.
     - cron: '0 6,7,8,9,10 * * *'
-  workflow_dispatch: # Allows you to click a button to run it manually
+  
+  # UPDATED: Allows manual triggering with specific dates for debugging
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Start Date (YYYY-MM-DD)'
+        required: false
+      end_date:
+        description: 'End Date (YYYY-MM-DD)'
+        required: false
 
 jobs:
   sync:
@@ -25,11 +32,38 @@ jobs:
       run: |
         pip install -r requirements.txt
 
-    - name: Run Sync Script
+    # NEW STEP: Force the script to log everything (DEBUG level)
+    # This reveals the hidden "Direct Lactate fetch failed" messages
+    - name: Enable Debug Logging
+      run: |
+        sed -i 's/logging.INFO/logging.DEBUG/g' src/main.py
+        echo "Logging level patched to DEBUG."
+
+    # UPDATED STEP: Run with logic to handle manual dates and capture logs
+    - name: Run Sync Script with Logging
       env:
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
+        PYTHONUNBUFFERED: "1" # Ensures logs are flushed immediately
       run: |
-        python -m src.main
+        # Check if manual dates were provided via workflow_dispatch
+        if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
+          echo "🛠️ DEBUG MODE: Running manual sync from ${{ inputs.start_date }} to ${{ inputs.end_date }}..."
+          # Run CLI mode with the provided dates, piping output to console AND a file
+          python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile USER1 --output-type sheets 2>&1 | tee sync_debug.log
+        else
+          echo "🔄 AUTOMATED MODE: Running standard daily sync..."
+          # Run standard mode
+          python -m src.main 2>&1 | tee sync_debug.log
+        fi
+
+    # NEW STEP: Upload the log file so you can download and read it
+    - name: Upload Debug Log
+      if: always() # Run this even if the script crashes
+      uses: actions/upload-artifact@v4
+      with:
+        name: garmin-debug-log
+        path: sync_debug.log
+        retention-days: 5
