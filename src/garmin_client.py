@@ -8,7 +8,7 @@ import garth
 from .exceptions import MFARequiredException
 from .config import GarminMetrics
 from statistics import mean
-from functools import partial  # <--- NEW IMPORT
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +81,10 @@ class GarminClient:
             # 1. Summary (Steps, Stress, RHR)
             summary = await safe_fetch("User Summary", asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_iso))
             
-            # --- DEBUG LOGGING FOR DIAGNOSIS ---
             if summary:
                 logger.debug(f"User Summary Data for {target_iso}: Steps={summary.get('totalSteps')}, Stress={summary.get('averageStressLevel')}")
             else:
                 logger.debug(f"User Summary Data for {target_iso} is NONE/EMPTY.")
-            # -----------------------------------
 
             # 2. Stats (Weight, Body Fat)
             stats = await safe_fetch("Stats", asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_iso))
@@ -118,24 +116,37 @@ class GarminClient:
                     logger.debug(f"Direct Lactate fetch failed: {e}")
                     return None
             
-            # 9. Lactate Threshold (Method B: Range Query) - FIXED!
-            async def get_lactate_range():
+            # 9. Lactate Threshold HR (Method B: Range Query)
+            async def get_lactate_hr_range():
                 try:
-                    # Fetches the specific day's stats directly
                     url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
                     params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
                     
-                    # FIX: Use functools.partial to pass keyword arguments correctly
                     return await asyncio.get_event_loop().run_in_executor(
                         None, 
                         partial(self.client.connectapi, url, params=params)
                     )
                 except Exception as e:
-                    logger.debug(f"Range Lactate fetch failed: {e}")
+                    logger.debug(f"Range Lactate HR fetch failed: {e}")
+                    return None
+
+            # 10. Lactate Threshold Speed (Method B: Range Query) <--- NEW
+            async def get_lactate_speed_range():
+                try:
+                    url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
+                    params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
+                    
+                    return await asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        partial(self.client.connectapi, url, params=params)
+                    )
+                except Exception as e:
+                    logger.debug(f"Range Lactate Speed fetch failed: {e}")
                     return None
 
             lactate_data = await get_lactate_direct()
-            lactate_range = await get_lactate_range()
+            lactate_range_hr = await get_lactate_hr_range()
+            lactate_range_speed = await get_lactate_speed_range()
 
             # ---------------------------------------------------------
             # 2. PARSE DATA
@@ -303,14 +314,13 @@ class GarminClient:
             med_stress_dur = None
             high_stress_dur = None
             
-            # Extract from Summary if available
             if summary:
                 active_cal = summary.get('activeKilocalories')
                 resting_cal = summary.get('bmrKilocalories')
                 intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
-                steps = summary.get('totalSteps') # Might be None even if summary exists
+                steps = summary.get('totalSteps') 
                 
                 rest_stress_dur = summary.get('restStressDuration')
                 low_stress_dur = summary.get('lowStressDuration')
@@ -324,7 +334,7 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
             
-            # Decoupled Fallback Logic
+            # Decoupled Fallback Logic for Steps
             if steps is None:
                 try:
                     daily_steps_data = await safe_fetch("Fallback Steps", asyncio.get_event_loop().run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
@@ -354,17 +364,33 @@ class GarminClient:
                         lactate_pace = f"{p_min}:{p_sec:02d}"
             
             # 2. Try Method B (Range Query) - If Method A failed
-            if not lactate_bpm and lactate_range and isinstance(lactate_range, list):
-                # The range endpoint returns a list of dictionaries
-                # We sort by valid date or just take the last one
+            # B1. Heart Rate
+            if not lactate_bpm and lactate_range_hr and isinstance(lactate_range_hr, list):
                 try:
-                    last_entry = lactate_range[-1] # Take the most recent in the range
+                    last_entry = lactate_range_hr[-1] 
                     if isinstance(last_entry, dict):
                          if 'value' in last_entry:
                              lactate_bpm = int(last_entry['value'])
                              logger.info(f"Found Lactate HR via Range Query: {lactate_bpm}")
                 except Exception as e:
-                    logger.debug(f"Parsing lactate range failed: {e}")
+                    logger.debug(f"Parsing lactate HR range failed: {e}")
+
+            # B2. Pace (Speed)
+            if not lactate_pace and lactate_range_speed and isinstance(lactate_range_speed, list):
+                try:
+                    last_entry = lactate_range_speed[-1]
+                    if isinstance(last_entry, dict) and 'value' in last_entry:
+                        speed_ms = last_entry['value']
+                        # Convert m/s to min/km
+                        if speed_ms and speed_ms > 0:
+                            sec_per_km = 1000 / speed_ms
+                            p_min = int(sec_per_km / 60)
+                            p_sec = int(sec_per_km % 60)
+                            lactate_pace = f"{p_min}:{p_sec:02d}"
+                            logger.info(f"Found Lactate Pace via Range Query: {lactate_pace}")
+                except Exception as e:
+                     logger.debug(f"Parsing lactate Speed range failed: {e}")
+
 
             # 3. Method C: Extract from Training Status (Last Resort)
             if training_status:
@@ -382,7 +408,6 @@ class GarminClient:
                     mr_ts = training_status.get('mostRecentTrainingStatus', {})
                     if mr_ts and 'lactateThresholdHeartRate' in mr_ts:
                         lactate_bpm = mr_ts['lactateThresholdHeartRate']
-                        logger.info(f"Found Lactate HR in Training Status: {lactate_bpm}")
 
             return GarminMetrics(
                 date=target_date,
