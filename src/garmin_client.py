@@ -61,11 +61,10 @@ class GarminClient:
                 raise Exception("Authentication previously failed.")
             await self.authenticate()
 
-        # --- HELPER: Strict Sequential Fetcher ---
+        # --- HELPER: Parallel Fetch Wrapper ---
         async def safe_fetch(name, coro):
             try:
-                # 2.0s delay to prevent rate-limiting on heavy days
-                await asyncio.sleep(2.0)
+                # No artificial sleep needed for parallel execution
                 return await coro
             except Exception as e:
                 logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
@@ -73,83 +72,71 @@ class GarminClient:
 
         try:
             target_iso = target_date.isoformat()
+            loop = asyncio.get_event_loop()
 
             # ---------------------------------------------------------
-            # 1. FETCH DATA (Strictly Sequential)
+            # 1. DEFINE TASKS (Prepare for Parallel Execution)
             # ---------------------------------------------------------
             
-            # 1. Summary (Steps, Stress, RHR)
-            summary = await safe_fetch("User Summary", asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_iso))
+            # Use partial for endpoints requiring arguments to run_in_executor
             
+            # Lactate Range Helpers
+            task_lactate_hr_url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
+            task_lactate_speed_url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
+            lactate_params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
+
+            # Define all coroutines
+            c_summary = safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
+            c_stats = safe_fetch("Stats", loop.run_in_executor(None, self.client.get_stats_and_body, target_iso))
+            c_sleep = safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
+            c_training = safe_fetch("Training Status", loop.run_in_executor(None, self.client.get_training_status, target_iso))
+            c_hrv = self._fetch_hrv_data(target_iso)
+            c_bp = safe_fetch("Blood Pressure", loop.run_in_executor(None, self.client.get_blood_pressure, target_iso))
+            c_activities = safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
+            
+            c_lactate_direct = safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
+            
+            c_lactate_range_hr = safe_fetch("Lactate Range HR", loop.run_in_executor(
+                None, partial(self.client.connectapi, task_lactate_hr_url, params=lactate_params)
+            ))
+            
+            c_lactate_range_speed = safe_fetch("Lactate Range Speed", loop.run_in_executor(
+                None, partial(self.client.connectapi, task_lactate_speed_url, params=lactate_params)
+            ))
+
+            # ---------------------------------------------------------
+            # 2. EXECUTE PARALLEL FETCH
+            # ---------------------------------------------------------
+            
+            results = await asyncio.gather(
+                c_summary, c_stats, c_sleep, c_training, c_hrv, c_bp, 
+                c_activities, c_lactate_direct, c_lactate_range_hr, c_lactate_range_speed
+            )
+
+            # Unpack results
+            (summary, stats, sleep_data, training_status, hrv_payload, bp_payload, 
+             activities, lactate_data, lactate_range_hr, lactate_range_speed) = results
+
+            # ---------------------------------------------------------
+            # 3. CONDITIONAL FETCH (Fallback)
+            # ---------------------------------------------------------
+            
+            # Check if steps are missing from summary; if so, trigger fallback
+            steps = None
             if summary:
-                logger.debug(f"User Summary Data for {target_iso}: Steps={summary.get('totalSteps')}, Stress={summary.get('averageStressLevel')}")
-            else:
-                logger.debug(f"User Summary Data for {target_iso} is NONE/EMPTY.")
-
-            # 2. Stats (Weight, Body Fat)
-            stats = await safe_fetch("Stats", asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_iso))
+                steps = summary.get('totalSteps')
             
-            # 3. Sleep
-            sleep_data = await safe_fetch("Sleep", asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_iso))
-            
-            # 4. Training Status (Contains VO2 Max)
-            training_status = await safe_fetch("Training Status", asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_iso))
-            
-            # 5. HRV
-            hrv_payload = await self._fetch_hrv_data(target_iso)
-            
-            # 6. Blood Pressure
-            bp_payload = await safe_fetch("Blood Pressure", asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_iso))
-            
-            # 7. Activities
-            activities = await safe_fetch("Activities", asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
-
-            # 8. Lactate Threshold (Method A: Direct Latest)
-            async def get_lactate_direct():
+            if steps is None:
                 try:
-                    return await asyncio.get_event_loop().run_in_executor(
-                        None, 
-                        self.client.connectapi, 
-                        "biometric-service/biometric/latestLactateThreshold"
-                    )
-                except Exception as e:
-                    logger.debug(f"Direct Lactate fetch failed: {e}")
-                    return None
-            
-            # 9. Lactate Threshold HR (Method B: Range Query)
-            async def get_lactate_hr_range():
-                try:
-                    url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
-                    params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
-                    
-                    return await asyncio.get_event_loop().run_in_executor(
-                        None, 
-                        partial(self.client.connectapi, url, params=params)
-                    )
-                except Exception as e:
-                    logger.debug(f"Range Lactate HR fetch failed: {e}")
-                    return None
-
-            # 10. Lactate Threshold Speed (Method B: Range Query)
-            async def get_lactate_speed_range():
-                try:
-                    url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
-                    params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
-                    
-                    return await asyncio.get_event_loop().run_in_executor(
-                        None, 
-                        partial(self.client.connectapi, url, params=params)
-                    )
-                except Exception as e:
-                    logger.debug(f"Range Lactate Speed fetch failed: {e}")
-                    return None
-
-            lactate_data = await get_lactate_direct()
-            lactate_range_hr = await get_lactate_hr_range()
-            lactate_range_speed = await get_lactate_speed_range()
+                    daily_steps_data = await safe_fetch("Fallback Steps", loop.run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
+                    if daily_steps_data and isinstance(daily_steps_data, list) and len(daily_steps_data) > 0:
+                        steps = daily_steps_data[0].get('totalSteps')
+                        logger.info(f"Retrieved steps ({steps}) via fallback method.")
+                except Exception as fb_err:
+                    logger.debug(f"Fallback step fetch failed: {fb_err}")
 
             # ---------------------------------------------------------
-            # 2. PARSE DATA
+            # 4. PARSE DATA
             # ---------------------------------------------------------
             
             # --- Sleep ---
@@ -301,13 +288,12 @@ class GarminClient:
                     except Exception as e:
                         logger.error(f"Error calculating BP average: {e}")
 
-            # --- Summary Stats (Steps, HR, Stress) ---
+            # --- Summary Stats (Rest of Logic) ---
             active_cal = None
             resting_cal = None
             intensity_min = None
             resting_hr = None
             avg_stress = None
-            steps = None
             floors = None
             rest_stress_dur = None
             low_stress_dur = None
@@ -320,7 +306,7 @@ class GarminClient:
                 intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
-                steps = summary.get('totalSteps') 
+                # steps already handled above
                 
                 rest_stress_dur = summary.get('restStressDuration')
                 low_stress_dur = summary.get('lowStressDuration')
@@ -333,16 +319,6 @@ class GarminClient:
                         floors = round(float(raw_floors))
                     except (ValueError, TypeError):
                         floors = raw_floors
-            
-            # Decoupled Fallback Logic for Steps
-            if steps is None:
-                try:
-                    daily_steps_data = await safe_fetch("Fallback Steps", asyncio.get_event_loop().run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
-                    if daily_steps_data and isinstance(daily_steps_data, list) and len(daily_steps_data) > 0:
-                        steps = daily_steps_data[0].get('totalSteps')
-                        logger.info(f"Retrieved steps ({steps}) via fallback method.")
-                except Exception as fb_err:
-                    print(f"Fallback step fetch failed: {fb_err}")
 
             # --- Training Status & Lactate Threshold ---
             vo2_run = None
@@ -371,7 +347,6 @@ class GarminClient:
                     if isinstance(last_entry, dict):
                          if 'value' in last_entry:
                              lactate_bpm = int(last_entry['value'])
-                             logger.info(f"Found Lactate HR via Range Query: {lactate_bpm}")
                 except Exception as e:
                     logger.debug(f"Parsing lactate HR range failed: {e}")
 
@@ -382,22 +357,17 @@ class GarminClient:
                     if isinstance(last_entry, dict) and 'value' in last_entry:
                         speed_ms = last_entry['value']
                         
-                        # --- FIX: DETECT & CORRECT LOW SPEED VALUE ---
-                        # If the API returns a value like 0.404 (dm/s) instead of 4.04 (m/s),
-                        # the resulting pace calculation will be off by 10x (41 min vs 4 min).
+                        # --- 10x CORRECTION LOGIC ---
                         if speed_ms and speed_ms > 0:
                             if speed_ms < 1.0: 
-                                logger.info(f"Detected low speed value ({speed_ms}); applying 10x correction.")
-                                speed_ms *= 10
+                                speed_ms *= 10  # Correct decameters/s to m/s if needed
                             
                             sec_per_km = 1000 / speed_ms
                             p_min = int(sec_per_km / 60)
                             p_sec = int(sec_per_km % 60)
                             lactate_pace = f"{p_min}:{p_sec:02d}"
-                            logger.info(f"Found Lactate Pace via Range Query: {lactate_pace}")
                 except Exception as e:
                      logger.debug(f"Parsing lactate Speed range failed: {e}")
-
 
             # 3. Method C: Extract from Training Status (Last Resort)
             if training_status:
