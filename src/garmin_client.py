@@ -60,45 +60,46 @@ class GarminClient:
                 raise Exception("Authentication previously failed.")
             await self.authenticate()
 
-        # Helper for sequential fetching with delays and logging
+        # --- HELPER: Strict Sequential Fetcher ---
         async def safe_fetch(name, coro):
             try:
-                # Add a tiny delay to reset the connection state
-                await asyncio.sleep(0.5) 
+                # Increased delay to 2.0 seconds to prevent rate-limiting/dropped packets
+                await asyncio.sleep(2.0)
                 return await coro
             except Exception as e:
-                # PRINT the error so you can see it in the console
-                print(f"⚠️ WARNING: Failed to fetch {name}: {e}")
                 logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
                 return None
 
         try:
             target_iso = target_date.isoformat()
 
-            # 1. Fetch Data Sequentially (Slow but Safe)
+            # ---------------------------------------------------------
+            # 1. FETCH DATA (Strictly Sequential)
+            # ---------------------------------------------------------
             
-            # --- User Summary (Steps, Stress, RHR) ---
+            # 1. Summary (Contains Steps, Floors, Stress, RHR)
+            # We fetch this FIRST to ensure it has the highest chance of success.
             summary = await safe_fetch("User Summary", asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_iso))
             
-            # --- Stats (Weight, Body Fat) ---
+            # 2. Stats (Weight, Body Fat)
             stats = await safe_fetch("Stats", asyncio.get_event_loop().run_in_executor(None, self.client.get_stats_and_body, target_iso))
             
-            # --- Sleep ---
+            # 3. Sleep
             sleep_data = await safe_fetch("Sleep", asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_iso))
             
-            # --- Training Status (Often contains Lactate Threshold too) ---
+            # 4. Training Status (Contains VO2 Max & Lactate Fallback)
             training_status = await safe_fetch("Training Status", asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_iso))
             
-            # --- HRV ---
+            # 5. HRV
             hrv_payload = await self._fetch_hrv_data(target_iso)
             
-            # --- Blood Pressure ---
+            # 6. Blood Pressure
             bp_payload = await safe_fetch("Blood Pressure", asyncio.get_event_loop().run_in_executor(None, self.client.get_blood_pressure, target_iso))
             
-            # --- Activities ---
+            # 7. Activities
             activities = await safe_fetch("Activities", asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
 
-            # --- Lactate Threshold (Direct Fetch attempt) ---
+            # 8. Lactate Threshold (Direct Fetch)
             async def get_lactate_direct():
                 try:
                     return await asyncio.get_event_loop().run_in_executor(
@@ -107,14 +108,16 @@ class GarminClient:
                         "biometric-service/biometric/latestLactateThreshold"
                     )
                 except Exception as e:
-                    # Log as WARNING so you can see if this endpoint is broken for you
-                    logger.warning(f"Direct Lactate Threshold fetch failed: {e}")
+                    logger.debug(f"Direct Lactate fetch failed: {e}")
                     return None
             
+            # We fetch this last as it's the most likely to fail
             lactate_data = await get_lactate_direct()
 
 
-            # 2. Extract Data
+            # ---------------------------------------------------------
+            # 2. PARSE DATA
+            # ---------------------------------------------------------
             
             # --- Sleep ---
             sleep_score = None
@@ -241,7 +244,6 @@ class GarminClient:
             # --- Blood Pressure (Robust Parsing) ---
             bp_systolic = None
             bp_diastolic = None
-            
             if bp_payload:
                 readings = []
                 # Check for structure: payload -> measurementSummaries -> [list] -> measurements -> [list]
@@ -330,7 +332,7 @@ class GarminClient:
                         p_min = int(sec_per_km / 60)
                         p_sec = int(sec_per_km % 60)
                         lactate_pace = f"{p_min}:{p_sec:02d}"
-            
+
             # 2. Extract VO2 Max and Status (AND FALLBACK LACTATE)
             if training_status:
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
