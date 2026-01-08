@@ -130,7 +130,7 @@ class GarminClient:
                     logger.debug(f"Range Lactate HR fetch failed: {e}")
                     return None
 
-            # 10. Lactate Threshold Speed (Method B: Range Query) <--- NEW
+            # 10. Lactate Threshold Speed (Method B: Range Query)
             async def get_lactate_speed_range():
                 try:
                     url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
@@ -381,8 +381,15 @@ class GarminClient:
                     last_entry = lactate_range_speed[-1]
                     if isinstance(last_entry, dict) and 'value' in last_entry:
                         speed_ms = last_entry['value']
-                        # Convert m/s to min/km
+                        
+                        # --- FIX: DETECT & CORRECT LOW SPEED VALUE ---
+                        # If the API returns a value like 0.404 (dm/s) instead of 4.04 (m/s),
+                        # the resulting pace calculation will be off by 10x (41 min vs 4 min).
                         if speed_ms and speed_ms > 0:
+                            if speed_ms < 1.0: 
+                                logger.info(f"Detected low speed value ({speed_ms}); applying 10x correction.")
+                                speed_ms *= 10
+                            
                             sec_per_km = 1000 / speed_ms
                             p_min = int(sec_per_km / 60)
                             p_sec = int(sec_per_km % 60)
