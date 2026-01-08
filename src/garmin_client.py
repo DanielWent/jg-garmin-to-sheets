@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, Any, Optional, List
 import asyncio
 import logging
@@ -63,7 +63,7 @@ class GarminClient:
         # --- HELPER: Strict Sequential Fetcher ---
         async def safe_fetch(name, coro):
             try:
-                # Increased delay to 2.0 seconds to prevent rate-limiting/dropped packets
+                # 2.0s delay to prevent rate-limiting on heavy days
                 await asyncio.sleep(2.0)
                 return await coro
             except Exception as e:
@@ -77,8 +77,7 @@ class GarminClient:
             # 1. FETCH DATA (Strictly Sequential)
             # ---------------------------------------------------------
             
-            # 1. Summary (Contains Steps, Floors, Stress, RHR)
-            # We fetch this FIRST to ensure it has the highest chance of success.
+            # 1. Summary (Steps, Stress, RHR)
             summary = await safe_fetch("User Summary", asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_iso))
             
             # 2. Stats (Weight, Body Fat)
@@ -87,7 +86,7 @@ class GarminClient:
             # 3. Sleep
             sleep_data = await safe_fetch("Sleep", asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_iso))
             
-            # 4. Training Status (Contains VO2 Max & Lactate Fallback)
+            # 4. Training Status (Contains VO2 Max)
             training_status = await safe_fetch("Training Status", asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_iso))
             
             # 5. HRV
@@ -99,7 +98,7 @@ class GarminClient:
             # 7. Activities
             activities = await safe_fetch("Activities", asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
 
-            # 8. Lactate Threshold (Direct Fetch)
+            # 8. Lactate Threshold (Method A: Direct Latest)
             async def get_lactate_direct():
                 try:
                     return await asyncio.get_event_loop().run_in_executor(
@@ -111,9 +110,21 @@ class GarminClient:
                     logger.debug(f"Direct Lactate fetch failed: {e}")
                     return None
             
-            # We fetch this last as it's the most likely to fail
-            lactate_data = await get_lactate_direct()
+            # 9. Lactate Threshold (Method B: Range Query) - NEW!
+            async def get_lactate_range():
+                try:
+                    # Fetches the specific day's stats directly
+                    url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
+                    params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
+                    return await asyncio.get_event_loop().run_in_executor(
+                        None, self.client.connectapi, url, params=params
+                    )
+                except Exception as e:
+                    logger.debug(f"Range Lactate fetch failed: {e}")
+                    return None
 
+            lactate_data = await get_lactate_direct()
+            lactate_range = await get_lactate_range()
 
             # ---------------------------------------------------------
             # 2. PARSE DATA
@@ -241,26 +252,23 @@ class GarminClient:
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
 
-            # --- Blood Pressure (Robust Parsing) ---
+            # --- Blood Pressure ---
             bp_systolic = None
             bp_diastolic = None
             if bp_payload:
                 readings = []
-                # Check for structure: payload -> measurementSummaries -> [list] -> measurements -> [list]
                 if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
                     summaries = bp_payload.get('measurementSummaries', [])
                     if isinstance(summaries, list):
-                        for summary in summaries:
-                            if isinstance(summary, dict) and 'measurements' in summary:
-                                batch = summary['measurements']
+                        for summary_item in summaries:
+                            if isinstance(summary_item, dict) and 'measurements' in summary_item:
+                                batch = summary_item['measurements']
                                 if isinstance(batch, list):
                                     readings.extend(batch)
-                # Fallback: check for direct list or 'userDailyBloodPressureDTOList'
                 elif isinstance(bp_payload, list):
                     readings = bp_payload
-                elif isinstance(bp_payload, dict):
-                    if 'userDailyBloodPressureDTOList' in bp_payload:
-                        readings = bp_payload['userDailyBloodPressureDTOList']
+                elif isinstance(bp_payload, dict) and 'userDailyBloodPressureDTOList' in bp_payload:
+                    readings = bp_payload['userDailyBloodPressureDTOList']
 
                 if readings:
                     try:
@@ -284,13 +292,14 @@ class GarminClient:
             med_stress_dur = None
             high_stress_dur = None
             
+            # Extract from Summary if available
             if summary:
                 active_cal = summary.get('activeKilocalories')
                 resting_cal = summary.get('bmrKilocalories')
                 intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
-                steps = summary.get('totalSteps')
+                steps = summary.get('totalSteps') # Might be None even if summary exists
                 
                 rest_stress_dur = summary.get('restStressDuration')
                 low_stress_dur = summary.get('lowStressDuration')
@@ -303,8 +312,10 @@ class GarminClient:
                         floors = round(float(raw_floors))
                     except (ValueError, TypeError):
                         floors = raw_floors
-            else:
-                # FALLBACKS (Try fetching steps specifically if summary failed)
+            
+            # >>> CRITICAL FIX: Decoupled Fallback Logic <<<
+            # We check if 'steps' is None regardless of whether 'summary' was found or not.
+            if steps is None:
                 try:
                     daily_steps_data = await safe_fetch("Fallback Steps", asyncio.get_event_loop().run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
                     if daily_steps_data and isinstance(daily_steps_data, list) and len(daily_steps_data) > 0:
@@ -320,9 +331,8 @@ class GarminClient:
             lactate_bpm = None
             lactate_pace = None
 
-            # 1. Try DIRECT fetch (Best for current value)
+            # 1. Try Method A (Direct Latest)
             if lactate_data:
-                # API usually returns: {'heartRate': 165, 'speed': 3.5, ...}
                 if 'heartRate' in lactate_data:
                     lactate_bpm = lactate_data['heartRate']
                 if 'speed' in lactate_data:
@@ -332,36 +342,37 @@ class GarminClient:
                         p_min = int(sec_per_km / 60)
                         p_sec = int(sec_per_km % 60)
                         lactate_pace = f"{p_min}:{p_sec:02d}"
+            
+            # 2. Try Method B (Range Query) - If Method A failed
+            if not lactate_bpm and lactate_range and isinstance(lactate_range, list):
+                # The range endpoint returns a list of dictionaries
+                # We sort by valid date or just take the last one
+                try:
+                    last_entry = lactate_range[-1] # Take the most recent in the range
+                    if isinstance(last_entry, dict):
+                         if 'value' in last_entry:
+                             lactate_bpm = int(last_entry['value'])
+                             logger.info(f"Found Lactate HR via Range Query: {lactate_bpm}")
+                except Exception as e:
+                    logger.debug(f"Parsing lactate range failed: {e}")
 
-            # 2. Extract VO2 Max and Status (AND FALLBACK LACTATE)
+            # 3. Method C: Extract from Training Status (Last Resort)
             if training_status:
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
                 if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
                 
-                # Extract Feedback Phrase
                 ts_data = training_status.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
                 if ts_data:
                     for dev_data in ts_data.values():
                         train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
                         break
                 
-                # --- Fallback: Extract Lactate from Training Status if direct fetch failed ---
                 if not lactate_bpm:
                     mr_ts = training_status.get('mostRecentTrainingStatus', {})
-                    if mr_ts:
-                        if 'lactateThresholdHeartRate' in mr_ts:
-                            lactate_bpm = mr_ts['lactateThresholdHeartRate']
-                            logger.info(f"Found Lactate HR in Training Status: {lactate_bpm}")
-                        
-                        if 'lactateThresholdSpeed' in mr_ts:
-                            speed_ms = mr_ts['lactateThresholdSpeed']
-                            if speed_ms and speed_ms > 0:
-                                sec_per_km = 1000 / speed_ms
-                                p_min = int(sec_per_km / 60)
-                                p_sec = int(sec_per_km % 60)
-                                lactate_pace = f"{p_min}:{p_sec:02d}"
-                                logger.info(f"Found Lactate Pace in Training Status: {lactate_pace}")
+                    if mr_ts and 'lactateThresholdHeartRate' in mr_ts:
+                        lactate_bpm = mr_ts['lactateThresholdHeartRate']
+                        logger.info(f"Found Lactate HR in Training Status: {lactate_bpm}")
 
             return GarminMetrics(
                 date=target_date,
