@@ -75,7 +75,7 @@ class GarminClient:
         try:
             target_iso = target_date.isoformat()
 
-            # 1. Fetch Data Sequentially
+            # 1. Fetch Data Sequentially (Slow but Safe)
             
             # --- User Summary (Steps, Stress, RHR) ---
             summary = await safe_fetch("User Summary", asyncio.get_event_loop().run_in_executor(None, self.client.get_user_summary, target_iso))
@@ -86,7 +86,7 @@ class GarminClient:
             # --- Sleep ---
             sleep_data = await safe_fetch("Sleep", asyncio.get_event_loop().run_in_executor(None, self.client.get_sleep_data, target_iso))
             
-            # --- Training Status ---
+            # --- Training Status (Often contains Lactate Threshold too) ---
             training_status = await safe_fetch("Training Status", asyncio.get_event_loop().run_in_executor(None, self.client.get_training_status, target_iso))
             
             # --- HRV ---
@@ -98,8 +98,7 @@ class GarminClient:
             # --- Activities ---
             activities = await safe_fetch("Activities", asyncio.get_event_loop().run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
 
-            # --- Lactate Threshold (Direct Fetch) ---
-            # This fetches the latest known value from your biometric profile
+            # --- Lactate Threshold (Direct Fetch attempt) ---
             async def get_lactate_direct():
                 try:
                     return await asyncio.get_event_loop().run_in_executor(
@@ -108,7 +107,8 @@ class GarminClient:
                         "biometric-service/biometric/latestLactateThreshold"
                     )
                 except Exception as e:
-                    logger.debug(f"Direct Lactate Threshold fetch failed: {e}")
+                    # Log as WARNING so you can see if this endpoint is broken for you
+                    logger.warning(f"Direct Lactate Threshold fetch failed: {e}")
                     return None
             
             lactate_data = await get_lactate_direct()
@@ -238,16 +238,36 @@ class GarminClient:
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
 
-            # --- Blood Pressure ---
+            # --- Blood Pressure (Robust Parsing) ---
             bp_systolic = None
             bp_diastolic = None
-            if bp_payload and 'userDailyBloodPressureDTOList' in bp_payload:
-                readings = bp_payload['userDailyBloodPressureDTOList']
+            
+            if bp_payload:
+                readings = []
+                # Check for structure: payload -> measurementSummaries -> [list] -> measurements -> [list]
+                if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
+                    summaries = bp_payload.get('measurementSummaries', [])
+                    if isinstance(summaries, list):
+                        for summary in summaries:
+                            if isinstance(summary, dict) and 'measurements' in summary:
+                                batch = summary['measurements']
+                                if isinstance(batch, list):
+                                    readings.extend(batch)
+                # Fallback: check for direct list or 'userDailyBloodPressureDTOList'
+                elif isinstance(bp_payload, list):
+                    readings = bp_payload
+                elif isinstance(bp_payload, dict):
+                    if 'userDailyBloodPressureDTOList' in bp_payload:
+                        readings = bp_payload['userDailyBloodPressureDTOList']
+
                 if readings:
-                    sys_values = [r['systolic'] for r in readings if r.get('systolic')]
-                    dia_values = [r['diastolic'] for r in readings if r.get('diastolic')]
-                    if sys_values: bp_systolic = int(round(mean(sys_values)))
-                    if dia_values: bp_diastolic = int(round(mean(dia_values)))
+                    try:
+                        sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
+                        dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
+                        if sys_values: bp_systolic = int(round(mean(sys_values)))
+                        if dia_values: bp_diastolic = int(round(mean(dia_values)))
+                    except Exception as e:
+                        logger.error(f"Error calculating BP average: {e}")
 
             # --- Summary Stats (Steps, HR, Stress) ---
             active_cal = None
@@ -310,18 +330,36 @@ class GarminClient:
                         p_min = int(sec_per_km / 60)
                         p_sec = int(sec_per_km % 60)
                         lactate_pace = f"{p_min}:{p_sec:02d}"
-
-            # 2. Extract VO2 Max and Status
+            
+            # 2. Extract VO2 Max and Status (AND FALLBACK LACTATE)
             if training_status:
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
                 if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
                 
+                # Extract Feedback Phrase
                 ts_data = training_status.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
                 if ts_data:
                     for dev_data in ts_data.values():
                         train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
                         break
+                
+                # --- Fallback: Extract Lactate from Training Status if direct fetch failed ---
+                if not lactate_bpm:
+                    mr_ts = training_status.get('mostRecentTrainingStatus', {})
+                    if mr_ts:
+                        if 'lactateThresholdHeartRate' in mr_ts:
+                            lactate_bpm = mr_ts['lactateThresholdHeartRate']
+                            logger.info(f"Found Lactate HR in Training Status: {lactate_bpm}")
+                        
+                        if 'lactateThresholdSpeed' in mr_ts:
+                            speed_ms = mr_ts['lactateThresholdSpeed']
+                            if speed_ms and speed_ms > 0:
+                                sec_per_km = 1000 / speed_ms
+                                p_min = int(sec_per_km / 60)
+                                p_sec = int(sec_per_km % 60)
+                                lactate_pace = f"{p_min}:{p_sec:02d}"
+                                logger.info(f"Found Lactate Pace in Training Status: {lactate_pace}")
 
             return GarminMetrics(
                 date=target_date,
