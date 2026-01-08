@@ -463,8 +463,8 @@ async def run_interactive_sync():
     FORCE_BACKFILL = True
 
     if FORCE_BACKFILL:
-        start_date = date(2023, 8, 28)
-        end_date = date.today()
+        start_date = date(2025, 1, 5)
+        end_date = date(2025, 1, 10)
     else:
         # Rolling sync: Fetch the last 7 days INCLUDING today
         # Today = Day 0. Today minus 6 days = 7 days total.
