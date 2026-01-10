@@ -278,3 +278,64 @@ class GoogleSheetsClient:
 
         except Exception as e:
             logger.warning(f"Could not prune sheet '{tab_name}': {e}")
+
+    def sort_sheets(self):
+        """
+        Sorts all managed tabs by Date in DESCENDING order (newest on top).
+        Checks if the tab exists in the current spreadsheet before attempting sort.
+        """
+        logger.info("Sorting sheets by date (descending)...")
+        try:
+            # 1. Fetch properties of all existing sheets in this spreadsheet
+            all_sheets_metadata = self._get_spreadsheet_details()
+            
+            # 2. Define the managed tabs and which column is "Date" (0-indexed)
+            # Most daily metrics have Date at col 0. 
+            # "List of Tracked Activities" has 'Activity ID' at 0, 'Date' at 1.
+            managed_tabs = {
+                self.sleep_tab_name: 0,
+                self.stress_tab_name: 0,
+                self.body_tab_name: 0,
+                self.bp_tab_name: 0,
+                self.activity_sum_tab_name: 0,
+                self.activities_sheet_name: 1 
+            }
+
+            requests = []
+
+            for sheet_meta in all_sheets_metadata:
+                title = sheet_meta['properties']['title']
+                sheet_id = sheet_meta['properties']['sheetId']
+                
+                # If this is one of our managed tabs, we queue a sort request
+                if title in managed_tabs:
+                    date_col_idx = managed_tabs[title]
+                    
+                    requests.append({
+                        "sortRange": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 1,  # Skip header row (row 1)
+                                # End row index omitted => sorts to the bottom
+                            },
+                            "sortSpecs": [
+                                {
+                                    "dimensionIndex": date_col_idx,
+                                    "sortOrder": "DESCENDING"
+                                }
+                            ]
+                        }
+                    })
+
+            if requests:
+                body = {'requests': requests}
+                self.service.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body=body
+                ).execute()
+                logger.info(f"Successfully sorted {len(requests)} tabs.")
+            else:
+                logger.info("No managed tabs found to sort.")
+
+        except Exception as e:
+            logger.error(f"Failed to sort sheets: {e}")
