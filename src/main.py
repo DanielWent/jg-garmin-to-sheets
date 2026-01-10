@@ -232,6 +232,23 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             sheets_client.prune_old_data(days_to_keep=365)
             # -----------------------------------------------
 
+            # >>> NEW LOGIC: Activity Sync to Separate Sheet <<<
+            ACTIVITIES_SHEET_ID = "1EglkT03d_9RCPLXUay63G2b0GdyPKP62ljZa0ruEx1g"
+            logger.info(f"Syncing Activities to dedicated sheet: {ACTIVITIES_SHEET_ID}")
+            
+            try:
+                act_client = GoogleSheetsClient(
+                    credentials_path='credentials/client_secret.json',
+                    spreadsheet_id=ACTIVITIES_SHEET_ID,
+                    sheet_name='Activities'
+                )
+                act_client.update_activities_tab(metrics_to_write)
+                act_client.prune_activities_tab(days_to_keep=365)
+                
+            except Exception as e:
+                logger.error(f"Failed to sync activities to dedicated sheet: {e}")
+            # >>> END NEW LOGIC <<<
+
             logger.info("Google Sheets sync completed successfully!")
         
         except GoogleAuthTokenRefreshError as auth_error:
