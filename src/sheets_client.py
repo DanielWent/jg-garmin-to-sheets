@@ -81,6 +81,7 @@ class GoogleSheetsClient:
             ).execute()
 
     def update_metrics(self, metrics: List[GarminMetrics]):
+        """Updates the daily metric tabs (Sleep, Stress, Body, BP, Summary)."""
         all_sheets_properties = self._get_spreadsheet_details()
         
         today = date.today()
@@ -110,6 +111,11 @@ class GoogleSheetsClient:
         self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
         self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_historical)
 
+        # Removed: Activities update (now handled separately)
+
+    def update_activities_tab(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the 'List of Tracked Activities' tab."""
+        all_sheets_properties = self._get_spreadsheet_details()
         self._ensure_tab_exists(self.activities_sheet_name, ACTIVITY_HEADERS, all_sheets_properties)
         self._update_activities(metrics)
 
@@ -201,7 +207,7 @@ class GoogleSheetsClient:
             ).execute()
 
     def prune_old_data(self, days_to_keep: int = 365):
-        """Removes rows older than the retention period from all managed sheets."""
+        """Removes rows older than the retention period from managed sheets (excluding activities)."""
         cutoff_date = date.today() - timedelta(days=days_to_keep)
         logger.info(f"Pruning data older than {cutoff_date.isoformat()}...")
 
@@ -211,11 +217,16 @@ class GoogleSheetsClient:
             (self.body_tab_name, 0),
             (self.bp_tab_name, 0),
             (self.activity_sum_tab_name, 0),
-            (self.activities_sheet_name, 1)
+            # Activities removed from here
         ]
 
         for tab_name, date_col_idx in sheet_configs:
             self._prune_single_sheet(tab_name, date_col_idx, cutoff_date)
+
+    def prune_activities_tab(self, days_to_keep: int = 365):
+        """Removes rows older than the retention period from the activities sheet."""
+        cutoff_date = date.today() - timedelta(days=days_to_keep)
+        self._prune_single_sheet(self.activities_sheet_name, 1, cutoff_date)
 
     def _prune_single_sheet(self, tab_name: str, date_col_idx: int, cutoff_date: date):
         try:
