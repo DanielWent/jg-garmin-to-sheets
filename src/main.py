@@ -232,6 +232,10 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             sheets_client.prune_old_data(days_to_keep=365)
             # -----------------------------------------------
 
+            # >>> NEW STEP: SORT TABS BY DATE <<<
+            sheets_client.sort_sheets()
+            # -----------------------------------
+
             # >>> NEW LOGIC: Activity Sync to Separate Sheet <<<
             ACTIVITIES_SHEET_ID = "1EglkT03d_9RCPLXUay63G2b0GdyPKP62ljZa0ruEx1g"
             logger.info(f"Syncing Activities to dedicated sheet: {ACTIVITIES_SHEET_ID}")
@@ -244,6 +248,10 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 )
                 act_client.update_activities_tab(metrics_to_write)
                 act_client.prune_activities_tab(days_to_keep=365)
+                
+                # >>> NEW STEP: SORT ACTIVITY TABS BY DATE <<<
+                act_client.sort_sheets()
+                # --------------------------------------------
                 
             except Exception as e:
                 logger.error(f"Failed to sync activities to dedicated sheet: {e}")
@@ -450,6 +458,11 @@ def cli_monthly_sync(
         )
         # Update metrics handles lists, so we pass the whole buffer
         sheets_client.update_metrics(metrics_buffer)
+
+        # >>> NEW STEP: SORT TABS BY DATE <<<
+        sheets_client.sort_sheets()
+        # -----------------------------------
+
         logger.info("Monthly sync completed successfully!")
         
     except Exception as e:
