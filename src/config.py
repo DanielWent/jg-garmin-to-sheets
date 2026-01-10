@@ -72,11 +72,12 @@ BP_HEADERS = [
     "Systolic Blood Pressure (mmHg)", "Diastolic Blood Pressure (mmHg)"
 ]
 
+# REMOVED: "Training Status Phase" from this list
 ACTIVITY_SUMMARY_HEADERS = [
     "Date",
     "Daily Intensity Minutes",
     "Steps", "Floors Climbed", 
-    "VO2 Max Running", "Lactate Threshold HR", "Lactate Threshold Pace", "Training Status Phase"
+    "VO2 Max Running", "Lactate Threshold HR", "Lactate Threshold Pace"
 ]
 
 # Consolidated HEADERS for CSV output (combining all above)
@@ -121,7 +122,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "VO2 Max Cycling": "vo2max_cycling",
     "Lactate Threshold HR": "lactate_threshold_bpm",
     "Lactate Threshold Pace": "lactate_threshold_pace",
-    "Training Status Phase": "training_status",
+    # REMOVED: "Training Status Phase": "training_status",
     "Steps": "steps",
     "Floors Climbed": "floors_climbed",
     "Daily Intensity Minutes": "intensity_minutes"
