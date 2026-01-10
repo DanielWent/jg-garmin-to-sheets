@@ -237,7 +237,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             # -----------------------------------
 
             # >>> NEW LOGIC: Activity Sync to Separate Sheet <<<
-            ACTIVITIES_SHEET_ID = "1EglkT03d_9RCPLXUay63G2b0GdyPKP62ljZa0ruEx1g"
+            ACTIVITIES_SHEET_ID = "1CReDty8noYMiQ0Jk5gZNI8810WQZcZITyb0-PlxuOlM"
             logger.info(f"Syncing Activities to dedicated sheet: {ACTIVITIES_SHEET_ID}")
             
             try:
