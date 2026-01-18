@@ -326,6 +326,7 @@ class GarminClient:
             train_phrase = None
             lactate_bpm = None
             lactate_pace = None
+            seven_day_load = None   # <--- NEW: Initialize variable
 
             # 1. Try Method A (Direct Latest)
             if lactate_data:
@@ -371,6 +372,16 @@ class GarminClient:
 
             # 3. Method C: Extract from Training Status (Last Resort)
             if training_status:
+                # --- NEW LOGIC START: Extract Training Load ---
+                # Try top level first, then nested. 
+                # Garmin often uses 'sevenDayLoad' or 'acuteLoad' interchangeably.
+                seven_day_load = training_status.get('sevenDayLoad') or training_status.get('acuteLoad')
+                
+                if not seven_day_load:
+                    mr_ts = training_status.get('mostRecentTrainingStatus', {})
+                    seven_day_load = mr_ts.get('sevenDayLoad') or mr_ts.get('acuteLoad')
+                # --- NEW LOGIC END ---
+
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
                 if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
@@ -415,6 +426,7 @@ class GarminClient:
                 hrv_status=hrv_status_value,
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
+                seven_day_load=seven_day_load,        # <--- NEW: Pass to Constructor
                 lactate_threshold_bpm=lactate_bpm,
                 lactate_threshold_pace=lactate_pace,
                 training_status=train_phrase,
