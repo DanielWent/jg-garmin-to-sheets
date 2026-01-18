@@ -1,7 +1,3 @@
-{
-type: file
-fileName: src/sheets_client.py
-fullContent:
 import logging
 from typing import List, Any
 from datetime import date, timedelta
@@ -99,8 +95,8 @@ class GoogleSheetsClient:
                 metrics_historical.append(m)
         return metrics_historical
 
-    # --- NEW: Granular Update Methods for Distinct Spreadsheets ---
-    
+    # --- INDIVIDUAL UPDATE METHODS ---
+
     def update_sleep(self, metrics: List[GarminMetrics]):
         """Updates ONLY the Sleep Data tab."""
         all_sheets_properties = self._get_spreadsheet_details()
@@ -132,14 +128,11 @@ class GoogleSheetsClient:
         metrics_hist = self._filter_historical_metrics(metrics)
         self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
         self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_hist)
-    
-    # -------------------------------------------------------------
+
+    # ---------------------------------
 
     def update_metrics(self, metrics: List[GarminMetrics]):
-        """
-        Updates ALL daily metric tabs.
-        Used for the Master Spreadsheet.
-        """
+        """Updates ALL daily metric tabs (Master Sheet functionality)."""
         all_sheets_properties = self._get_spreadsheet_details()
         metrics_historical = self._filter_historical_metrics(metrics)
 
@@ -256,7 +249,7 @@ class GoogleSheetsClient:
         cutoff_date = date.today() - timedelta(days=days_to_keep)
         logger.info(f"Pruning data older than {cutoff_date.isoformat()}...")
 
-        # Get list of actual sheets in the spreadsheet first to avoid 404s on single-purpose sheets
+        # 1. Get list of actual sheets in the spreadsheet first to avoid 404s
         all_sheets = self._get_spreadsheet_details()
         existing_titles = {s['properties']['title'] for s in all_sheets}
 
@@ -383,4 +376,3 @@ class GoogleSheetsClient:
 
         except Exception as e:
             logger.error(f"Failed to sort sheets: {e}")
-}
