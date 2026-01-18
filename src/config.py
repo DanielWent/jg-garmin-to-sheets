@@ -77,9 +77,12 @@ BP_HEADERS = [
 ACTIVITY_SUMMARY_HEADERS = [
     "Date",
     "Daily Intensity Minutes",
-    "7-Day Training Load",                        # <--- NEW: Column Header
-    "Steps", "Floors Climbed", 
-    "VO2 Max Running", "Lactate Threshold HR", "Lactate Threshold Pace"
+    "Steps", 
+    "Floors Climbed", 
+    "VO2 Max Running", 
+    "Lactate Threshold HR", 
+    "Lactate Threshold Pace",
+    "7-Day Training Load"                        # <--- FIXED: Moved to the end to prevent column shift
 ]
 
 # Consolidated HEADERS for CSV output (combining all above)
