@@ -115,6 +115,7 @@ class GarminClient:
                     None, self.client.connectapi, endpoint
                 )
             except Exception as e:
+                # Debug logging only, to avoid clutter
                 logger.debug(f"Direct fetch for {name} failed: {e}")
                 return None
 
@@ -137,11 +138,8 @@ class GarminClient:
             # Training Status - Standard Method (Often fails for FR265)
             c_training_std = safe_fetch("Training Status (Std)", loop.run_in_executor(None, self.client.get_training_status, target_iso))
 
-            # Training Readiness - (Primary Source for Acute Load on FR265)
-            readiness_url = f"metrics-service/metrics/trainingreadiness/{target_iso}"
-            c_readiness = direct_fetch("Training Readiness", readiness_url)
-
-            # Training Status - Modern Endpoint (Secondary Source)
+            # Training Status - Modern Endpoint (Direct Fetch for FR265)
+            # This endpoint is specific to the "Unified Training Status" service
             modern_url = f"metrics-service/metrics/trainingstatus/aggregated/{target_iso}"
             c_training_modern = direct_fetch("Training Status (Modern)", modern_url)
 
@@ -154,11 +152,11 @@ class GarminClient:
             
             results = await asyncio.gather(
                 c_summary, c_stats, c_sleep, c_hrv, c_bp, c_activities, 
-                c_training_std, c_readiness, c_training_modern, c_lactate_direct
+                c_training_std, c_training_modern, c_lactate_direct
             )
 
             (summary, stats, sleep_data, hrv_payload, bp_payload, activities, 
-             training_status_std, readiness_data, training_status_modern, lactate_data) = results
+             training_status_std, training_status_modern, lactate_data) = results
 
             # ---------------------------------------------------------
             # 3. FALLBACKS
@@ -306,6 +304,7 @@ class GarminClient:
             bp_diastolic = None
             if bp_payload:
                 readings = []
+                # ... [Existing BP Parsing Logic] ...
                 if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
                     summaries = bp_payload.get('measurementSummaries', [])
                     if isinstance(summaries, list):
@@ -325,10 +324,10 @@ class GarminClient:
                         dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
                         if sys_values: bp_systolic = int(round(mean(sys_values)))
                         if dia_values: bp_diastolic = int(round(mean(dia_values)))
-                    except Exception as e:
-                        logger.error(f"Error calculating BP average: {e}")
+                    except Exception:
+                        pass
 
-            # --- Summary Stats (Rest of Logic) ---
+            # --- Summary Stats ---
             active_cal = None
             resting_cal = None
             intensity_min = None
@@ -346,7 +345,6 @@ class GarminClient:
                 intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
-                # steps already handled above
                 
                 rest_stress_dur = summary.get('restStressDuration')
                 low_stress_dur = summary.get('lowStressDuration')
@@ -360,89 +358,42 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
 
-            # --- Training Status & Lactate Threshold ---
+            # --- TRAINING LOAD & LACTATE ---
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
             lactate_bpm = None
             lactate_pace = None
-            seven_day_load = None   # <--- NEW: Initialize variable
+            seven_day_load = None
 
-            # 1. Try Method A (Direct Latest)
-            if lactate_data:
-                if 'heartRate' in lactate_data:
-                    lactate_bpm = lactate_data['heartRate']
-                if 'speed' in lactate_data:
-                    speed_ms = lactate_data['speed']
-                    if speed_ms and speed_ms > 0:
-                        sec_per_km = 1000 / speed_ms
-                        p_min = int(sec_per_km / 60)
-                        p_sec = int(sec_per_km % 60)
-                        lactate_pace = f"{p_min}:{p_sec:02d}"
-            
-            # 2. Try Method B (Range Query) - If Method A failed
-            # B1. Heart Rate
-            if not lactate_bpm and lactate_range_hr and isinstance(lactate_range_hr, list):
-                try:
-                    last_entry = lactate_range_hr[-1] 
-                    if isinstance(last_entry, dict):
-                         if 'value' in last_entry:
-                             lactate_bpm = int(last_entry['value'])
-                except Exception as e:
-                    logger.debug(f"Parsing lactate HR range failed: {e}")
+            # 1. Parse Lactate (Direct)
+            if lactate_data and isinstance(lactate_data, dict):
+                lactate_bpm = lactate_data.get('heartRate')
+                speed_ms = lactate_data.get('speed')
+                if speed_ms and speed_ms > 0:
+                    sec_per_km = 1000 / speed_ms
+                    p_min = int(sec_per_km / 60)
+                    p_sec = int(sec_per_km % 60)
+                    lactate_pace = f"{p_min}:{p_sec:02d}"
 
-            # B2. Pace (Speed)
-            if not lactate_pace and lactate_range_speed and isinstance(lactate_range_speed, list):
-                try:
-                    last_entry = lactate_range_speed[-1]
-                    if isinstance(last_entry, dict) and 'value' in last_entry:
-                        speed_ms = last_entry['value']
-                        
-                        # --- 10x CORRECTION LOGIC ---
-                        if speed_ms and speed_ms > 0:
-                            if speed_ms < 1.0: 
-                                speed_ms *= 10  # Correct decameters/s to m/s if needed
-                            
-                            sec_per_km = 1000 / speed_ms
-                            p_min = int(sec_per_km / 60)
-                            p_sec = int(sec_per_km % 60)
-                            lactate_pace = f"{p_min}:{p_sec:02d}"
-                except Exception as e:
-                     logger.debug(f"Parsing lactate Speed range failed: {e}")
-
-            # 3. Training Load Parsing Strategy (Prioritized for FR265)
-            # PRIORITY 1: Training Readiness (Contains 'acuteLoad' for modern devices)
-            if seven_day_load is None and readiness_data:
-                seven_day_load = self._find_training_load(readiness_data)
-
-            # PRIORITY 2: Unified Training Status (Metrics service)
-            if seven_day_load is None and training_status_modern:
+            # 2. Parse Training Load (Multiple Sources)
+            # PRIORITY 1: Modern Endpoint (metrics-service) - Most likely for FR265
+            if training_status_modern:
                 seven_day_load = self._find_training_load(training_status_modern)
-
-            # PRIORITY 3: Legacy Training Status
+            
+            # PRIORITY 2: Standard Endpoint (training-service) - Fallback
             if seven_day_load is None and training_status_std:
                 seven_day_load = self._find_training_load(training_status_std)
 
-            # PRIORITY 4: User Summary (Last resort fallback)
+            # PRIORITY 3: User Summary - Rare Fallback
             if seven_day_load is None and summary:
                 seven_day_load = self._find_training_load(summary)
 
-            # --- Extract VO2 Max (Standard) ---
+            # Extract VO2 Max (Standard)
             if training_status_std:
                 mr_vo2 = training_status_std.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
                 if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
-                
-                ts_data = training_status_std.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
-                if ts_data:
-                    for dev_data in ts_data.values():
-                        train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
-                        break
-                
-                if not lactate_bpm:
-                    mr_ts = training_status_std.get('mostRecentTrainingStatus', {})
-                    if mr_ts and 'lactateThresholdHeartRate' in mr_ts:
-                        lactate_bpm = mr_ts['lactateThresholdHeartRate']
 
             return GarminMetrics(
                 date=target_date,
@@ -473,7 +424,7 @@ class GarminClient:
                 hrv_status=hrv_status_value,
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
-                seven_day_load=seven_day_load,        # <--- NEW: Pass to Constructor
+                seven_day_load=seven_day_load,
                 lactate_threshold_bpm=lactate_bpm,
                 lactate_threshold_pace=lactate_pace,
                 training_status=train_phrase,
