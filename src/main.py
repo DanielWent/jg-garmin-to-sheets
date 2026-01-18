@@ -1,3 +1,7 @@
+{
+type: file
+fileName: src/main.py
+fullContent:
 import os
 import sys
 import csv
@@ -212,14 +216,16 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         return
 
     if output_type == 'sheets':
-        # >>> CRITICAL FIX: Ensure the file exists before the client looks for it <<<
         ensure_credentials_file_exists()
 
+        # =================================================================
+        # 1. MASTER SHEET SYNC (Existing Logic - Untouched)
+        # =================================================================
         sheets_id = profile_data.get('sheet_id')
         sheet_name = profile_data.get('sheet_name', 'Daily Summaries')
         display_name = profile_data.get('spreadsheet_name', f"ID: {sheets_id}")
 
-        logger.info(f"Initializing Google Sheets client for spreadsheet: '{display_name}'")
+        logger.info(f"Initializing Google Sheets client for Master Spreadsheet: '{display_name}'")
         try:
             sheets_client = GoogleSheetsClient(
                 credentials_path='credentials/client_secret.json',
@@ -230,13 +236,11 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             
             # --- Prune old data (retention: 1 year) ---
             sheets_client.prune_old_data(days_to_keep=365)
-            # -----------------------------------------------
-
-            # >>> NEW STEP: SORT TABS BY DATE <<<
+            
+            # --- Sort by Date ---
             sheets_client.sort_sheets()
-            # -----------------------------------
 
-            # >>> NEW LOGIC: Activity Sync to Separate Sheet <<<
+            # --- Activity Sync to Separate Sheet (Existing Logic) ---
             ACTIVITIES_SHEET_ID = "1EglkT03d_9RCPLXUay63G2b0GdyPKP62ljZa0ruEx1g"
             logger.info(f"Syncing Activities to dedicated sheet: {ACTIVITIES_SHEET_ID}")
             
@@ -248,14 +252,38 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 )
                 act_client.update_activities_tab(metrics_to_write)
                 act_client.prune_activities_tab(days_to_keep=365)
-                
-                # >>> NEW STEP: SORT ACTIVITY TABS BY DATE <<<
                 act_client.sort_sheets()
-                # --------------------------------------------
                 
             except Exception as e:
                 logger.error(f"Failed to sync activities to dedicated sheet: {e}")
-            # >>> END NEW LOGIC <<<
+
+            # =================================================================
+            # 2. GRANULAR SHEET SYNC (New Logic)
+            # =================================================================
+            SEPARATE_SHEETS_CONFIG = {
+                "Sleep Logs":         ("1irnTBkVKsmo5pi6HW_Vzt8Z2PzDb4PwgXaCTrygIg2Y", "update_sleep"),
+                "Body Composition":   ("1TQup1IRehLyBs7almknpkr6OuZr0keFBY-cJC7IUBYo", "update_body_composition"),
+                "Blood Pressure":     ("1Hg_PUGACUoAk1cJorQLOTE40oz4_UcQQwAAkd3q5skA", "update_blood_pressure"),
+                "Stress Data":        ("1r_5RImSpTK-yQtZQq0WCmuhbHS5gnU7GNok7_DkGCWs", "update_stress"),
+                "Activity Summaries": ("1SnjvPSYr0nuaHBUrr6KusMA0GAkn1_VfdTOJyUF_3No", "update_activity_summary")
+            }
+
+            for label, (sep_id, method_name) in SEPARATE_SHEETS_CONFIG.items():
+                logger.info(f"Syncing {label} to separate sheet: {sep_id}")
+                try:
+                    sep_client = GoogleSheetsClient(
+                        credentials_path='credentials/client_secret.json',
+                        spreadsheet_id=sep_id,
+                        sheet_name=label # This init argument is unused by the update methods but required by constructor
+                    )
+                    # Dynamically call the specific update method (e.g., update_sleep)
+                    getattr(sep_client, method_name)(metrics_to_write)
+                    
+                    # Clean up old data and sort
+                    sep_client.prune_old_data(days_to_keep=365)
+                    sep_client.sort_sheets()
+                except Exception as e:
+                    logger.error(f"Failed to sync {label} to separate sheet: {e}")
 
             logger.info("Google Sheets sync completed successfully!")
         
@@ -530,3 +558,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+}
