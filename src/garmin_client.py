@@ -55,6 +55,35 @@ class GarminClient:
             logger.error(f"Error fetching HRV data: {str(e)}")
             return None
 
+    def _find_training_load(self, data: Any) -> Optional[int]:
+        """Recursively search for sevenDayLoad or acuteLoad in the JSON structure."""
+        if not data:
+            return None
+        
+        # Use a stack for iterative depth-first search to avoid recursion limits
+        stack = [data]
+        while stack:
+            current = stack.pop()
+            
+            if isinstance(current, dict):
+                # Check for the keys we want
+                if 'sevenDayLoad' in current and current['sevenDayLoad'] is not None:
+                    return int(round(current['sevenDayLoad']))
+                if 'acuteLoad' in current and current['acuteLoad'] is not None:
+                    return int(round(current['acuteLoad']))
+                
+                # Push values to stack to continue searching
+                for value in current.values():
+                    if isinstance(value, (dict, list)):
+                        stack.append(value)
+            
+            elif isinstance(current, list):
+                for item in current:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+                        
+        return None
+
     async def get_metrics(self, target_date: date) -> GarminMetrics:
         if not self._authenticated:
             if self._auth_failed:
@@ -370,17 +399,10 @@ class GarminClient:
                 except Exception as e:
                      logger.debug(f"Parsing lactate Speed range failed: {e}")
 
-            # 3. Method C: Extract from Training Status (Last Resort)
+            # 3. Method C: Extract from Training Status (Robust Recursive Search)
             if training_status:
-                # --- NEW LOGIC START: Extract Training Load ---
-                # Try top level first, then nested. 
-                # Garmin often uses 'sevenDayLoad' or 'acuteLoad' interchangeably.
-                seven_day_load = training_status.get('sevenDayLoad') or training_status.get('acuteLoad')
-                
-                if not seven_day_load:
-                    mr_ts = training_status.get('mostRecentTrainingStatus', {})
-                    seven_day_load = mr_ts.get('sevenDayLoad') or mr_ts.get('acuteLoad')
-                # --- NEW LOGIC END ---
+                # Use the helper to find load anywhere in the structure
+                seven_day_load = self._find_training_load(training_status)
 
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
