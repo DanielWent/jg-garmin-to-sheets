@@ -404,6 +404,12 @@ class GarminClient:
                 # Use the helper to find load anywhere in the structure
                 seven_day_load = self._find_training_load(training_status)
 
+            # --- NEW FALLBACK ---
+            # If still None, try finding it in the User Summary (common backup location)
+            if seven_day_load is None and summary:
+                seven_day_load = self._find_training_load(summary)
+            # --------------------
+
                 mr_vo2 = training_status.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
                 if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
