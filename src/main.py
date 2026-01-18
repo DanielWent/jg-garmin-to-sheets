@@ -160,6 +160,8 @@ def aggregate_monthly_metrics(metrics: list[GarminMetrics], month_date: date) ->
         vo2max_running=get_avg("vo2max_running"),
         vo2max_cycling=get_avg("vo2max_cycling"),
         
+        seven_day_load=get_avg_int("seven_day_load"),  # <--- NEW: Monthly Avg Calculation
+
         # --- NEW: Lactate Threshold Averages ---
         lactate_threshold_bpm=get_avg_int("lactate_threshold_bpm"),
         lactate_threshold_pace=get_avg_time("lactate_threshold_pace"),
