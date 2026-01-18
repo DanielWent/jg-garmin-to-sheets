@@ -1,6 +1,6 @@
 import logging
 from typing import List, Any
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -293,13 +293,26 @@ class GoogleSheetsClient:
                     continue
                 
                 date_str = row[date_col_idx]
+                row_date = None
+                
+                # --- FIXED: Robust Date Parsing (ISO and UK format) ---
                 try:
+                    # Try standard ISO first (YYYY-MM-DD)
                     row_date = date.fromisoformat(date_str)
+                except ValueError:
+                    try:
+                        # Fallback to UK/European format (DD/MM/YYYY)
+                        row_date = datetime.strptime(date_str, "%d/%m/%Y").date()
+                    except ValueError:
+                        # If parsing fails, default to KEEPING the row to avoid data loss
+                        pass
+                
+                if row_date:
                     if row_date >= cutoff_date:
                         kept_rows.append(row)
                     else:
                         rows_removed += 1
-                except ValueError:
+                else:
                     kept_rows.append(row)
 
             if rows_removed > 0:
