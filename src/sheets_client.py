@@ -1,3 +1,7 @@
+{
+type: file
+fileName: src/sheets_client.py
+fullContent:
 import logging
 from typing import List, Any
 from datetime import date, timedelta
@@ -80,10 +84,8 @@ class GoogleSheetsClient:
                 body={'values': [headers]}
             ).execute()
 
-    def update_metrics(self, metrics: List[GarminMetrics]):
-        """Updates the daily metric tabs (Sleep, Stress, Body, BP, Summary)."""
-        all_sheets_properties = self._get_spreadsheet_details()
-        
+    def _filter_historical_metrics(self, metrics: List[GarminMetrics]):
+        """Returns metrics excluding today's date (for Stress/Summary data)."""
         today = date.today()
         metrics_historical = []
         for m in metrics:
@@ -95,6 +97,51 @@ class GoogleSheetsClient:
                     pass
             if m_date != today:
                 metrics_historical.append(m)
+        return metrics_historical
+
+    # --- NEW: Granular Update Methods for Distinct Spreadsheets ---
+    
+    def update_sleep(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Sleep Data tab."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        self._ensure_tab_exists(self.sleep_tab_name, SLEEP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.sleep_tab_name, SLEEP_HEADERS, metrics)
+
+    def update_stress(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Stress Data tab (historical only)."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        metrics_hist = self._filter_historical_metrics(metrics)
+        self._ensure_tab_exists(self.stress_tab_name, STRESS_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.stress_tab_name, STRESS_HEADERS, metrics_hist)
+
+    def update_body_composition(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Body Composition tab."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        self._ensure_tab_exists(self.body_tab_name, BODY_COMP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.body_tab_name, BODY_COMP_HEADERS, metrics)
+
+    def update_blood_pressure(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Blood Pressure tab."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        self._ensure_tab_exists(self.bp_tab_name, BP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.bp_tab_name, BP_HEADERS, metrics)
+
+    def update_activity_summary(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Activity Summary tab (historical only)."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        metrics_hist = self._filter_historical_metrics(metrics)
+        self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_hist)
+    
+    # -------------------------------------------------------------
+
+    def update_metrics(self, metrics: List[GarminMetrics]):
+        """
+        Updates ALL daily metric tabs.
+        Used for the Master Spreadsheet.
+        """
+        all_sheets_properties = self._get_spreadsheet_details()
+        metrics_historical = self._filter_historical_metrics(metrics)
 
         self._ensure_tab_exists(self.sleep_tab_name, SLEEP_HEADERS, all_sheets_properties)
         self._update_sheet_generic(self.sleep_tab_name, SLEEP_HEADERS, metrics)
@@ -110,8 +157,6 @@ class GoogleSheetsClient:
 
         self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
         self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_historical)
-
-        # Removed: Activities update (now handled separately)
 
     def update_activities_tab(self, metrics: List[GarminMetrics]):
         """Updates ONLY the 'List of Tracked Activities' tab."""
@@ -207,9 +252,13 @@ class GoogleSheetsClient:
             ).execute()
 
     def prune_old_data(self, days_to_keep: int = 365):
-        """Removes rows older than the retention period from managed sheets (excluding activities)."""
+        """Removes rows older than the retention period from managed sheets (if they exist)."""
         cutoff_date = date.today() - timedelta(days=days_to_keep)
         logger.info(f"Pruning data older than {cutoff_date.isoformat()}...")
+
+        # Get list of actual sheets in the spreadsheet first to avoid 404s on single-purpose sheets
+        all_sheets = self._get_spreadsheet_details()
+        existing_titles = {s['properties']['title'] for s in all_sheets}
 
         sheet_configs = [
             (self.sleep_tab_name, 0),
@@ -217,11 +266,11 @@ class GoogleSheetsClient:
             (self.body_tab_name, 0),
             (self.bp_tab_name, 0),
             (self.activity_sum_tab_name, 0),
-            # Activities removed from here
         ]
 
         for tab_name, date_col_idx in sheet_configs:
-            self._prune_single_sheet(tab_name, date_col_idx, cutoff_date)
+            if tab_name in existing_titles:
+                self._prune_single_sheet(tab_name, date_col_idx, cutoff_date)
 
     def prune_activities_tab(self, days_to_keep: int = 365):
         """Removes rows older than the retention period from the activities sheet."""
@@ -290,8 +339,6 @@ class GoogleSheetsClient:
             all_sheets_metadata = self._get_spreadsheet_details()
             
             # 2. Define the managed tabs and which column is "Date" (0-indexed)
-            # Most daily metrics have Date at col 0. 
-            # "List of Tracked Activities" has 'Activity ID' at 0, 'Date' at 1.
             managed_tabs = {
                 self.sleep_tab_name: 0,
                 self.stress_tab_name: 0,
@@ -307,16 +354,13 @@ class GoogleSheetsClient:
                 title = sheet_meta['properties']['title']
                 sheet_id = sheet_meta['properties']['sheetId']
                 
-                # If this is one of our managed tabs, we queue a sort request
                 if title in managed_tabs:
                     date_col_idx = managed_tabs[title]
-                    
                     requests.append({
                         "sortRange": {
                             "range": {
                                 "sheetId": sheet_id,
-                                "startRowIndex": 1,  # Skip header row (row 1)
-                                # End row index omitted => sorts to the bottom
+                                "startRowIndex": 1,
                             },
                             "sortSpecs": [
                                 {
@@ -339,3 +383,4 @@ class GoogleSheetsClient:
 
         except Exception as e:
             logger.error(f"Failed to sort sheets: {e}")
+}
