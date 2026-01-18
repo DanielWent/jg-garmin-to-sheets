@@ -33,8 +33,9 @@ class GarminMetrics:
     hrv_status: Optional[str] = None
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
-    lactate_threshold_bpm: Optional[int] = None   # <--- NEW
-    lactate_threshold_pace: Optional[str] = None  # <--- NEW
+    seven_day_load: Optional[int] = None          # <--- NEW: Training Load
+    lactate_threshold_bpm: Optional[int] = None
+    lactate_threshold_pace: Optional[str] = None
     training_status: Optional[str] = None
     active_calories: Optional[int] = None
     resting_calories: Optional[int] = None
@@ -76,6 +77,7 @@ BP_HEADERS = [
 ACTIVITY_SUMMARY_HEADERS = [
     "Date",
     "Daily Intensity Minutes",
+    "7-Day Training Load",                        # <--- NEW: Column Header
     "Steps", "Floors Climbed", 
     "VO2 Max Running", "Lactate Threshold HR", "Lactate Threshold Pace"
 ]
@@ -120,6 +122,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic",
     "VO2 Max Running": "vo2max_running",
     "VO2 Max Cycling": "vo2max_cycling",
+    "7-Day Training Load": "seven_day_load",      # <--- NEW: Mapping
     "Lactate Threshold HR": "lactate_threshold_bpm",
     "Lactate Threshold Pace": "lactate_threshold_pace",
     # REMOVED: "Training Status Phase": "training_status",
