@@ -2,47 +2,143 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import List, Optional, Any, Dict
 
-# ... (Previous imports and logging config)
+# -----------------------------------------------------------------------------
+# 1. GOOGLE SHEETS HEADERS (The columns in your spreadsheet)
+# -----------------------------------------------------------------------------
 
-# Updated Headers
-STRESS_HEADERS = [
-    "Date", "Stress Level", "Rest Stress Duration", "Low Stress Duration", 
-    "Medium Stress Duration", "High Stress Duration", 
-    "Body Battery Max", "Body Battery Min"  # <--- NEW
+# Main "Daily Summaries" Sheet
+HEADERS = [
+    "Date", "Sleep Score", "Sleep Duration (hr)", "Sleep Need (hr)", "Sleep Efficiency (%)",
+    "Resting HR", "HRV (ms)", "Stress Avg", "Training Status", "VO2 Max (Run)", "7-Day Load",
+    "Steps", "Active Calories", "Weight (kg)", "Body Fat (%)"
 ]
 
-# ... (Body Comp and Sleep Headers remain unchanged) ...
+# Separate "Sleep Logs" Sheet
+SLEEP_HEADERS = [
+    "Date", "Sleep Score", "Duration (min)", "Start Time", "End Time",
+    "Deep (min)", "Light (min)", "REM (min)", "Awake (min)",
+    "Restlessness", "Avg Respiration", "Avg SpO2"
+]
 
+# Separate "Body Composition" Sheet
+BODY_HEADERS = [
+    "Date", "Weight (kg)", "BMI", "Body Fat (%)", "Skeletal Muscle (kg)", 
+    "Bone Mass (kg)", "Water (%)"
+]
+
+# Separate "Blood Pressure" Sheet
+BP_HEADERS = [
+    "Date", "Systolic", "Diastolic", "Pulse", "Notes"
+]
+
+# Separate "Stress Data" Sheet
+STRESS_HEADERS = [
+    "Date", "Stress Level", "Rest Stress Duration", "Low Stress Duration", 
+    "Medium Stress Duration", "High Stress Duration",
+    "Body Battery Max", "Body Battery Min"
+]
+
+# Separate "Activities" Sheet
 ACTIVITIES_HEADERS = [
     "Activity ID", "Date", "Time", "Type", "Name", "Distance (km)", "Duration (min)",
     "Avg Pace (min/km)", "Avg HR", "Max HR", "Calories", 
     "Avg Cadence (spm)", "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE",
-    "Avg Power", "GCT (ms)", "Vert Osc (cm)", "Stride Len (m)",  # <--- NEW METRICS
-    "Zone 1 (min)", "Zone 2 (min)", "Zone 3 (min)", "Zone 4 (min)", "Zone 5 (min)" # <--- NEW ZONES
+    "Avg Power", "GCT (ms)", "Vert Osc (cm)", "Stride Len (m)",
+    "Zone 1 (min)", "Zone 2 (min)", "Zone 3 (min)", "Zone 4 (min)", "Zone 5 (min)"
 ]
 
-# Map headers to GarminMetrics attributes or dictionary keys
-# This map helps the Sheets client know where to pull data from
+
+# -----------------------------------------------------------------------------
+# 2. INTERNAL DATA MODEL (Maps API data to Python Objects)
+# -----------------------------------------------------------------------------
+
+# Map headers to attribute names in GarminMetrics for CSV/generic export
 HEADER_TO_ATTRIBUTE_MAP = {
-    # ... (Existing mappings) ...
+    "Date": "date",
+    "Sleep Score": "sleep_score",
+    "Sleep Duration (hr)": "sleep_length_hours", # derived property
+    "Sleep Need (hr)": "sleep_need_hours",       # derived property
+    "Sleep Efficiency (%)": "sleep_efficiency",
+    "Resting HR": "resting_heart_rate",
+    "HRV (ms)": "overnight_hrv",
+    "Stress Avg": "average_stress",
+    "Training Status": "training_status",
+    "VO2 Max (Run)": "vo2max_running",
+    "7-Day Load": "seven_day_load",
+    "Steps": "steps",
+    "Active Calories": "active_calories",
+    "Weight (kg)": "weight",
+    "Body Fat (%)": "body_fat",
+    
+    # Stress Sheet Mappings
+    "Stress Level": "average_stress",
+    "Rest Stress Duration": "rest_stress_duration",
+    "Low Stress Duration": "low_stress_duration",
+    "Medium Stress Duration": "medium_stress_duration",
+    "High Stress Duration": "high_stress_duration",
     "Body Battery Max": "body_battery_max",
-    "Body Battery Min": "body_battery_min",
-    # Note: Activities are usually a list of dicts, so they are handled dynamically, 
-    # but we define them here for completeness if needed by your CSV logic
+    "Body Battery Min": "body_battery_min"
 }
 
 @dataclass
 class GarminMetrics:
     date: date
-    # ... (Existing fields) ...
     
-    # Body Battery
+    # Sleep
+    sleep_score: Optional[int] = None
+    sleep_need: Optional[int] = None        # minutes
+    sleep_efficiency: Optional[int] = None
+    sleep_length: Optional[int] = None      # minutes
+    sleep_start_time: Optional[str] = None
+    sleep_end_time: Optional[str] = None
+    sleep_deep: Optional[int] = None        # minutes
+    sleep_light: Optional[int] = None       # minutes
+    sleep_rem: Optional[int] = None         # minutes
+    sleep_awake: Optional[int] = None       # minutes
+    overnight_respiration: Optional[float] = None
+    overnight_pulse_ox: Optional[float] = None
+    
+    # Body / Health
+    weight: Optional[float] = None
+    bmi: Optional[float] = None
+    body_fat: Optional[float] = None
+    blood_pressure_systolic: Optional[int] = None
+    blood_pressure_diastolic: Optional[int] = None
+    resting_heart_rate: Optional[int] = None
+    
+    # Stress & Battery
+    average_stress: Optional[int] = None
+    rest_stress_duration: Optional[int] = None
+    low_stress_duration: Optional[int] = None
+    medium_stress_duration: Optional[int] = None
+    high_stress_duration: Optional[int] = None
     body_battery_max: Optional[int] = None
     body_battery_min: Optional[int] = None
+
+    # HRV & Training
+    overnight_hrv: Optional[int] = None     # ms
+    hrv_status: Optional[str] = None
+    vo2max_running: Optional[float] = None
+    vo2max_cycling: Optional[float] = None
+    seven_day_load: Optional[int] = None
+    training_status: Optional[str] = None   # e.g., "Productive"
+    lactate_threshold_bpm: Optional[int] = None
+    lactate_threshold_pace: Optional[str] = None # "MM:SS"
+
+    # Daily Activity
+    active_calories: Optional[int] = None
+    resting_calories: Optional[int] = None
+    intensity_minutes: Optional[int] = None
+    steps: Optional[int] = None
+    floors_climbed: Optional[float] = None
     
-    # ... (Existing fields) ...
-    
-    # Activities is a list of dicts, so the new fields will be keys inside these dicts
+    # List of detailed activities (runs, swims, etc.)
     activities: List[Dict[str, Any]] = field(default_factory=list)
 
-# ... (Rest of the file)
+    @property
+    def sleep_length_hours(self):
+        return round(self.sleep_length / 60, 1) if self.sleep_length else None
+
+    @property
+    def sleep_need_hours(self):
+        return round(self.sleep_need / 60, 1) if self.sleep_need else None
