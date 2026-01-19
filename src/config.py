@@ -2,10 +2,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import List, Optional, Any, Dict
 
-# -----------------------------------------------------------------------------
-# 1. GOOGLE SHEETS HEADERS
-# -----------------------------------------------------------------------------
-
 # Main "Daily Summaries" Sheet
 HEADERS = [
     "Date (YYYY-MM-DD)", 
@@ -101,16 +97,9 @@ ACTIVITY_HEADERS = [
     "HR Zone 5 (min)"
 ]
 
-# For the generic summary tab (if used)
 ACTIVITY_SUMMARY_HEADERS = HEADERS
 
-# -----------------------------------------------------------------------------
-# 2. INTERNAL DATA MODEL
-# -----------------------------------------------------------------------------
-
-# Map headers to attribute names in GarminMetrics
 HEADER_TO_ATTRIBUTE_MAP = {
-    # Main Sheet
     "Date (YYYY-MM-DD)": "date",
     "Sleep Score (0-100)": "sleep_score",
     "Total Sleep (hr)": "sleep_length_hours",
@@ -127,7 +116,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Weight (kg)": "weight",
     "Body Fat (%)": "body_fat",
     
-    # Sleep Sheet
     "Total Sleep (min)": "sleep_length",
     "Bedtime (HH:MM)": "sleep_start_time",
     "Wake Time (HH:MM)": "sleep_end_time",
@@ -135,23 +123,20 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Light Sleep (min)": "sleep_light",
     "REM Sleep (min)": "sleep_rem",
     "Awake Time (min)": "sleep_awake",
-    "Restlessness (x)": "sleep_restlessness", # Note: Placeholder in client
+    "Restlessness (x)": "sleep_restlessness", 
     "Avg Respiration (brpm)": "overnight_respiration",
     "Avg SpO2 (%)": "overnight_pulse_ox",
 
-    # Body Sheet
     "BMI": "bmi",
-    "Skeletal Muscle (kg)": "skeletal_muscle", # Placeholder
-    "Bone Mass (kg)": "bone_mass",             # Placeholder
-    "Water (%)": "body_water",                 # Placeholder
+    "Skeletal Muscle (kg)": "skeletal_muscle", 
+    "Bone Mass (kg)": "bone_mass",             
+    "Water (%)": "body_water",                 
 
-    # BP Sheet
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
-    "Pulse (bpm)": "blood_pressure_pulse",     # Placeholder
-    "Notes": "blood_pressure_notes",           # Placeholder
+    "Pulse (bpm)": "blood_pressure_pulse",     
+    "Notes": "blood_pressure_notes",           
 
-    # Stress Sheet
     "Rest Stress Total (s)": "rest_stress_duration",
     "Low Stress Total (s)": "low_stress_duration",
     "Med Stress Total (s)": "medium_stress_duration",
@@ -164,38 +149,34 @@ HEADER_TO_ATTRIBUTE_MAP = {
 class GarminMetrics:
     date: date
     
-    # Sleep
     sleep_score: Optional[int] = None
-    sleep_need: Optional[int] = None        # minutes
+    sleep_need: Optional[int] = None        
     sleep_efficiency: Optional[int] = None
-    sleep_length: Optional[int] = None      # minutes
+    sleep_length: Optional[int] = None      
     sleep_start_time: Optional[str] = None
     sleep_end_time: Optional[str] = None
-    sleep_deep: Optional[int] = None        # minutes
-    sleep_light: Optional[int] = None       # minutes
-    sleep_rem: Optional[int] = None         # minutes
-    sleep_awake: Optional[int] = None       # minutes
+    sleep_deep: Optional[int] = None        
+    sleep_light: Optional[int] = None       
+    sleep_rem: Optional[int] = None         
+    sleep_awake: Optional[int] = None       
     overnight_respiration: Optional[float] = None
     overnight_pulse_ox: Optional[float] = None
-    sleep_restlessness: Optional[Any] = None # Placeholder
+    sleep_restlessness: Optional[Any] = None 
     
-    # Body / Health
     weight: Optional[float] = None
     bmi: Optional[float] = None
     body_fat: Optional[float] = None
-    skeletal_muscle: Optional[float] = None # Placeholder
-    bone_mass: Optional[float] = None       # Placeholder
-    body_water: Optional[float] = None      # Placeholder
+    skeletal_muscle: Optional[float] = None 
+    bone_mass: Optional[float] = None       
+    body_water: Optional[float] = None      
     
-    # Blood Pressure
     blood_pressure_systolic: Optional[int] = None
     blood_pressure_diastolic: Optional[int] = None
-    blood_pressure_pulse: Optional[int] = None # Placeholder
-    blood_pressure_notes: Optional[str] = None # Placeholder
+    blood_pressure_pulse: Optional[int] = None 
+    blood_pressure_notes: Optional[str] = None 
     
     resting_heart_rate: Optional[int] = None
     
-    # Stress & Battery
     average_stress: Optional[int] = None
     rest_stress_duration: Optional[int] = None
     low_stress_duration: Optional[int] = None
@@ -204,8 +185,7 @@ class GarminMetrics:
     body_battery_max: Optional[int] = None
     body_battery_min: Optional[int] = None
 
-    # HRV & Training
-    overnight_hrv: Optional[int] = None     # ms
+    overnight_hrv: Optional[int] = None     
     hrv_status: Optional[str] = None
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
@@ -214,14 +194,12 @@ class GarminMetrics:
     lactate_threshold_bpm: Optional[int] = None
     lactate_threshold_pace: Optional[str] = None
 
-    # Daily Activity
     active_calories: Optional[int] = None
     resting_calories: Optional[int] = None
     intensity_minutes: Optional[int] = None
     steps: Optional[int] = None
     floors_climbed: Optional[float] = None
     
-    # List of detailed activities (runs, swims, etc.)
     activities: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
