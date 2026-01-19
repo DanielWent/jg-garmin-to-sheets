@@ -32,13 +32,6 @@ jobs:
       run: |
         pip install -r requirements.txt
 
-    # NEW STEP: Force the script to log everything (DEBUG level)
-    # This reveals the hidden "Direct Lactate fetch failed" messages
-    - name: Enable Debug Logging
-      run: |
-        sed -i 's/logging.INFO/logging.DEBUG/g' src/main.py
-        echo "Logging level patched to DEBUG."
-
     # UPDATED STEP: Run with logic to handle manual dates and capture logs
     - name: Run Sync Script with Logging
       env:
@@ -47,8 +40,9 @@ jobs:
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
         PYTHONUNBUFFERED: "1" # Ensures logs are flushed immediately
+        LOG_LEVEL: "DEBUG"    # <--- NEW: Set log level cleanly via env var
       run: |
-        # Check if manual dates were provided via workflow_dispatch
+        # Check if manual inputs were provided (from workflow_dispatch)
         if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
           echo "🛠️ DEBUG MODE: Running manual sync from ${{ inputs.start_date }} to ${{ inputs.end_date }}..."
           # Run CLI mode with the provided dates, piping output to console AND a file
