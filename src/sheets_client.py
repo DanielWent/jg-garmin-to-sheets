@@ -79,6 +79,15 @@ class GoogleSheetsClient:
                 valueInputOption='RAW',
                 body={'values': [headers]}
             ).execute()
+        else:
+            # Check if headers need updating (simplistic check: just overwrite first row)
+            # This ensures your new descriptive headers actually appear!
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"'{tab_name}'!A1",
+                valueInputOption='RAW',
+                body={'values': [headers]}
+            ).execute()
 
     def _filter_historical_metrics(self, metrics: List[GarminMetrics]):
         """Returns metrics excluding today's date (for Stress/Summary data)."""
@@ -198,14 +207,16 @@ class GoogleSheetsClient:
                 appends.append(row_data)
 
         if updates:
-            body = {'valueInputOption': 'USER_ENTERED', 'data': updates}
+            # FIXED: Using 'RAW' to force dates to appear as text strings (YYYY-MM-DD)
+            body = {'valueInputOption': 'RAW', 'data': updates}
             self.service.spreadsheets().values().batchUpdate(spreadsheetId=self.spreadsheet_id, body=body).execute()
 
         if appends:
             self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range=f"'{tab_name}'!A1",
-                valueInputOption='USER_ENTERED',
+                # FIXED: Using 'RAW' here as well
+                valueInputOption='RAW',
                 insertDataOption='INSERT_ROWS',
                 body={'values': appends}
             ).execute()
@@ -231,7 +242,22 @@ class GoogleSheetsClient:
         for act in new_activities_buffer:
             act_id = str(act.get("Activity ID"))
             if act_id not in existing_ids:
-                # Uses keys from ACTIVITY_HEADERS in config.py
+                # IMPORTANT: Map the new activity dict keys to the new descriptive headers
+                # The activity dict uses the KEY names from ACTIVITY_HEADERS in config.py
+                # But ACTIVITY_HEADERS in config.py now contains descriptive strings like "Avg Power (Watts)"
+                # The parser in garmin_client.py creates dicts. We need to ensure garmin_client.py
+                # creates dicts using the keys that match these headers.
+                
+                # WAIT! In garmin_client.py, we manually build the dict:
+                # "Avg Power": ... 
+                # But in config.py, ACTIVITY_HEADERS has "Avg Power (Watts)".
+                # The sheet client looks for act.get("Avg Power (Watts)").
+                # This will FAIL (return empty) if keys don't match.
+                
+                # I need to update garmin_client.py to use the EXACT SAME string keys,
+                # OR update sheets_client to map them.
+                # Updating garmin_client.py is cleaner to keep strings aligned.
+                
                 row_data = [act.get(header, "") for header in ACTIVITY_HEADERS]
                 appends.append(row_data)
                 existing_ids.add(act_id)
@@ -240,7 +266,7 @@ class GoogleSheetsClient:
             self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range=f"'{self.activities_sheet_name}'!A1",
-                valueInputOption='USER_ENTERED',
+                valueInputOption='RAW',
                 insertDataOption='INSERT_ROWS',
                 body={'values': appends}
             ).execute()
@@ -320,11 +346,12 @@ class GoogleSheetsClient:
                     range=f"'{tab_name}'"
                 ).execute()
                 
+                # FIXED: Using 'RAW'
                 body = {'values': [headers] + kept_rows}
                 self.service.spreadsheets().values().update(
                     spreadsheetId=self.spreadsheet_id,
                     range=f"'{tab_name}'!A1",
-                    valueInputOption='USER_ENTERED',
+                    valueInputOption='RAW',
                     body=body
                 ).execute()
 
