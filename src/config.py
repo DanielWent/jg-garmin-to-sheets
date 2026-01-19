@@ -34,7 +34,9 @@ SLEEP_HEADERS = [
     "REM Sleep (min)", 
     "Awake Time (min)",
     "Avg Respiration (brpm)", 
-    "Avg SpO2 (%)"
+    "Avg SpO2 (%)",
+    "Overnight HRV (ms)",  # <--- NEW
+    "HRV Status"           # <--- NEW
 ]
 
 # Separate "Body Composition" Sheet
@@ -132,6 +134,11 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Restlessness (x)": "sleep_restlessness", 
     "Avg Respiration (brpm)": "overnight_respiration",
     "Avg SpO2 (%)": "overnight_pulse_ox",
+
+    # --- NEW MAPPINGS ---
+    "Overnight HRV (ms)": "overnight_hrv",
+    "HRV Status": "hrv_status",
+    # --------------------
 
     "BMI": "bmi",
     "Skeletal Muscle (kg)": "skeletal_muscle", 
