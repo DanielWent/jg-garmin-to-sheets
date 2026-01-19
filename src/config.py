@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import List, Optional, Any, Dict
 
-# Main "Daily Summaries" Sheet
+# Main "Daily Summaries" Sheet (kept as reference for HEADERS, though user only requested changes to specific sheets)
 HEADERS = [
     "Date (YYYY-MM-DD)", 
     "Sleep Score (0-100)", 
@@ -32,7 +32,6 @@ SLEEP_HEADERS = [
     "Light Sleep (min)", 
     "REM Sleep (min)", 
     "Awake Time (min)",
-    "Restlessness (x)", 
     "Avg Respiration (brpm)", 
     "Avg SpO2 (%)"
 ]
@@ -42,19 +41,14 @@ BODY_COMP_HEADERS = [
     "Date (YYYY-MM-DD)", 
     "Weight (kg)", 
     "BMI", 
-    "Body Fat (%)", 
-    "Skeletal Muscle (kg)", 
-    "Bone Mass (kg)", 
-    "Water (%)"
+    "Body Fat (%)"
 ]
 
 # Separate "Blood Pressure" Sheet
 BP_HEADERS = [
     "Date (YYYY-MM-DD)", 
     "Systolic (mmHg)", 
-    "Diastolic (mmHg)", 
-    "Pulse (bpm)", 
-    "Notes"
+    "Diastolic (mmHg)"
 ]
 
 # Separate "Stress Data" Sheet
@@ -75,7 +69,6 @@ ACTIVITY_HEADERS = [
     "Date (YYYY-MM-DD)", 
     "Start Time (HH:MM)", 
     "Activity Type", 
-    "Activity Name", 
     "Distance (km)", 
     "Duration (min)",
     "Avg Pace (min/km)", 
@@ -97,7 +90,18 @@ ACTIVITY_HEADERS = [
     "HR Zone 5 (min)"
 ]
 
-ACTIVITY_SUMMARY_HEADERS = HEADERS
+# Modified Activity Summary Headers
+ACTIVITY_SUMMARY_HEADERS = [
+    "Date (YYYY-MM-DD)",
+    "VO2 Max Run (ml/kg/min)", 
+    "Training Load (7-Day Sum)",
+    "Daily Steps (count)", 
+    "Active Calories (kcal)",
+    "Floors Climbed",
+    "Daily Intensity Minutes",
+    "Lactate Threshold HR (bpm)",
+    "Lactate Threshold pace (mm:ss / km)"
+]
 
 HEADER_TO_ATTRIBUTE_MAP = {
     "Date (YYYY-MM-DD)": "date",
@@ -142,7 +146,13 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Med Stress Total (s)": "medium_stress_duration",
     "High Stress Total (s)": "high_stress_duration",
     "Body Battery Max (0-100)": "body_battery_max",
-    "Body Battery Min (0-100)": "body_battery_min"
+    "Body Battery Min (0-100)": "body_battery_min",
+
+    # New Mappings for Activity Summary
+    "Floors Climbed": "floors_climbed",
+    "Daily Intensity Minutes": "intensity_minutes",
+    "Lactate Threshold HR (bpm)": "lactate_threshold_bpm",
+    "Lactate Threshold pace (mm:ss / km)": "lactate_threshold_pace"
 }
 
 @dataclass
