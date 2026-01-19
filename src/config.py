@@ -26,6 +26,7 @@ SLEEP_HEADERS = [
     "Date (YYYY-MM-DD)", 
     "Sleep Score (0-100)", 
     "Total Sleep (min)", 
+    "Sleep Need (min)", 
     "Bedtime (HH:MM)", 
     "Wake Time (HH:MM)",
     "Deep Sleep (min)", 
@@ -121,6 +122,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Body Fat (%)": "body_fat",
     
     "Total Sleep (min)": "sleep_length",
+    "Sleep Need (min)": "sleep_need",
     "Bedtime (HH:MM)": "sleep_start_time",
     "Wake Time (HH:MM)": "sleep_end_time",
     "Deep Sleep (min)": "sleep_deep",
