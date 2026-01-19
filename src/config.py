@@ -3,7 +3,7 @@ from datetime import date
 from typing import List, Optional, Any, Dict
 
 # -----------------------------------------------------------------------------
-# 1. GOOGLE SHEETS HEADERS (The columns in your spreadsheet)
+# 1. GOOGLE SHEETS HEADERS
 # -----------------------------------------------------------------------------
 
 # Main "Daily Summaries" Sheet
@@ -21,7 +21,7 @@ SLEEP_HEADERS = [
 ]
 
 # Separate "Body Composition" Sheet
-BODY_HEADERS = [
+BODY_COMP_HEADERS = [
     "Date", "Weight (kg)", "BMI", "Body Fat (%)", "Skeletal Muscle (kg)", 
     "Bone Mass (kg)", "Water (%)"
 ]
@@ -32,14 +32,16 @@ BP_HEADERS = [
 ]
 
 # Separate "Stress Data" Sheet
+# UPDATED: Added Body Battery Max/Min
 STRESS_HEADERS = [
     "Date", "Stress Level", "Rest Stress Duration", "Low Stress Duration", 
     "Medium Stress Duration", "High Stress Duration",
     "Body Battery Max", "Body Battery Min"
 ]
 
-# Separate "Activities" Sheet
-ACTIVITIES_HEADERS = [
+# Separate "List of Tracked Activities" Sheet
+# UPDATED: Added Power, Run Dynamics, and HR Zones
+ACTIVITY_HEADERS = [
     "Activity ID", "Date", "Time", "Type", "Name", "Distance (km)", "Duration (min)",
     "Avg Pace (min/km)", "Avg HR", "Max HR", "Calories", 
     "Avg Cadence (spm)", "Elevation Gain (m)", "Aerobic TE", "Anaerobic TE",
@@ -47,17 +49,19 @@ ACTIVITIES_HEADERS = [
     "Zone 1 (min)", "Zone 2 (min)", "Zone 3 (min)", "Zone 4 (min)", "Zone 5 (min)"
 ]
 
+# For the generic summary tab (if used)
+ACTIVITY_SUMMARY_HEADERS = HEADERS
 
 # -----------------------------------------------------------------------------
-# 2. INTERNAL DATA MODEL (Maps API data to Python Objects)
+# 2. INTERNAL DATA MODEL
 # -----------------------------------------------------------------------------
 
-# Map headers to attribute names in GarminMetrics for CSV/generic export
+# Map headers to attribute names in GarminMetrics
 HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
     "Sleep Score": "sleep_score",
-    "Sleep Duration (hr)": "sleep_length_hours", # derived property
-    "Sleep Need (hr)": "sleep_need_hours",       # derived property
+    "Sleep Duration (hr)": "sleep_length_hours",
+    "Sleep Need (hr)": "sleep_need_hours",
     "Sleep Efficiency (%)": "sleep_efficiency",
     "Resting HR": "resting_heart_rate",
     "HRV (ms)": "overnight_hrv",
@@ -121,9 +125,9 @@ class GarminMetrics:
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
     seven_day_load: Optional[int] = None
-    training_status: Optional[str] = None   # e.g., "Productive"
+    training_status: Optional[str] = None
     lactate_threshold_bpm: Optional[int] = None
-    lactate_threshold_pace: Optional[str] = None # "MM:SS"
+    lactate_threshold_pace: Optional[str] = None
 
     # Daily Activity
     active_calories: Optional[int] = None
