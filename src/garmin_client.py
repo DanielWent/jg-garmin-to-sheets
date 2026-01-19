@@ -107,6 +107,24 @@ class GarminClient:
                 logger.debug(f"Direct fetch for {name} failed: {e}")
                 return None
 
+        # --- Lactate Threshold (Specific Date Fetch) ---
+        async def get_lactate_direct():
+            try:
+                # Request data strictly for the single target day
+                # We use the Range endpoint but set start=target and end=target
+                url_hr = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
+                url_pace = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
+                
+                hr_data, pace_data = await asyncio.gather(
+                    asyncio.get_event_loop().run_in_executor(None, self.client.connectapi, url_hr),
+                    asyncio.get_event_loop().run_in_executor(None, self.client.connectapi, url_pace)
+                )
+                
+                return {"hr_list": hr_data, "pace_list": pace_data}
+            except Exception as e:
+                logger.debug(f"Could not fetch Lactate for {target_date}: {e}")
+                return None
+
         try:
             target_iso = target_date.isoformat()
             loop = asyncio.get_event_loop()
@@ -122,7 +140,9 @@ class GarminClient:
             
             modern_url = f"metrics-service/metrics/trainingstatus/aggregated/{target_iso}"
             c_training_modern = direct_fetch("Training Status (Modern)", modern_url)
-            c_lactate_direct = safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
+            
+            # UPDATED: Use the specific date fetcher
+            c_lactate_direct = get_lactate_direct()
 
             # 2. Execute Parallel Fetch
             results = await asyncio.gather(
@@ -403,18 +423,38 @@ class GarminClient:
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
+            
+            # --- UPDATED PARSE LACTATE DATA (Day Specific) ---
             lactate_bpm = None
             lactate_pace = None
-            seven_day_load = None
+            
+            if lactate_data:
+                # 1. Parse Heart Rate
+                hr_list = lactate_data.get("hr_list", [])
+                if hr_list and isinstance(hr_list, list):
+                    for entry in hr_list:
+                        # Ensure the data belongs to this specific date
+                        if entry.get('calendarDate') == target_iso:
+                            lactate_bpm = entry.get('value')
+                            break # Found the entry for today
 
-            if lactate_data and isinstance(lactate_data, dict):
-                lactate_bpm = lactate_data.get('heartRate')
-                speed_ms = lactate_data.get('speed')
-                if speed_ms and speed_ms > 0:
-                    sec_per_km = 1000 / speed_ms
-                    p_min = int(sec_per_km / 60)
-                    p_sec = int(sec_per_km % 60)
-                    lactate_pace = f"{p_min}:{p_sec:02d}"
+                # 2. Parse Pace (Speed)
+                pace_list = lactate_data.get("pace_list", [])
+                if pace_list and isinstance(pace_list, list):
+                    for entry in pace_list:
+                        if entry.get('calendarDate') == target_iso:
+                            speed_mps = entry.get('value') # meters/second
+                            
+                            if speed_mps and speed_mps > 0:
+                                try:
+                                    # Convert m/s to min/km
+                                    seconds_per_km = 1000 / speed_mps
+                                    minutes = int(seconds_per_km // 60)
+                                    seconds = int(seconds_per_km % 60)
+                                    lactate_pace = f"{minutes}:{seconds:02d} / km"
+                                except Exception:
+                                    lactate_pace = None
+                            break
 
             if training_status_modern:
                 seven_day_load = self._find_training_load(training_status_modern)
