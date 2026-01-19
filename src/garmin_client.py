@@ -57,36 +57,23 @@ class GarminClient:
             return None
 
     def _find_training_load(self, data: Any) -> Optional[int]:
-        """
-        Recursively search for Training Load keys.
-        Prioritizes 'dailyTrainingLoadAcute' (FR265) -> 'acuteLoad' -> 'sevenDayLoad' (Legacy).
-        """
         if not data:
             return None
         
-        # Use a stack for iterative depth-first search
         stack = [data]
         while stack:
             current = stack.pop()
             
             if isinstance(current, dict):
-                # 1. Check for Daily Acute Load (Specific to FR265/Modern FW)
                 if 'dailyTrainingLoadAcute' in current and current['dailyTrainingLoadAcute'] is not None:
                     return int(round(current['dailyTrainingLoadAcute']))
-
-                # 2. Check for Acute Load (Newer Devices)
                 if 'acuteLoad' in current and current['acuteLoad'] is not None:
                     return int(round(current['acuteLoad']))
-                
-                # 3. Check for 7-Day Load (Older Devices)
                 if 'sevenDayLoad' in current and current['sevenDayLoad'] is not None:
                     return int(round(current['sevenDayLoad']))
-
-                # 4. Check for timeInZoneLoad (Rare fallback)
                 if 'timeInZoneLoad' in current and current['timeInZoneLoad'] is not None:
                      return int(round(current['timeInZoneLoad']))
                 
-                # Push values to stack to continue searching
                 for value in current.values():
                     if isinstance(value, (dict, list)):
                         stack.append(value)
@@ -104,7 +91,6 @@ class GarminClient:
                 raise Exception("Authentication previously failed.")
             await self.authenticate()
 
-        # --- HELPER: Parallel Fetch Wrapper ---
         async def safe_fetch(name, coro):
             try:
                 return await coro
@@ -112,15 +98,12 @@ class GarminClient:
                 logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
                 return None
 
-        # --- HELPER: Direct API Fetch (For Modern Endpoints) ---
         async def direct_fetch(name, endpoint):
             try:
-                # Use the client's internal connectapi method to hit arbitrary URLs
                 return await asyncio.get_event_loop().run_in_executor(
                     None, self.client.connectapi, endpoint
                 )
             except Exception as e:
-                # Debug logging only, to avoid clutter
                 logger.debug(f"Direct fetch for {name} failed: {e}")
                 return None
 
@@ -128,33 +111,20 @@ class GarminClient:
             target_iso = target_date.isoformat()
             loop = asyncio.get_event_loop()
 
-            # ---------------------------------------------------------
-            # 1. DEFINE TASKS
-            # ---------------------------------------------------------
-            
-            # Standard Library Calls
+            # 1. Define Tasks
             c_summary = safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
             c_stats = safe_fetch("Stats", loop.run_in_executor(None, self.client.get_stats_and_body, target_iso))
             c_sleep = safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
             c_hrv = self._fetch_hrv_data(target_iso)
             c_bp = safe_fetch("Blood Pressure", loop.run_in_executor(None, self.client.get_blood_pressure, target_iso))
             c_activities = safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
-            
-            # Training Status - Standard Method (Often fails for FR265)
             c_training_std = safe_fetch("Training Status (Std)", loop.run_in_executor(None, self.client.get_training_status, target_iso))
-
-            # Training Status - Modern Endpoint (Direct Fetch for FR265)
-            # This endpoint is specific to the "Unified Training Status" service
+            
             modern_url = f"metrics-service/metrics/trainingstatus/aggregated/{target_iso}"
             c_training_modern = direct_fetch("Training Status (Modern)", modern_url)
-
-            # Lactate Direct
             c_lactate_direct = safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
 
-            # ---------------------------------------------------------
-            # 2. EXECUTE PARALLEL FETCH
-            # ---------------------------------------------------------
-            
+            # 2. Execute Parallel Fetch
             results = await asyncio.gather(
                 c_summary, c_stats, c_sleep, c_hrv, c_bp, c_activities, 
                 c_training_std, c_training_modern, c_lactate_direct
@@ -164,20 +134,78 @@ class GarminClient:
              training_status_std, training_status_modern, lactate_data) = results
 
             # ---------------------------------------------------------
-            # 3. PARSE BODY BATTERY
+            # Body Battery Parsing
             # ---------------------------------------------------------
             bb_max = None
             bb_min = None
             if summary:
                 bb_max = summary.get('bodyBatteryHighestValue')
                 bb_min = summary.get('bodyBatteryLowestValue')
-                
-                logger.info(f"[{target_date}] Body Battery Return: Max={bb_max}, Min={bb_min}")
+                logger.info(f"[{target_date}] Body Battery: Max={bb_max}, Min={bb_min}")
             else:
-                logger.info(f"[{target_date}] Body Battery Return: Summary was None")
+                logger.info(f"[{target_date}] Body Battery: No Summary Data")
 
             # ---------------------------------------------------------
-            # 4. FALLBACKS (STEPS)
+            # Stats (Weight/Body/BMI) Parsing - WITH LOGGING
+            # ---------------------------------------------------------
+            weight = None
+            body_fat = None
+            bmi = None
+            
+            if stats:
+                logger.info(f"[{target_date}] Raw Stats Data: {json.dumps(stats, default=str)}")
+                if stats.get('weight'): 
+                    weight = stats.get('weight') / 1000
+                body_fat = stats.get('bodyFat')
+                bmi = stats.get('bmi')
+                
+                logger.info(f"[{target_date}] Parsed Body Metrics -> Weight: {weight}, BMI: {bmi}, Fat: {body_fat}")
+            else:
+                logger.info(f"[{target_date}] Stats data is None/Empty.")
+
+            # ---------------------------------------------------------
+            # Blood Pressure Parsing - WITH LOGGING
+            # ---------------------------------------------------------
+            bp_systolic = None
+            bp_diastolic = None
+            
+            if bp_payload:
+                logger.info(f"[{target_date}] Raw BP Payload found (type: {type(bp_payload)})")
+                readings = []
+                
+                try:
+                    if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
+                        summaries = bp_payload.get('measurementSummaries', [])
+                        if isinstance(summaries, list):
+                            for summary_item in summaries:
+                                if isinstance(summary_item, dict) and 'measurements' in summary_item:
+                                    batch = summary_item['measurements']
+                                    if isinstance(batch, list):
+                                        readings.extend(batch)
+                    elif isinstance(bp_payload, list):
+                        readings = bp_payload
+                    elif isinstance(bp_payload, dict) and 'userDailyBloodPressureDTOList' in bp_payload:
+                        readings = bp_payload['userDailyBloodPressureDTOList']
+
+                    if readings:
+                        logger.info(f"[{target_date}] Found {len(readings)} BP readings.")
+                        sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
+                        dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
+                        
+                        if sys_values: bp_systolic = int(round(mean(sys_values)))
+                        if dia_values: bp_diastolic = int(round(mean(dia_values)))
+                        
+                        logger.info(f"[{target_date}] Parsed BP -> Systolic: {bp_systolic}, Diastolic: {bp_diastolic}")
+                    else:
+                        logger.info(f"[{target_date}] No BP readings extracted from payload.")
+
+                except Exception as e_bp:
+                    logger.error(f"[{target_date}] Error parsing Blood Pressure: {e_bp}")
+            else:
+                logger.info(f"[{target_date}] Blood Pressure payload is None.")
+
+            # ---------------------------------------------------------
+            # Fallbacks (Steps)
             # ---------------------------------------------------------
             steps = None
             if summary:
@@ -192,7 +220,7 @@ class GarminClient:
                     pass
 
             # ---------------------------------------------------------
-            # 5. PARSE DATA
+            # Standard Parsing (Sleep, HRV, Activities, etc.)
             # ---------------------------------------------------------
             
             # --- Sleep ---
@@ -287,50 +315,32 @@ class GarminClient:
                         aerobic_te = activity.get('aerobicTrainingEffect')
                         anaerobic_te = activity.get('anaerobicTrainingEffect')
 
-                        # NEW METRICS EXTRACTION
-                        avg_power = activity.get('avgPower')
-                        if avg_power is None:
-                            avg_power = activity.get('averageRunningPower')
-                        
+                        # Metrics
+                        avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
                         gct = activity.get('avgGroundContactTime')
                         vert_osc = activity.get('avgVerticalOscillation')
                         stride_len = activity.get('avgStrideLength')
 
-                        # Logging
-                        logger.info(f"Activity {act_id} ({act_name}) Raw Metrics - "
-                                    f"Power: {avg_power}, GCT: {gct}, VO: {vert_osc}, Stride: {stride_len}")
-
-                        # NEW: HR ZONES
-                        # We need to fetch zone data separately for each activity
+                        # HR Zones
                         zones_dict = {
-                            "HR Zone 1 (min)": 0, 
-                            "HR Zone 2 (min)": 0, 
-                            "HR Zone 3 (min)": 0, 
-                            "HR Zone 4 (min)": 0, 
-                            "HR Zone 5 (min)": 0
+                            "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
+                            "HR Zone 3 (min)": 0, "HR Zone 4 (min)": 0, "HR Zone 5 (min)": 0
                         }
                         
                         try:
                             hr_zones = await loop.run_in_executor(
                                 None, self.client.get_activity_hr_in_timezones, act_id
                             )
-                            
                             if hr_zones:
-                                logger.info(f"Activity {act_id} HR Zones Raw: {json.dumps(hr_zones)}")
                                 for z in hr_zones:
                                     z_num = z.get('zoneNumber')
                                     z_secs = z.get('secsInZone', 0)
                                     if z_num and 1 <= z_num <= 5:
-                                        # Use exact key matching config.py
                                         zones_dict[f"HR Zone {z_num} (min)"] = round(z_secs / 60, 2)
-                            else:
-                                logger.info(f"Activity {act_id}: No HR Zone data returned.")
-
                         except Exception as e_zone:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
 
-                        # Build the activity entry
-                        # KEYS MUST MATCH config.py ACTIVITY_HEADERS EXACTLY
+                        # Build Entry
                         activity_entry = {
                             "Activity ID": act_id,
                             "Date (YYYY-MM-DD)": target_date.isoformat(),
@@ -347,57 +357,17 @@ class GarminClient:
                             "Elevation Gain (m)": int(elev) if elev else "",
                             "Aerobic TE (0-5.0)": aerobic_te,
                             "Anaerobic TE (0-5.0)": anaerobic_te,
-                            
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
                             "Avg GCT (ms)": round(gct, 1) if gct else "",
                             "Avg Vert Osc (cm)": round(vert_osc, 2) if vert_osc else "",
                             "Avg Stride Len (m)": round(stride_len / 100, 2) if stride_len else "", 
                         }
-                        # Add zones to the dict
                         activity_entry.update(zones_dict)
-
                         processed_activities.append(activity_entry)
 
                     except Exception as e_act:
                         logger.error(f"Error parsing activity detail: {e_act}")
                         continue
-
-            # --- Stats (Weight/Body) ---
-            weight = None
-            body_fat = None
-            bmi = None
-            if stats:
-                if stats.get('weight'): weight = stats.get('weight') / 1000
-                body_fat = stats.get('bodyFat')
-                bmi = stats.get('bmi')
-
-            # --- Blood Pressure ---
-            bp_systolic = None
-            bp_diastolic = None
-            if bp_payload:
-                readings = []
-                # ... [Existing BP Parsing Logic] ...
-                if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
-                    summaries = bp_payload.get('measurementSummaries', [])
-                    if isinstance(summaries, list):
-                        for summary_item in summaries:
-                            if isinstance(summary_item, dict) and 'measurements' in summary_item:
-                                batch = summary_item['measurements']
-                                if isinstance(batch, list):
-                                    readings.extend(batch)
-                elif isinstance(bp_payload, list):
-                    readings = bp_payload
-                elif isinstance(bp_payload, dict) and 'userDailyBloodPressureDTOList' in bp_payload:
-                    readings = bp_payload['userDailyBloodPressureDTOList']
-
-                if readings:
-                    try:
-                        sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
-                        dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
-                        if sys_values: bp_systolic = int(round(mean(sys_values)))
-                        if dia_values: bp_diastolic = int(round(mean(dia_values)))
-                    except Exception:
-                        pass
 
             # --- Summary Stats ---
             active_cal = None
@@ -417,12 +387,11 @@ class GarminClient:
                 intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
-                
                 rest_stress_dur = summary.get('restStressDuration')
                 low_stress_dur = summary.get('lowStressDuration')
                 med_stress_dur = summary.get('mediumStressDuration')
                 high_stress_dur = summary.get('highStressDuration')
-
+                
                 raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
                 if raw_floors is not None:
                     try:
@@ -430,7 +399,7 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
 
-            # --- TRAINING LOAD & LACTATE ---
+            # --- Training Load & Lactate ---
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
@@ -438,7 +407,6 @@ class GarminClient:
             lactate_pace = None
             seven_day_load = None
 
-            # 1. Parse Lactate (Direct)
             if lactate_data and isinstance(lactate_data, dict):
                 lactate_bpm = lactate_data.get('heartRate')
                 speed_ms = lactate_data.get('speed')
@@ -448,20 +416,13 @@ class GarminClient:
                     p_sec = int(sec_per_km % 60)
                     lactate_pace = f"{p_min}:{p_sec:02d}"
 
-            # 2. Parse Training Load (Multiple Sources)
-            # PRIORITY 1: Modern Endpoint (metrics-service) - Most likely for FR265
             if training_status_modern:
                 seven_day_load = self._find_training_load(training_status_modern)
-            
-            # PRIORITY 2: Standard Endpoint (training-service) - Fallback
             if seven_day_load is None and training_status_std:
                 seven_day_load = self._find_training_load(training_status_std)
-
-            # PRIORITY 3: User Summary - Rare Fallback
             if seven_day_load is None and summary:
                 seven_day_load = self._find_training_load(summary)
 
-            # Extract VO2 Max (Standard)
             if training_status_std:
                 mr_vo2 = training_status_std.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
@@ -492,11 +453,8 @@ class GarminClient:
                 low_stress_duration=low_stress_dur,
                 medium_stress_duration=med_stress_dur,
                 high_stress_duration=high_stress_dur,
-                
-                # NEW Body Battery
                 body_battery_max=bb_max,
                 body_battery_min=bb_min,
-
                 overnight_hrv=overnight_hrv_value,
                 hrv_status=hrv_status_value,
                 vo2max_running=vo2_run,
