@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 from typing import Dict, Any, Optional, List
 import asyncio
 import logging
+import json
 import garminconnect
 from garth.sso import resume_login
 import garth
@@ -157,6 +158,24 @@ class GarminClient:
 
             (summary, stats, sleep_data, hrv_payload, bp_payload, activities, 
              training_status_std, training_status_modern, lactate_data) = results
+
+            # ---------------------------------------------------------
+            # DIAGNOSTIC LOGGING (Added to debug blank Training Status)
+            # ---------------------------------------------------------
+            logger.info(f"--- DIAGNOSTIC LOGGING FOR {target_date} ---")
+            
+            logger.info(f"training_status_std type: {type(training_status_std)}")
+            if training_status_std:
+                logger.debug(f"training_status_std content: {json.dumps(training_status_std, default=str)}")
+            else:
+                logger.info("training_status_std is None or empty")
+
+            logger.info(f"training_status_modern type: {type(training_status_modern)}")
+            if training_status_modern:
+                logger.debug(f"training_status_modern content: {json.dumps(training_status_modern, default=str)}")
+            else:
+                logger.info("training_status_modern is None or empty")
+            # ---------------------------------------------------------
 
             # ---------------------------------------------------------
             # 3. FALLBACKS
@@ -394,6 +413,9 @@ class GarminClient:
                 mr_vo2 = training_status_std.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
                 if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
+
+            # DEBUG LOGGING FOR THE FINAL PHRASE
+            logger.info(f"Final resolved 'training_status' phrase: {train_phrase}")
 
             return GarminMetrics(
                 date=target_date,
