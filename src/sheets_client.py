@@ -1,309 +1,385 @@
 import logging
-import gspread
-from gspread.utils import ValueRenderOption
-from google.oauth2.service_account import Credentials
-from google.auth.transport.requests import Request
 from typing import List, Any
+from datetime import date, datetime, timedelta
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
 from .config import (
-    HEADERS, SLEEP_HEADERS, BODY_HEADERS, BP_HEADERS, 
-    STRESS_HEADERS, ACTIVITIES_HEADERS, 
-    HEADER_TO_ATTRIBUTE_MAP, GarminMetrics
+    GarminMetrics, 
+    HEADER_TO_ATTRIBUTE_MAP, 
+    ACTIVITY_HEADERS,
+    SLEEP_HEADERS, 
+    STRESS_HEADERS, 
+    BODY_COMP_HEADERS, 
+    BP_HEADERS,
+    ACTIVITY_SUMMARY_HEADERS
 )
-from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
 class GoogleAuthTokenRefreshError(Exception):
     pass
 
 class GoogleSheetsClient:
-    def __init__(self, credentials_path: str, spreadsheet_id: str, sheet_name: str = 'Daily Summaries'):
-        self.scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        self.credentials_path = credentials_path
+    def __init__(self, credentials_path: str, spreadsheet_id: str, sheet_name: str):
+        if not spreadsheet_id:
+            raise ValueError("Spreadsheet ID is missing.")
+            
         self.spreadsheet_id = spreadsheet_id
-        
-        # Default Sheet Names
-        self.main_sheet_name = sheet_name
+        # Define fixed tab names
         self.sleep_tab_name = "Sleep Logs"
+        self.stress_tab_name = "Stress Data"
         self.body_tab_name = "Body Composition Data"
         self.bp_tab_name = "Blood Pressure Data"
-        self.stress_tab_name = "Stress Data"
-        self.activities_tab_name = "Activities"
-        self.activity_summary_tab_name = "Activity Summaries"
+        self.activity_sum_tab_name = "Activity Summaries"
+        self.activities_sheet_name = "List of Tracked Activities"
+        
+        self.credentials_path = credentials_path
+        self.credentials = self._get_credentials()
+        self.service = build('sheets', 'v4', credentials=self.credentials)
 
+    def _get_credentials(self) -> Credentials:
         try:
-            self.creds = Credentials.from_service_account_file(
-                self.credentials_path, scopes=self.scopes
+            return Credentials.from_service_account_file(
+                self.credentials_path, 
+                scopes=SCOPES
             )
-            self.client = gspread.authorize(self.creds)
-            self.service = self.client.auth
         except Exception as e:
-            logger.error(f"Failed to initialize Google Sheets client: {e}")
+            logger.error(f"Failed to authenticate with Service Account: {e}")
             raise
 
-    def _refresh_auth(self):
-        """Force a refresh of the Google Auth token."""
+    def _get_spreadsheet_details(self):
         try:
-            self.creds.refresh(Request())
-            self.client = gspread.authorize(self.creds)
-        except Exception as e:
-            logger.error(f"Failed to refresh Google Auth token: {e}")
-            raise GoogleAuthTokenRefreshError("Could not refresh authentication token")
+            sheet_metadata = self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
+            return sheet_metadata.get('sheets', [])
+        except HttpError as e:
+            logger.error(f"An error occurred fetching spreadsheet details: {e}")
+            raise
 
-    def _update_sheet_generic(self, tab_name: str, headers: List[str], data_rows: List[Any], is_metric_object: bool = True):
-        """
-        Generic helper to update a specific sheet.
-        If is_metric_object is True, data_rows is a list of GarminMetrics, and we map them using headers.
-        If is_metric_object is False, data_rows is a list of lists (raw values).
-        """
+    def _ensure_tab_exists(self, tab_name: str, headers: List[str], all_sheets_properties):
+        sheet_exists = any(s['properties']['title'] == tab_name for s in all_sheets_properties)
+        
+        if not sheet_exists:
+            logger.info(f"Sheet '{tab_name}' not found. Creating it now.")
+            body = {'requests': [{'addSheet': {'properties': {'title': tab_name}}}]}
+            self.service.spreadsheets().batchUpdate(spreadsheetId=self.spreadsheet_id, body=body).execute()
+
+        range_to_check = f"'{tab_name}'!A1"
+        result = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id, range=range_to_check
+        ).execute()
+
+        if 'values' not in result:
+            logger.info(f"Sheet '{tab_name}' is empty. Writing headers.")
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_to_check,
+                valueInputOption='RAW',
+                body={'values': [headers]}
+            ).execute()
+
+    def _filter_historical_metrics(self, metrics: List[GarminMetrics]):
+        """Returns metrics excluding today's date (for Stress/Summary data)."""
+        today = date.today()
+        metrics_historical = []
+        for m in metrics:
+            m_date = m.date
+            if isinstance(m_date, str):
+                try:
+                    m_date = date.fromisoformat(m_date)
+                except ValueError:
+                    pass
+            if m_date != today:
+                metrics_historical.append(m)
+        return metrics_historical
+
+    # --- INDIVIDUAL UPDATE METHODS ---
+
+    def update_sleep(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Sleep Data tab."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        self._ensure_tab_exists(self.sleep_tab_name, SLEEP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.sleep_tab_name, SLEEP_HEADERS, metrics)
+
+    def update_stress(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Stress Data tab (historical only)."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        metrics_hist = self._filter_historical_metrics(metrics)
+        self._ensure_tab_exists(self.stress_tab_name, STRESS_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.stress_tab_name, STRESS_HEADERS, metrics_hist)
+
+    def update_body_composition(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Body Composition tab."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        self._ensure_tab_exists(self.body_tab_name, BODY_COMP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.body_tab_name, BODY_COMP_HEADERS, metrics)
+
+    def update_blood_pressure(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Blood Pressure tab."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        self._ensure_tab_exists(self.bp_tab_name, BP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.bp_tab_name, BP_HEADERS, metrics)
+
+    def update_activity_summary(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the Activity Summary tab (historical only)."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        metrics_hist = self._filter_historical_metrics(metrics)
+        self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_hist)
+
+    # ---------------------------------
+
+    def update_metrics(self, metrics: List[GarminMetrics]):
+        """Updates ALL daily metric tabs (Master Sheet functionality)."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        metrics_historical = self._filter_historical_metrics(metrics)
+
+        self._ensure_tab_exists(self.sleep_tab_name, SLEEP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.sleep_tab_name, SLEEP_HEADERS, metrics)
+
+        self._ensure_tab_exists(self.stress_tab_name, STRESS_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.stress_tab_name, STRESS_HEADERS, metrics_historical)
+
+        self._ensure_tab_exists(self.body_tab_name, BODY_COMP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.body_tab_name, BODY_COMP_HEADERS, metrics)
+        
+        self._ensure_tab_exists(self.bp_tab_name, BP_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.bp_tab_name, BP_HEADERS, metrics)
+
+        self._ensure_tab_exists(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, all_sheets_properties)
+        self._update_sheet_generic(self.activity_sum_tab_name, ACTIVITY_SUMMARY_HEADERS, metrics_historical)
+
+    def update_activities_tab(self, metrics: List[GarminMetrics]):
+        """Updates ONLY the 'List of Tracked Activities' tab."""
+        all_sheets_properties = self._get_spreadsheet_details()
+        self._ensure_tab_exists(self.activities_sheet_name, ACTIVITY_HEADERS, all_sheets_properties)
+        self._update_activities(metrics)
+
+    def _update_sheet_generic(self, tab_name: str, headers: List[str], metrics: List[GarminMetrics]):
         try:
-            spreadsheet = self.client.open_by_key(self.spreadsheet_id)
+            date_column_range = f"'{tab_name}'!A:A"
+            result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=date_column_range).execute()
+            existing_dates_list = result.get('values', [])
+            date_to_row_map = {row[0]: i + 1 for i, row in enumerate(existing_dates_list) if row}
+        except HttpError as e:
+            logger.error(f"Could not read existing dates for {tab_name}: {e}")
+            return
+
+        updates = []
+        appends = []
+
+        for metric in metrics:
+            metric_date_str = metric.date.isoformat() if isinstance(metric.date, date) else metric.date
             
-            # 1. Get or Create Worksheet
-            try:
-                worksheet = spreadsheet.worksheet(tab_name)
-            except gspread.WorksheetNotFound:
-                logger.info(f"Worksheet '{tab_name}' not found. Creating it...")
-                worksheet = spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=len(headers))
-            
-            # 2. Update Headers (Always ensure they match config)
-            worksheet.update('A1', [headers])
-            
-            # 3. Prepare New Data
-            new_data_map = {} # Keyed by Date string for easy lookup
-            
-            for item in data_rows:
-                if is_metric_object:
-                    # Map Metric Object to Row
-                    row = []
-                    for h in headers:
-                        attr = HEADER_TO_ATTRIBUTE_MAP.get(h)
-                        val = getattr(item, attr, "") if attr else ""
-                        row.append(str(val) if val is not None else "")
-                    
-                    date_val = item.date.isoformat()
-                    new_data_map[date_val] = row
-                else:
-                    # Raw List (First column MUST be Date)
-                    date_val = item[0] 
-                    new_data_map[date_val] = [str(x) if x is not None else "" for x in item]
-
-            # 4. Fetch Existing Data to Append/Update (Batch Friendly)
-            existing_values = worksheet.get_all_values()
-            
-            if len(existing_values) > 1:
-                # Map existing rows by date (assuming col 0 is Date)
-                # We skip the header row [0]
-                existing_map = {row[0]: (i + 2, row) for i, row in enumerate(existing_values[1:])}
-            else:
-                existing_map = {}
-
-            updates = []
-            rows_to_append = []
-
-            for date_key, new_row in new_data_map.items():
-                if date_key in existing_map:
-                    # UPDATE existing row
-                    row_idx, _ = existing_map[date_key]
-                    # Create a batch update range (e.g., A5:F5)
-                    col_letter = chr(64 + len(new_row)) # Simple conversion for A-Z
-                    # Note: For many columns this simple char conversion breaks (Z->AA). 
-                    # gspread handles list of lists well, but for specific row updates `update` is easier.
-                    # For safety with wider sheets, let's use the row update.
-                    
-                    # We will use batch_update later, but gspread doesn't have a simple "update specific rows" batch method 
-                    # without calculating A1 notation for every single one. 
-                    # For simplicity in this script, we'll append to a list and overwrite, 
-                    # OR just update individually if volume is low. 
-                    # Given typical daily use (1-7 rows), individual updates are okay, but let's be cleaner:
-                    
-                    # We will simply REWRITE the whole sheet if we are mixing updates and appends, 
-                    # OR we just append the new ones and let the sort handle it?
-                    # Better: Update the specific range for the match.
-                    
-                    # Check if data actually changed to save API calls?
-                    # For now, let's just overwrite the row to ensure latest data.
-                    range_name = f"A{row_idx}"
-                    updates.append({
-                        'range': range_name,
-                        'values': [new_row]
-                    })
-                else:
-                    rows_to_append.append(new_row)
-
-            # Execute Updates
-            if updates:
-                worksheet.batch_update(updates)
-            
-            # Execute Appends
-            if rows_to_append:
-                worksheet.append_rows(rows_to_append)
-
-            logger.info(f"Updated {tab_name}: {len(updates)} rows updated, {len(rows_to_append)} rows appended.")
-
-        except Exception as e:
-            logger.error(f"Error updating {tab_name}: {e}")
-            # Don't raise, let other sheets proceed
-
-    def update_metrics(self, metrics_list: List[GarminMetrics]):
-        """Updates the MAIN Daily Summary sheet."""
-        self._update_sheet_generic(self.main_sheet_name, HEADERS, metrics_list, is_metric_object=True)
-
-    def update_sleep(self, metrics_list: List[GarminMetrics]):
-        """Updates the separate Sleep Logs sheet."""
-        # Convert objects to raw rows based on SLEEP_HEADERS logic
-        rows = []
-        for m in metrics_list:
-            # Derived/Specific logic for Sleep Sheet columns
-            # [Date, Score, Dur, Start, End, Deep, Light, REM, Awake, Restless, Resp, SpO2]
-            row = [
-                m.date.isoformat(),
-                m.sleep_score,
-                m.sleep_length,
-                m.sleep_start_time,
-                m.sleep_end_time,
-                m.sleep_deep,
-                m.sleep_light,
-                m.sleep_rem,
-                m.sleep_awake,
-                "", # Restlessness not currently parsed
-                m.overnight_respiration,
-                m.overnight_pulse_ox
-            ]
-            rows.append(row)
-        
-        self._update_sheet_generic(self.sleep_tab_name, SLEEP_HEADERS, rows, is_metric_object=False)
-
-    def update_body_composition(self, metrics_list: List[GarminMetrics]):
-        """Syncs body comp data."""
-        # HEADERS: Date, Weight, BMI, Body Fat, Muscle, Bone, Water
-        rows = []
-        for m in metrics_list:
-            rows.append([
-                m.date.isoformat(),
-                m.weight,
-                m.bmi,
-                m.body_fat,
-                "", "", "" # Muscle, Bone, Water not parsed yet
-            ])
-        self._update_sheet_generic(self.body_tab_name, BODY_HEADERS, rows, is_metric_object=False)
-
-    def update_blood_pressure(self, metrics_list: List[GarminMetrics]):
-        """Syncs blood pressure data."""
-        rows = []
-        for m in metrics_list:
-            if m.blood_pressure_systolic:
-                rows.append([
-                    m.date.isoformat(),
-                    m.blood_pressure_systolic,
-                    m.blood_pressure_diastolic,
-                    "", "" # Pulse, Notes
-                ])
-        if rows:
-            self._update_sheet_generic(self.bp_tab_name, BP_HEADERS, rows, is_metric_object=False)
-
-    def update_stress(self, metrics_list: List[GarminMetrics]):
-        """Syncs stress data."""
-        # HEADERS: Date, Stress Level, Rest, Low, Med, High, BB Max, BB Min
-        rows = []
-        for m in metrics_list:
-            rows.append([
-                m.date.isoformat(),
-                m.average_stress,
-                m.rest_stress_duration,
-                m.low_stress_duration,
-                m.medium_stress_duration,
-                m.high_stress_duration,
-                m.body_battery_max,  # <--- NEW
-                m.body_battery_min   # <--- NEW
-            ])
-        self._update_sheet_generic(self.stress_tab_name, STRESS_HEADERS, rows, is_metric_object=False)
-
-    def update_activity_summary(self, metrics_list: List[GarminMetrics]):
-        """
-        Syncs activity data. 
-        Note: One Daily Metric object can contain MULTIPLE activities.
-        """
-        rows = []
-        for m in metrics_list:
-            for act in m.activities:
-                # act is a Dictionary matching keys in ACTIVITIES_HEADERS
-                row = []
-                for h in ACTIVITIES_HEADERS:
-                    # Dictionary lookup
-                    val = act.get(h, "")
-                    row.append(str(val) if val is not None else "")
-                rows.append(row)
-
-        # For activities, we allow multiple rows per date, so our generic updater's 
-        # "Date key map" logic might overwrite if there are multiple activities on one day.
-        # We need a custom handling here or ensure the key is unique (Activity ID).
-        
-        self._update_sheet_activities_custom(rows)
-
-    def _update_sheet_activities_custom(self, rows: List[List[str]]):
-        """
-        Custom updater for activities to handle Activity ID as the unique key, not Date.
-        """
-        tab_name = self.activity_summary_tab_name
-        headers = ACTIVITIES_HEADERS
-        
-        try:
-            spreadsheet = self.client.open_by_key(self.spreadsheet_id)
-            try:
-                worksheet = spreadsheet.worksheet(tab_name)
-            except gspread.WorksheetNotFound:
-                worksheet = spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=len(headers))
-                worksheet.update('A1', [headers])
-
-            # Get existing Activity IDs (Column 1)
-            existing_values = worksheet.get_all_values()
-            existing_ids = {}
-            if len(existing_values) > 1:
-                # Map Activity ID -> Row Index
-                for i, row in enumerate(existing_values[1:]):
-                    # Activity ID is at index 0
-                    if row:
-                        existing_ids[row[0]] = i + 2
-
-            updates = []
-            rows_to_append = []
-
-            for new_row in rows:
-                act_id = new_row[0] # Activity ID
-                if act_id in existing_ids:
-                    # Update existing row
-                    row_idx = existing_ids[act_id]
-                    range_name = f"A{row_idx}"
-                    updates.append({
-                        'range': range_name,
-                        'values': [new_row]
-                    })
-                else:
-                    rows_to_append.append(new_row)
-
-            if updates:
-                worksheet.batch_update(updates)
-            
-            if rows_to_append:
-                worksheet.append_rows(rows_to_append)
+            row_data = []
+            for header in headers:
+                attribute_name = HEADER_TO_ATTRIBUTE_MAP.get(header)
+                value = getattr(metric, attribute_name, "") if attribute_name else ""
                 
-            logger.info(f"Updated {tab_name}: {len(updates)} updated, {len(rows_to_append)} appended.")
+                if attribute_name == 'date':
+                    value = metric_date_str
 
-        except Exception as e:
-            logger.error(f"Error updating {tab_name}: {e}")
+                if value is None:
+                    value = ""
+                elif isinstance(value, float):
+                    value = round(value, 2)
+                
+                row_data.append(value)
 
-    def update_activities_tab(self, metrics_list: List[GarminMetrics]):
-        # Legacy/Alias for compatibility if needed, or redirect
-        self.update_activity_summary(metrics_list)
+            if metric_date_str in date_to_row_map:
+                row_number = date_to_row_map[metric_date_str]
+                updates.append({
+                    'range': f"'{tab_name}'!A{row_number}",
+                    'values': [row_data]
+                })
+            else:
+                appends.append(row_data)
+
+        if updates:
+            body = {'valueInputOption': 'USER_ENTERED', 'data': updates}
+            self.service.spreadsheets().values().batchUpdate(spreadsheetId=self.spreadsheet_id, body=body).execute()
+
+        if appends:
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"'{tab_name}'!A1",
+                valueInputOption='USER_ENTERED',
+                insertDataOption='INSERT_ROWS',
+                body={'values': appends}
+            ).execute()
+
+    def _update_activities(self, metrics: List[GarminMetrics]):
+        new_activities_buffer = []
+        for metric in metrics:
+            if metric.activities:
+                new_activities_buffer.extend(metric.activities)
+        
+        if not new_activities_buffer:
+            return
+
+        try:
+            id_column_range = f"'{self.activities_sheet_name}'!A:A"
+            result = self.service.spreadsheets().values().get(spreadsheetId=self.spreadsheet_id, range=id_column_range).execute()
+            existing_ids = {str(row[0]) for row in result.get('values', []) if row}
+        except HttpError as e:
+            logger.error(f"Could not read existing activity IDs: {e}")
+            return
+
+        appends = []
+        for act in new_activities_buffer:
+            act_id = str(act.get("Activity ID"))
+            if act_id not in existing_ids:
+                # Uses keys from ACTIVITY_HEADERS in config.py
+                row_data = [act.get(header, "") for header in ACTIVITY_HEADERS]
+                appends.append(row_data)
+                existing_ids.add(act_id)
+
+        if appends:
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"'{self.activities_sheet_name}'!A1",
+                valueInputOption='USER_ENTERED',
+                insertDataOption='INSERT_ROWS',
+                body={'values': appends}
+            ).execute()
 
     def prune_old_data(self, days_to_keep: int = 365):
-        # Implementation of pruning if needed...
-        pass
-    
+        """Removes rows older than the retention period from managed sheets (if they exist)."""
+        cutoff_date = date.today() - timedelta(days=days_to_keep)
+        logger.info(f"Pruning data older than {cutoff_date.isoformat()}...")
+
+        # 1. Get list of actual sheets in the spreadsheet first to avoid 404s
+        all_sheets = self._get_spreadsheet_details()
+        existing_titles = {s['properties']['title'] for s in all_sheets}
+
+        sheet_configs = [
+            (self.sleep_tab_name, 0),
+            (self.stress_tab_name, 0),
+            (self.body_tab_name, 0),
+            (self.bp_tab_name, 0),
+            (self.activity_sum_tab_name, 0),
+        ]
+
+        for tab_name, date_col_idx in sheet_configs:
+            if tab_name in existing_titles:
+                self._prune_single_sheet(tab_name, date_col_idx, cutoff_date)
+
+    def prune_activities_tab(self, days_to_keep: int = 365):
+        """Removes rows older than the retention period from the activities sheet."""
+        cutoff_date = date.today() - timedelta(days=days_to_keep)
+        self._prune_single_sheet(self.activities_sheet_name, 1, cutoff_date)
+
+    def _prune_single_sheet(self, tab_name: str, date_col_idx: int, cutoff_date: date):
+        try:
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id, 
+                range=f"'{tab_name}'" 
+            ).execute()
+            
+            rows = result.get('values', [])
+            if not rows or len(rows) < 2:
+                return 
+
+            headers = rows[0]
+            data_rows = rows[1:]
+            
+            kept_rows = []
+            rows_removed = 0
+
+            for row in data_rows:
+                if len(row) <= date_col_idx:
+                    kept_rows.append(row)
+                    continue
+                
+                date_str = row[date_col_idx]
+                row_date = None
+                
+                try:
+                    row_date = date.fromisoformat(date_str)
+                except ValueError:
+                    try:
+                        row_date = datetime.strptime(date_str, "%d/%m/%Y").date()
+                    except ValueError:
+                        pass
+                
+                if row_date:
+                    if row_date >= cutoff_date:
+                        kept_rows.append(row)
+                    else:
+                        rows_removed += 1
+                else:
+                    kept_rows.append(row)
+
+            if rows_removed > 0:
+                logger.info(f"Removing {rows_removed} old rows from '{tab_name}'.")
+                
+                self.service.spreadsheets().values().clear(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"'{tab_name}'"
+                ).execute()
+                
+                body = {'values': [headers] + kept_rows}
+                self.service.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"'{tab_name}'!A1",
+                    valueInputOption='USER_ENTERED',
+                    body=body
+                ).execute()
+
+        except Exception as e:
+            logger.warning(f"Could not prune sheet '{tab_name}': {e}")
+
     def sort_sheets(self):
-        # Implementation of sorting...
-        pass
+        """
+        Sorts all managed tabs by Date in DESCENDING order (newest on top).
+        """
+        logger.info("Sorting sheets by date (descending)...")
+        try:
+            all_sheets_metadata = self._get_spreadsheet_details()
+            
+            managed_tabs = {
+                self.sleep_tab_name: 0,
+                self.stress_tab_name: 0,
+                self.body_tab_name: 0,
+                self.bp_tab_name: 0,
+                self.activity_sum_tab_name: 0,
+                self.activities_sheet_name: 1 
+            }
+
+            requests = []
+
+            for sheet_meta in all_sheets_metadata:
+                title = sheet_meta['properties']['title']
+                sheet_id = sheet_meta['properties']['sheetId']
+                
+                if title in managed_tabs:
+                    date_col_idx = managed_tabs[title]
+                    requests.append({
+                        "sortRange": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 1,
+                            },
+                            "sortSpecs": [
+                                {
+                                    "dimensionIndex": date_col_idx,
+                                    "sortOrder": "DESCENDING"
+                                }
+                            ]
+                        }
+                    })
+
+            if requests:
+                body = {'requests': requests}
+                self.service.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body=body
+                ).execute()
+                logger.info(f"Successfully sorted {len(requests)} tabs.")
+            else:
+                logger.info("No managed tabs found to sort.")
+
+        except Exception as e:
+            logger.error(f"Failed to sort sheets: {e}")
