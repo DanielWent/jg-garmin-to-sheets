@@ -33,8 +33,6 @@ SLEEP_HEADERS = [
     "Light Sleep (min)", 
     "REM Sleep (min)", 
     "Awake Time (min)",
-    "Avg Respiration (brpm)", 
-    "Avg SpO2 (%)",
     "Overnight HRV (ms)",  # <--- NEW
     "HRV Status"           # <--- NEW
 ]
