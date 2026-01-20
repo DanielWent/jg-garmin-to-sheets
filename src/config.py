@@ -102,10 +102,7 @@ BODY_COMP_HEADERS = [
     "Date",
     "Weight (kg)",
     "BMI",
-    "Body Fat (%)",
-    "Skeletal Muscle (kg)",
-    "Bone Mass (kg)",
-    "Body Water (%)"
+    "Body Fat (%)"
 ]
 
 STRESS_HEADERS = [
@@ -139,13 +136,11 @@ ACTIVITY_HEADERS = [
     "Date (YYYY-MM-DD)",
     "Start Time (HH:MM)",
     "Activity Type",
-    "Activity Name",
     "Distance (km)",
     "Duration (min)",
     "Avg Pace (min/km)",
     "Avg HR (bpm)",
     "Max HR (bpm)",
-    "Total Calories (kcal)",
     "Avg Cadence (spm)",
     "Elevation Gain (m)",
     "Aerobic TE (0-5.0)",
@@ -184,9 +179,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Weight (kg)": "weight",
     "BMI": "bmi",
     "Body Fat (%)": "body_fat",
-    "Skeletal Muscle (kg)": "skeletal_muscle",
-    "Bone Mass (kg)": "bone_mass",
-    "Body Water (%)": "body_water",
 
     # --- Stress Tab ---
     "Average Stress": "average_stress",
