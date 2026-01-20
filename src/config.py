@@ -118,8 +118,7 @@ STRESS_HEADERS = [
 BP_HEADERS = [
     "Date",
     "Systolic (mmHg)",
-    "Diastolic (mmHg)",
-    "Pulse (bpm)"
+    "Diastolic (mmHg)"
 ]
 
 ACTIVITY_SUMMARY_HEADERS = [
@@ -191,7 +190,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     # --- Blood Pressure Tab ---
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
-    "Pulse (bpm)": "resting_heart_rate", 
 
     # --- Activity Summary Tab ---
     "Active Calories": "active_calories",
