@@ -69,7 +69,7 @@ class GarminMetrics:
 HEADERS = [
     "Date",
     "Sleep Score",
-    "Sleep Length (hrs)",
+    "Sleep Length (mins)",
     "Garmin Overnight HRV (ms)",
     "Garmin HRV Status",
     "Overnight Resting Heart Rate (bpm)",
@@ -86,7 +86,8 @@ HEADERS = [
 SLEEP_HEADERS = [
     "Date",
     "Sleep Score",
-    "Sleep Length (hrs)",
+    "Sleep Length (mins)",
+    "Sleep Need (mins)",
     "Sleep Start Time",
     "Sleep End Time",
     "Deep Sleep (min)",
@@ -163,7 +164,8 @@ HEADER_TO_ATTRIBUTE_MAP = {
     # --- Sleep Tab ---
     "Date": "date",
     "Sleep Score": "sleep_score",
-    "Sleep Length (hrs)": "sleep_length",
+    "Sleep Length (mins)": "sleep_length",
+    "Sleep Need (mins)": "sleep_need",
     "Sleep Start Time": "sleep_start_time",
     "Sleep End Time": "sleep_end_time",
     "Deep Sleep (min)": "sleep_deep",
