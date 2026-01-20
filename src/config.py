@@ -75,7 +75,6 @@ ACTIVITY_HEADERS = [
     "Avg Pace (min/km)", 
     "Avg HR (bpm)", 
     "Max HR (bpm)", 
-    "Total Calories (kcal)", 
     "Avg Cadence (spm)", 
     "Elevation Gain (m)", 
     "Aerobic TE (0-5.0)", 
