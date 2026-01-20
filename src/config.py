@@ -1,6 +1,87 @@
+from dataclasses import dataclass, field
+from typing import List, Optional, Any
+from datetime import date
+
 # =========================================================
-# 1. HEADER LISTS (Columns for the Google Sheets)
+# 1. DATA CLASS (Structure to hold fetched Garmin data)
 # =========================================================
+
+@dataclass
+class GarminMetrics:
+    date: Optional[date] = None
+    # Sleep
+    sleep_score: Optional[int] = None
+    sleep_length: Optional[float] = None
+    sleep_start_time: Optional[str] = None
+    sleep_end_time: Optional[str] = None
+    sleep_deep: Optional[float] = None
+    sleep_light: Optional[float] = None
+    sleep_rem: Optional[float] = None
+    sleep_awake: Optional[float] = None
+    sleep_need: Optional[int] = None
+    sleep_efficiency: Optional[int] = None
+    overnight_respiration: Optional[float] = None
+    overnight_pulse_ox: Optional[float] = None
+    # HRV
+    overnight_hrv: Optional[float] = None
+    hrv_status: Optional[str] = None
+    # Body
+    weight: Optional[float] = None
+    bmi: Optional[float] = None
+    body_fat: Optional[float] = None
+    skeletal_muscle: Optional[float] = None
+    bone_mass: Optional[float] = None
+    body_water: Optional[float] = None
+    # Stress
+    average_stress: Optional[int] = None
+    rest_stress_duration: Optional[int] = None
+    low_stress_duration: Optional[int] = None
+    medium_stress_duration: Optional[int] = None
+    high_stress_duration: Optional[int] = None
+    # BP
+    blood_pressure_systolic: Optional[int] = None
+    blood_pressure_diastolic: Optional[int] = None
+    # Activity Summary
+    active_calories: Optional[int] = None
+    resting_calories: Optional[int] = None
+    intensity_minutes: Optional[int] = None
+    steps: Optional[int] = None
+    floors_climbed: Optional[float] = None
+    resting_heart_rate: Optional[int] = None
+    # Training / VO2 / Lactate
+    vo2max_running: Optional[float] = None
+    vo2max_cycling: Optional[float] = None
+    seven_day_load: Optional[int] = None
+    lactate_threshold_bpm: Optional[int] = None
+    lactate_threshold_pace: Optional[str] = None
+    training_status: Optional[str] = None
+    # Body Battery
+    body_battery_max: Optional[int] = None
+    body_battery_min: Optional[int] = None
+    # Activities
+    activities: List[Any] = field(default_factory=list)
+
+# =========================================================
+# 2. HEADER LISTS (Columns for the Google Sheets)
+# =========================================================
+
+# Master List (Fallback for CSV or main sheets)
+HEADERS = [
+    "Date",
+    "Sleep Score",
+    "Sleep Length (hrs)",
+    "Garmin Overnight HRV (ms)",
+    "Garmin HRV Status",
+    "Overnight Resting Heart Rate (bpm)",
+    "Body Battery Max",
+    "Body Battery Min",
+    "Training Status",
+    "VO2 Max Running",
+    "Steps",
+    "Active Calories",
+    "Resting Calories",
+    "Weight (kg)"
+]
 
 SLEEP_HEADERS = [
     "Date",
@@ -81,7 +162,7 @@ ACTIVITY_HEADERS = [
 ]
 
 # =========================================================
-# 2. DATA MAPPING (Connects Headers to Garmin Data)
+# 3. DATA MAPPING (Connects Headers to Garmin Data)
 # =========================================================
 
 HEADER_TO_ATTRIBUTE_MAP = {
@@ -113,19 +194,23 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Low Stress Duration (min)": "low_stress_duration",
     "Medium Stress Duration (min)": "medium_stress_duration",
     "High Stress Duration (min)": "high_stress_duration",
-    "Stress Score": "average_stress", # duplicate mapping if needed
+    "Stress Score": "average_stress", 
 
     # --- Blood Pressure Tab ---
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
-    "Pulse (bpm)": "resting_heart_rate", # typically logged with BP or just use RHR
+    "Pulse (bpm)": "resting_heart_rate", 
 
     # --- Activity Summary Tab ---
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
     "Intensity Minutes": "intensity_minutes",
     "Steps": "steps",
-    "Floors Climbed": "floors_climbed"
+    "Floors Climbed": "floors_climbed",
+    
+    # --- Headers for Master List (CSV/General) ---
+    "Body Battery Max": "body_battery_max",
+    "Body Battery Min": "body_battery_min",
+    "Training Status": "training_status",
+    "VO2 Max Running": "vo2max_running"
 }
-
-# (Optional) If you have a separate mapping for GarminMetrics attributes, ensure they align here.
