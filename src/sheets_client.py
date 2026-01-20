@@ -29,7 +29,7 @@ class GoogleSheetsClient:
             
         self.spreadsheet_id = spreadsheet_id
         # Define fixed tab names
-        self.sleep_tab_name = "Sleep Logs"
+        self.sleep_tab_name = "Sleep and Recovery Logs"
         self.stress_tab_name = "Stress Data"
         self.body_tab_name = "Body Composition Data"
         self.bp_tab_name = "Blood Pressure Data"
