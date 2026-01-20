@@ -262,7 +262,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             # 2. GRANULAR SHEET SYNC (New Logic)
             # =================================================================
             SEPARATE_SHEETS_CONFIG = {
-                "Sleep Logs":         ("1irnTBkVKsmo5pi6HW_Vzt8Z2PzDb4PwgXaCTrygIg2Y", "update_sleep"),
+                "Sleep and Recovery Logs": ("1irnTBkVKsmo5pi6HW_Vzt8Z2PzDb4PwgXaCTrygIg2Y", "update_sleep"),
                 "Body Composition":   ("1TQup1IRehLyBs7almknpkr6OuZr0keFBY-cJC7IUBYo", "update_body_composition"),
                 "Blood Pressure":     ("1Hg_PUGACUoAk1cJorQLOTE40oz4_UcQQwAAkd3q5skA", "update_blood_pressure"),
                 "Stress Data":        ("1r_5RImSpTK-yQtZQq0WCmuhbHS5gnU7GNok7_DkGCWs", "update_stress"),
