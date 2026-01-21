@@ -85,6 +85,18 @@ class GarminClient:
                         
         return None
 
+    def _calculate_pace(self, speed_ms: float) -> str:
+        """Converts speed (m/s) to pace (mm:ss/km)."""
+        if not speed_ms or speed_ms <= 0:
+            return ""
+        try:
+            sec_per_km = 1000 / speed_ms
+            p_min = int(sec_per_km / 60)
+            p_sec = int(sec_per_km % 60)
+            return f"{p_min}:{p_sec:02d}"
+        except Exception:
+            return ""
+
     async def get_metrics(self, target_date: date) -> GarminMetrics:
         if not self._authenticated:
             if self._auth_failed:
@@ -291,19 +303,6 @@ class GarminClient:
                         act_id = activity.get('activityId')
                         act_name = activity.get('activityName')
                         act_start_local = activity.get('startTimeLocal')
-                        
-                        # --- DEBUG: CHECK FOR MISSING FIELDS ---
-                        # Only log this for running to reduce noise, or remove the condition to see all
-                        if atype.get('typeKey') == 'running' or True:
-                            logger.info(f"--- DEBUG: Activity {act_id} Raw Fields ---")
-                            logger.info(f"Keys present: {list(activity.keys())}")
-                            logger.info(f"elevationGain: {activity.get('elevationGain')}")
-                            logger.info(f"elevationLoss: {activity.get('elevationLoss')}")
-                            logger.info(f"totalAscent: {activity.get('totalAscent')}")
-                            logger.info(f"totalDescent: {activity.get('totalDescent')}")
-                            logger.info(f"averageGradeAdjustedSpeed: {activity.get('averageGradeAdjustedSpeed')}")
-                            logger.info(f"-------------------------------------------")
-                        # ---------------------------------------
 
                         act_time_str = ""
                         if act_start_local:
@@ -323,13 +322,22 @@ class GarminClient:
                         max_hr = activity.get('maxHR')
 
                         cal = activity.get('calories')
-                        elev = activity.get('elevationGain')
+                        
+                        # --- FIX 1: Map elevationGain/Loss correctly ---
+                        elev_gain = activity.get('elevationGain') # Used for Total Ascent
+                        elev_loss = activity.get('elevationLoss') # Used for Total Descent
+                        
                         aerobic_te = activity.get('aerobicTrainingEffect')
                         anaerobic_te = activity.get('anaerobicTrainingEffect')
 
                         # Metrics
                         avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
                         training_effect = activity.get('trainingEffectLabel')
+
+                        # --- FIX 2: Calculate GAP from avgGradeAdjustedSpeed ---
+                        # Note: 'avgGradeAdjustedSpeed' is in m/s, matching 'averageSpeed'.
+                        gap_speed = activity.get('avgGradeAdjustedSpeed')
+                        gap_str = self._calculate_pace(gap_speed)
 
                         # HR Zones
                         zones_dict = {
@@ -363,24 +371,19 @@ class GarminClient:
                             "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
                             "Max HR (bpm)": int(max_hr) if max_hr else "",
                             "Total Calories (kcal)": int(cal) if cal else "",
-                            "Elevation Gain (m)": int(elev) if elev else "",
+                            
+                            # Mapped fields
+                            "Elevation Gain (m)": int(elev_gain) if elev_gain else "",
+                            "Total Ascent (m)": int(elev_gain) if elev_gain else "",
+                            "Total Descent (m)": int(elev_loss) if elev_loss else "",
+                            "Average Grade Adjusted Pace (min/km)": gap_str,
+                            
                             "Aerobic TE (0-5.0)": aerobic_te,
                             "Anaerobic TE (0-5.0)": anaerobic_te,
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
                             "Garmin Training Effect Label": training_effect if training_effect else "",
                         }
                         activity_entry.update(zones_dict)
-                        
-                        # --- CHECK IF REQUIRED HEADERS EXIST ---
-                        # These are the exact headers defined in src/config.py
-                        missing_headers = [
-                            "Total Ascent (m)", 
-                            "Total Descent (m)", 
-                            "Average Grade Adjusted Pace (min/km)"
-                        ]
-                        for h in missing_headers:
-                            if h not in activity_entry:
-                                logger.warning(f"Activity {act_id} is MISSING key: '{h}'. This column will be empty in Sheets.")
                         
                         processed_activities.append(activity_entry)
 
@@ -431,11 +434,7 @@ class GarminClient:
                     lactate_bpm = lactate_data['heartRate']
                 if 'speed' in lactate_data:
                     speed_ms = lactate_data['speed']
-                    if speed_ms and speed_ms > 0:
-                        sec_per_km = 1000 / speed_ms
-                        p_min = int(sec_per_km / 60)
-                        p_sec = int(sec_per_km % 60)
-                        lactate_pace = f"{p_min}:{p_sec:02d}"
+                    lactate_pace = self._calculate_pace(speed_ms)
             
             # 2. Try Method B (Range Query) - If Method A failed
             if not lactate_bpm and lactate_range_hr and isinstance(lactate_range_hr, list):
@@ -452,15 +451,12 @@ class GarminClient:
                     last_entry = lactate_range_speed[-1]
                     if isinstance(last_entry, dict) and 'value' in last_entry:
                         speed_ms = last_entry['value']
-                        
+                        # Sometimes range data is in different units, but typically m/s
                         if speed_ms and speed_ms > 0:
-                            if speed_ms < 1.0: 
+                            if speed_ms < 1.0: # Heuristic for potential unit mismatch if needed
                                 speed_ms *= 10  
-                            
-                            sec_per_km = 1000 / speed_ms
-                            p_min = int(sec_per_km / 60)
-                            p_sec = int(sec_per_km % 60)
-                            lactate_pace = f"{p_min}:{p_sec:02d}"
+                            lactate_pace = self._calculate_pace(speed_ms)
+
                 except Exception as e:
                      logger.debug(f"Parsing lactate Speed range failed: {e}")
 
