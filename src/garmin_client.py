@@ -409,11 +409,25 @@ class GarminClient:
                 intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
-                rest_stress_dur = summary.get('restStressDuration')
-                low_stress_dur = summary.get('lowStressDuration')
-                med_stress_dur = summary.get('mediumStressDuration')
-                high_stress_dur = summary.get('highStressDuration')
                 
+                # --- UPDATED: Convert Stress Durations from Seconds to Minutes ---
+                rsd = summary.get('restStressDuration')
+                if rsd is not None:
+                    rest_stress_dur = int(round(rsd / 60))
+                
+                lsd = summary.get('lowStressDuration')
+                if lsd is not None:
+                    low_stress_dur = int(round(lsd / 60))
+                
+                msd = summary.get('mediumStressDuration')
+                if msd is not None:
+                    med_stress_dur = int(round(msd / 60))
+                
+                hsd = summary.get('highStressDuration')
+                if hsd is not None:
+                    high_stress_dur = int(round(hsd / 60))
+                # -----------------------------------------------------------------
+
                 raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
                 if raw_floors is not None:
                     try:
