@@ -125,11 +125,13 @@ BP_HEADERS = [
 
 ACTIVITY_SUMMARY_HEADERS = [
     "Date",
-    "Active Calories",
-    "Resting Calories",
     "Intensity Minutes",
     "Steps",
-    "Floors Climbed"
+    "Floors Climbed",
+    "VO2 Max (ml/kg/min)",
+    "Lactate Threshold Heart Rate (bpm)",
+    "Lactate Threshold Pace (min / km)",
+    "Garmin Training Load (7-Day Sum)"
 ]
 
 ACTIVITY_HEADERS = [
@@ -200,6 +202,10 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Intensity Minutes": "intensity_minutes",
     "Steps": "steps",
     "Floors Climbed": "floors_climbed",
+    "VO2 Max (ml/kg/min)": "vo2max_running",
+    "Lactate Threshold Heart Rate (bpm)": "lactate_threshold_bpm",
+    "Lactate Threshold Pace (min / km)": "lactate_threshold_pace",
+    "Garmin Training Load (7-Day Sum)": "seven_day_load",
     
     # --- Headers for Master List (CSV/General) ---
     "Body Battery Max": "body_battery_max",
