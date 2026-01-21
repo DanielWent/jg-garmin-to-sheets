@@ -145,7 +145,7 @@ ACTIVITY_HEADERS = [
     "Aerobic TE (0-5.0)",
     "Anaerobic TE (0-5.0)",
     "Avg Power (Watts)",
-    "Garmin Training Effect",
+    "Garmin Training Effect Label",
     "HR Zone 1 (min)",
     "HR Zone 2 (min)",
     "HR Zone 3 (min)",
