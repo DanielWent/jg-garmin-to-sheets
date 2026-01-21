@@ -115,7 +115,6 @@ class GarminClient:
             # 1. DEFINE TASKS
             # ---------------------------------------------------------
             
-            # --- Lactate Config (From Working Code) ---
             task_lactate_hr_url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
             task_lactate_speed_url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
             lactate_params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
@@ -132,7 +131,6 @@ class GarminClient:
             modern_url = f"metrics-service/metrics/trainingstatus/aggregated/{target_iso}"
             c_training_modern = direct_fetch("Training Status (Modern)", modern_url)
             
-            # --- Lactate Calls (From Working Code) ---
             c_lactate_direct = safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
             
             c_lactate_range_hr = safe_fetch("Lactate Range HR", loop.run_in_executor(
@@ -162,9 +160,6 @@ class GarminClient:
             if summary:
                 bb_max = summary.get('bodyBatteryHighestValue')
                 bb_min = summary.get('bodyBatteryLowestValue')
-                logger.info(f"[{target_date}] Body Battery: Max={bb_max}, Min={bb_min}")
-            else:
-                logger.info(f"[{target_date}] Body Battery: No Summary Data")
 
             # ---------------------------------------------------------
             # Stats (Weight/Body/BMI) Parsing
@@ -174,15 +169,10 @@ class GarminClient:
             bmi = None
             
             if stats:
-                logger.info(f"[{target_date}] Raw Stats Data: {json.dumps(stats, default=str)}")
                 if stats.get('weight'): 
                     weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
-                
-                logger.info(f"[{target_date}] Parsed Body Metrics -> Weight: {weight}, BMI: {bmi}, Fat: {body_fat}")
-            else:
-                logger.info(f"[{target_date}] Stats data is None/Empty.")
 
             # ---------------------------------------------------------
             # Blood Pressure Parsing
@@ -191,9 +181,7 @@ class GarminClient:
             bp_diastolic = None
             
             if bp_payload:
-                logger.info(f"[{target_date}] Raw BP Payload found (type: {type(bp_payload)})")
                 readings = []
-                
                 try:
                     if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
                         summaries = bp_payload.get('measurementSummaries', [])
@@ -209,21 +197,14 @@ class GarminClient:
                         readings = bp_payload['userDailyBloodPressureDTOList']
 
                     if readings:
-                        logger.info(f"[{target_date}] Found {len(readings)} BP readings.")
                         sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
                         dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
                         
                         if sys_values: bp_systolic = int(round(mean(sys_values)))
                         if dia_values: bp_diastolic = int(round(mean(dia_values)))
-                        
-                        logger.info(f"[{target_date}] Parsed BP -> Systolic: {bp_systolic}, Diastolic: {bp_diastolic}")
-                    else:
-                        logger.info(f"[{target_date}] No BP readings extracted from payload.")
 
                 except Exception as e_bp:
                     logger.error(f"[{target_date}] Error parsing Blood Pressure: {e_bp}")
-            else:
-                logger.info(f"[{target_date}] Blood Pressure payload is None.")
 
             # ---------------------------------------------------------
             # Fallbacks (Steps)
@@ -311,6 +292,19 @@ class GarminClient:
                         act_name = activity.get('activityName')
                         act_start_local = activity.get('startTimeLocal')
                         
+                        # --- DEBUG: CHECK FOR MISSING FIELDS ---
+                        # Only log this for running to reduce noise, or remove the condition to see all
+                        if atype.get('typeKey') == 'running' or True:
+                            logger.info(f"--- DEBUG: Activity {act_id} Raw Fields ---")
+                            logger.info(f"Keys present: {list(activity.keys())}")
+                            logger.info(f"elevationGain: {activity.get('elevationGain')}")
+                            logger.info(f"elevationLoss: {activity.get('elevationLoss')}")
+                            logger.info(f"totalAscent: {activity.get('totalAscent')}")
+                            logger.info(f"totalDescent: {activity.get('totalDescent')}")
+                            logger.info(f"averageGradeAdjustedSpeed: {activity.get('averageGradeAdjustedSpeed')}")
+                            logger.info(f"-------------------------------------------")
+                        # ---------------------------------------
+
                         act_time_str = ""
                         if act_start_local:
                              act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
@@ -376,6 +370,18 @@ class GarminClient:
                             "Garmin Training Effect Label": training_effect if training_effect else "",
                         }
                         activity_entry.update(zones_dict)
+                        
+                        # --- CHECK IF REQUIRED HEADERS EXIST ---
+                        # These are the exact headers defined in src/config.py
+                        missing_headers = [
+                            "Total Ascent (m)", 
+                            "Total Descent (m)", 
+                            "Average Grade Adjusted Pace (min/km)"
+                        ]
+                        for h in missing_headers:
+                            if h not in activity_entry:
+                                logger.warning(f"Activity {act_id} is MISSING key: '{h}'. This column will be empty in Sheets.")
+                        
                         processed_activities.append(activity_entry)
 
                     except Exception as e_act:
@@ -432,7 +438,6 @@ class GarminClient:
                         lactate_pace = f"{p_min}:{p_sec:02d}"
             
             # 2. Try Method B (Range Query) - If Method A failed
-            # B1. Heart Rate
             if not lactate_bpm and lactate_range_hr and isinstance(lactate_range_hr, list):
                 try:
                     last_entry = lactate_range_hr[-1] 
@@ -442,17 +447,15 @@ class GarminClient:
                 except Exception as e:
                     logger.debug(f"Parsing lactate HR range failed: {e}")
 
-            # B2. Pace (Speed)
             if not lactate_pace and lactate_range_speed and isinstance(lactate_range_speed, list):
                 try:
                     last_entry = lactate_range_speed[-1]
                     if isinstance(last_entry, dict) and 'value' in last_entry:
                         speed_ms = last_entry['value']
                         
-                        # --- 10x CORRECTION LOGIC ---
                         if speed_ms and speed_ms > 0:
                             if speed_ms < 1.0: 
-                                speed_ms *= 10  # Correct decameters/s to m/s if needed
+                                speed_ms *= 10  
                             
                             sec_per_km = 1000 / speed_ms
                             p_min = int(sec_per_km / 60)
