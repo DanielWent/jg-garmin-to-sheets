@@ -337,6 +337,10 @@ class GarminClient:
                         avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
                         training_effect = activity.get('primaryBenefit')
 
+                        # DIAGNOSTIC LOGGING
+                        logger.info(f"DEBUG_TE: Activity {act_id} ({act_name}) - primaryBenefit: {training_effect}")
+                        logger.info(f"DEBUG_TE: Activity {act_id} Keys: {list(activity.keys())}")
+
                         # HR Zones
                         zones_dict = {
                             "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
