@@ -335,11 +335,7 @@ class GarminClient:
 
                         # Metrics
                         avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
-                        training_effect = activity.get('primaryBenefit')
-
-                        # DIAGNOSTIC LOGGING
-                        logger.info(f"DEBUG_TE: Activity {act_id} ({act_name}) - primaryBenefit: {training_effect}")
-                        logger.info(f"DEBUG_TE: Activity {act_id} Keys: {list(activity.keys())}")
+                        training_effect = activity.get('trainingEffectLabel')
 
                         # HR Zones
                         zones_dict = {
@@ -377,7 +373,7 @@ class GarminClient:
                             "Aerobic TE (0-5.0)": aerobic_te,
                             "Anaerobic TE (0-5.0)": anaerobic_te,
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
-                            "Garmin Training Effect": training_effect if training_effect else "",
+                            "Garmin Training Effect Label": training_effect if training_effect else "",
                         }
                         activity_entry.update(zones_dict)
                         processed_activities.append(activity_entry)
