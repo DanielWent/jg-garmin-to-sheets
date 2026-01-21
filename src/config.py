@@ -113,7 +113,8 @@ STRESS_HEADERS = [
     "Low Stress Duration (min)",
     "Medium Stress Duration (min)",
     "High Stress Duration (min)",
-    "Stress Score"
+    "Today's Minimum Body Battery",
+    "Today's Maximum Body Battery"
 ]
 
 BP_HEADERS = [
@@ -184,7 +185,8 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Low Stress Duration (min)": "low_stress_duration",
     "Medium Stress Duration (min)": "medium_stress_duration",
     "High Stress Duration (min)": "high_stress_duration",
-    "Stress Score": "average_stress", 
+    "Today's Minimum Body Battery": "body_battery_min",
+    "Today's Maximum Body Battery": "body_battery_max",
 
     # --- Blood Pressure Tab ---
     "Systolic (mmHg)": "blood_pressure_systolic",
