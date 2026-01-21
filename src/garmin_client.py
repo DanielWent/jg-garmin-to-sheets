@@ -327,9 +327,6 @@ class GarminClient:
 
                         avg_hr = activity.get('averageHR')
                         max_hr = activity.get('maxHR')
-                        avg_cadence = activity.get('averageRunningCadenceInStepsPerMinute')
-                        if not avg_cadence:
-                            avg_cadence = activity.get('averageBikingCadenceInRevPerMinute') 
 
                         cal = activity.get('calories')
                         elev = activity.get('elevationGain')
@@ -338,9 +335,7 @@ class GarminClient:
 
                         # Metrics
                         avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
-                        gct = activity.get('avgGroundContactTime')
-                        vert_osc = activity.get('avgVerticalOscillation')
-                        stride_len = activity.get('avgStrideLength')
+                        training_effect = activity.get('primaryBenefit')
 
                         # HR Zones
                         zones_dict = {
@@ -374,14 +369,11 @@ class GarminClient:
                             "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
                             "Max HR (bpm)": int(max_hr) if max_hr else "",
                             "Total Calories (kcal)": int(cal) if cal else "",
-                            "Avg Cadence (spm)": int(avg_cadence) if avg_cadence else "",
                             "Elevation Gain (m)": int(elev) if elev else "",
                             "Aerobic TE (0-5.0)": aerobic_te,
                             "Anaerobic TE (0-5.0)": anaerobic_te,
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
-                            "Avg GCT (ms)": round(gct, 1) if gct else "",
-                            "Avg Vert Osc (cm)": round(vert_osc, 2) if vert_osc else "",
-                            "Avg Stride Len (m)": round(stride_len / 100, 2) if stride_len else "", 
+                            "Garmin Training Effect": training_effect if training_effect else "",
                         }
                         activity_entry.update(zones_dict)
                         processed_activities.append(activity_entry)
