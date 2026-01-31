@@ -4,7 +4,6 @@ import asyncio
 import logging
 import json
 import garminconnect
-from garth.sso import resume_login
 import garth
 from pathlib import Path
 from .exceptions import MFARequiredException
@@ -21,9 +20,9 @@ class GarminClient:
         self.profile_name = profile_name
         
         # Create an isolated directory for this user's session tokens
-        # This prevents USER1 and USER2 from overwriting each other's session data
         self.session_dir = Path(f"~/.garth/{self.profile_name}").expanduser()
         self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.token_file = self.session_dir / "tokens.json"
         
         self.client = garminconnect.Garmin(email, password)
         self._authenticated = False
@@ -31,18 +30,49 @@ class GarminClient:
         self._auth_failed = False
 
     async def authenticate(self):
-        try:
-            # CRITICAL FIX: Configure garth to use the isolated folder for this specific profile
-            # This ensures we load/save tokens to ~/.garth/USER_PROFILE instead of the shared default
-            garth.configure(domain="garmin.com", folder=str(self.session_dir))
+        """
+        Authenticate using isolated token storage.
+        Attempts to resume a session from the profile-specific folder.
+        If that fails, performs a fresh login and saves the new tokens to that folder.
+        """
+        loop = asyncio.get_event_loop()
+        
+        # Configure global garth domain (without invalid 'folder' argument)
+        garth.configure(domain="garmin.com")
 
+        # 1. Try to resume from isolated token file
+        if self.token_file.exists():
+            try:
+                logger.info(f"Attempting to resume session for {self.profile_name}...")
+                with open(self.token_file, "r") as f:
+                    saved_tokens = json.load(f)
+                
+                # Load tokens directly into this client's garth instance
+                self.client.garth.load(saved_tokens)
+                self._authenticated = True
+                logger.info(f"Resumed session successfully for {self.email}")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to resume session for {self.profile_name}: {e}")
+                # Fall through to fresh login
+
+        # 2. Fresh Login
+        try:
             def login_wrapper():
                 return self.client.login()
             
-            await asyncio.get_event_loop().run_in_executor(None, login_wrapper)
+            await loop.run_in_executor(None, login_wrapper)
             self._authenticated = True
             self.mfa_ticket_dict = None
-            logger.info(f"Authenticated successfully as {self.email} (Profile: {self.profile_name})")
+            logger.info(f"Authenticated successfully as {self.email} (Fresh Login)")
+
+            # 3. Save tokens to isolated file
+            try:
+                with open(self.token_file, "w") as f:
+                    json.dump(self.client.garth.dump(), f)
+                logger.debug(f"Saved session tokens to {self.token_file}")
+            except Exception as e:
+                logger.error(f"Failed to save session tokens: {e}")
 
         except AttributeError as e:
             if "'dict' object has no attribute 'expired'" in str(e):
@@ -113,13 +143,20 @@ class GarminClient:
             return ""
 
     async def get_metrics(self, target_date: date) -> GarminMetrics:
-        # CRITICAL FIX: Ensure garth is pointing to the correct user folder before any API calls
-        garth.configure(domain="garmin.com", folder=str(self.session_dir))
-
+        # Check authentication state (and re-prime session if needed)
         if not self._authenticated:
             if self._auth_failed:
                 raise Exception("Authentication previously failed.")
             await self.authenticate()
+        else:
+            # Ensure the client is using the correct tokens for this profile
+            # (In case global state drifted, though instance isolation should handle it)
+            try:
+                 if self.token_file.exists():
+                     with open(self.token_file, "r") as f:
+                         self.client.garth.load(json.load(f))
+            except Exception:
+                pass
 
         async def safe_fetch(name, coro):
             try:
@@ -151,9 +188,7 @@ class GarminClient:
 
             # Define coroutines
             c_summary = safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
-            
             c_stats = safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
-            
             c_sleep = safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
             c_hrv = self._fetch_hrv_data(target_iso)
             c_bp = safe_fetch("Blood Pressure", loop.run_in_executor(None, self.client.get_blood_pressure, target_iso))
@@ -185,16 +220,16 @@ class GarminClient:
              lactate_data, lactate_range_hr, lactate_range_speed) = results
 
             # =========================================================
-            # CRITICAL FIX: Handle List Responses Safely
+            # CRITICAL FIX: Handle Null/List Responses Safely
             # =========================================================
-            if isinstance(summary, list):
-                summary = summary[0] if summary else {}
-            
-            if isinstance(sleep_data, list):
-                sleep_data = sleep_data[0] if sleep_data else {}
-            
-            if isinstance(training_status_std, list):
-                training_status_std = training_status_std[0] if training_status_std else {}
+            summary = summary or {}
+            if isinstance(summary, list): summary = summary[0] if summary else {}
+
+            sleep_data = sleep_data or {}
+            if isinstance(sleep_data, list): sleep_data = sleep_data[0] if sleep_data else {}
+
+            training_status_std = training_status_std or {}
+            if isinstance(training_status_std, list): training_status_std = training_status_std[0] if training_status_std else {}
 
             # ---------------------------------------------------------
             # Body Battery Parsing
@@ -218,8 +253,7 @@ class GarminClient:
             
             if stats:
                 current_stats = None
-                
-                if 'dateWeightList' in stats:
+                if isinstance(stats, dict) and 'dateWeightList' in stats:
                     weight_list = stats.get('dateWeightList', [])
                     if weight_list:
                         for entry in weight_list:
@@ -228,10 +262,8 @@ class GarminClient:
                                  break
                         if not current_stats:
                              current_stats = weight_list[-1]
-                
                 elif isinstance(stats, dict):
                      current_stats = stats
-                
                 elif isinstance(stats, list) and len(stats) > 0:
                      current_stats = stats[0]
 
@@ -295,7 +327,7 @@ class GarminClient:
                     pass
 
             # ---------------------------------------------------------
-            # Standard Parsing (Sleep, HRV, Activities, etc.)
+            # Standard Parsing
             # ---------------------------------------------------------
             
             # --- Sleep ---
@@ -362,6 +394,8 @@ class GarminClient:
             processed_activities = []
             if activities:
                 for activity in activities:
+                    if not isinstance(activity, dict): continue
+                    
                     atype = activity.get('activityType', {})
                     try:
                         act_id = activity.get('activityId')
@@ -386,16 +420,13 @@ class GarminClient:
                         max_hr = activity.get('maxHR')
 
                         cal = activity.get('calories')
-                        
                         elev_gain = activity.get('elevationGain') 
                         elev_loss = activity.get('elevationLoss') 
                         
                         aerobic_te = activity.get('aerobicTrainingEffect')
                         anaerobic_te = activity.get('anaerobicTrainingEffect')
-
                         avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
                         training_effect = activity.get('trainingEffectLabel')
-
                         gap_speed = activity.get('avgGradeAdjustedSpeed')
                         gap_str = self._calculate_pace(gap_speed)
 
@@ -404,23 +435,23 @@ class GarminClient:
                             "HR Zone 3 (min)": 0, "HR Zone 4 (min)": 0, "HR Zone 5 (min)": 0
                         }
                         
+                        # Fetch HR Zones safely
                         try:
                             hr_zones = await loop.run_in_executor(
                                 None, self.client.get_activity_hr_in_timezones, act_id
                             )
-                            # --- Fallback for modern devices (like FR570) if standard zones return None ---
+                            # Fallback for modern devices if standard zones are null
                             if hr_zones is None:
                                 hr_zones = await loop.run_in_executor(
                                     None, self.client.connectapi, f"activity-service/activity/{act_id}/hrTimeInZones"
                                 )
                                 
-                            if hr_zones:
+                            if hr_zones and isinstance(hr_zones, list):
                                 for z in hr_zones:
+                                    if not isinstance(z, dict): continue
                                     z_num = z.get('zoneNumber')
                                     z_secs = z.get('secsInZone', 0)
                                     if z_num and 1 <= z_num <= 5:
-                                        zones_dict[f"HR Zone 1 (min)"] = round(z_secs / 60, 2)
-                                        # Note: The logic here should map z_num dynamically
                                         zones_dict[f"HR Zone {z_num} (min)"] = round(z_secs / 60, 2)
                         except Exception as e_zone:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
@@ -473,20 +504,16 @@ class GarminClient:
                 avg_stress = summary.get('averageStressLevel')
                 
                 rsd = summary.get('restStressDuration')
-                if rsd is not None:
-                    rest_stress_dur = int(round(rsd / 60))
+                if rsd is not None: rest_stress_dur = int(round(rsd / 60))
                 
                 lsd = summary.get('lowStressDuration')
-                if lsd is not None:
-                    low_stress_dur = int(round(lsd / 60))
+                if lsd is not None: low_stress_dur = int(round(lsd / 60))
                 
                 msd = summary.get('mediumStressDuration')
-                if msd is not None:
-                    med_stress_dur = int(round(msd / 60))
+                if msd is not None: med_stress_dur = int(round(msd / 60))
                 
                 hsd = summary.get('highStressDuration')
-                if hsd is not None:
-                    high_stress_dur = int(round(hsd / 60))
+                if hsd is not None: high_stress_dur = int(round(hsd / 60))
 
                 raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
                 if raw_floors is not None:
@@ -514,8 +541,8 @@ class GarminClient:
                     last_entry = lactate_range_hr[-1] 
                     if isinstance(last_entry, dict) and 'value' in last_entry:
                              lactate_bpm = int(last_entry['value'])
-                except Exception as e:
-                    logger.debug(f"Parsing lactate HR range failed: {e}")
+                except Exception:
+                    pass
 
             if not lactate_pace and lactate_range_speed and isinstance(lactate_range_speed, list):
                 try:
@@ -523,11 +550,10 @@ class GarminClient:
                     if isinstance(last_entry, dict) and 'value' in last_entry:
                         speed_ms = last_entry['value']
                         if speed_ms and speed_ms > 0:
-                            if speed_ms < 1.0: 
-                                speed_ms *= 10  
+                            if speed_ms < 1.0: speed_ms *= 10  
                             lactate_pace = self._calculate_pace(speed_ms)
-                except Exception as e:
-                     logger.debug(f"Parsing lactate Speed range failed: {e}")
+                except Exception:
+                     pass
 
             if training_status_std:
                 mr_vo2 = training_status_std.get('mostRecentVO2Max', {})
