@@ -86,6 +86,8 @@ class GoogleDriveClient:
     def _upload_df(self, filename: str, new_df: pd.DataFrame, dedup_col: str, sort_date_desc: bool, is_activity: bool = False):
         file_id = self._get_file_id(filename)
         
+        combined_df = None
+        
         if file_id:
             try:
                 # Download existing
@@ -101,19 +103,40 @@ class GoogleDriveClient:
                 # Deduplicate
                 if dedup_col in combined_df.columns:
                     combined_df = combined_df.drop_duplicates(subset=[dedup_col], keep='last')
-                
-                # Sort
-                if is_activity:
-                    if 'Date (YYYY-MM-DD)' in combined_df.columns:
-                        combined_df = combined_df.sort_values(by='Date (YYYY-MM-DD)', ascending=False)
-                elif sort_date_desc and 'Date' in combined_df.columns:
-                    combined_df = combined_df.sort_values(by='Date', ascending=False)
                     
             except Exception as e:
                 logger.warning(f"Error merging {filename}, overwriting: {e}")
                 combined_df = new_df
         else:
             combined_df = new_df
+
+        # === 365-DAY RETENTION POLICY ===
+        # Filter combined_df to keep only the last 365 days
+        try:
+            # Identify the correct date column
+            date_col = 'Date (YYYY-MM-DD)' if is_activity else 'Date'
+            
+            if date_col in combined_df.columns:
+                # Convert to datetime for comparison
+                combined_df[date_col] = pd.to_datetime(combined_df[date_col])
+                
+                # Calculate cutoff date (Today - 365 days)
+                cutoff_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=365)
+                
+                # Filter rows
+                combined_df = combined_df[combined_df[date_col] >= cutoff_date]
+                
+                # Convert back to string format YYYY-MM-DD
+                combined_df[date_col] = combined_df[date_col].dt.strftime('%Y-%m-%d')
+        except Exception as e:
+            logger.warning(f"Could not apply 365-day retention policy to {filename}: {e}")
+
+        # === SORTING ===
+        if is_activity:
+            if 'Date (YYYY-MM-DD)' in combined_df.columns:
+                combined_df = combined_df.sort_values(by='Date (YYYY-MM-DD)', ascending=False)
+        elif sort_date_desc and 'Date' in combined_df.columns:
+            combined_df = combined_df.sort_values(by='Date', ascending=False)
 
         # Upload
         csv_buffer = io.StringIO()
