@@ -38,7 +38,6 @@ class GoogleDriveClient:
                 if isinstance(val, date):
                     val = val.isoformat()
                 elif isinstance(val, float):
-                    # --- NEW LOGIC: Specific rounding for VO2 Max ---
                     if "VO2 Max" in h:
                         val = round(val, 1)
                     else:
@@ -92,6 +91,9 @@ class GoogleDriveClient:
                 # Download existing
                 content = self.service.files().get_media(fileId=file_id).execute()
                 existing_df = pd.read_csv(io.BytesIO(content))
+                
+                # === FIX: Remove garbage "Unnamed" columns from placeholder files ===
+                existing_df = existing_df.loc[:, ~existing_df.columns.str.contains('^Unnamed')]
                 
                 # Merge
                 combined_df = pd.concat([existing_df, new_df])
