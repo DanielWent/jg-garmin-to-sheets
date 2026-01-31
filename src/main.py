@@ -7,7 +7,7 @@ import asyncio
 import json
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 from statistics import mean
 
 import typer
@@ -76,20 +76,20 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         garmin_client = GarminClient(email, password)
         await garmin_client.authenticate()
     except Exception as e:
-        logger.error(f"Authentication failed: {e}", exc_info=True)
-        sys.exit(1)
+        logger.error(f"Authentication failed for {profile_name}: {e}")
+        return
 
-    logger.info(f"Fetching metrics from {start_date.isoformat()} to {end_date.isoformat()}...")
+    logger.info(f"[{profile_name}] Fetching metrics from {start_date.isoformat()} to {end_date.isoformat()}...")
     metrics_to_write = []
     current_date = start_date
     while current_date <= end_date:
-        logger.info(f"Fetching metrics for {current_date.isoformat()}")
+        logger.info(f"[{profile_name}] Fetching metrics for {current_date.isoformat()}")
         daily_metrics = await garmin_client.get_metrics(current_date)
         metrics_to_write.append(daily_metrics)
         current_date += timedelta(days=1)
 
     if not metrics_to_write:
-        logger.warning("No metrics fetched. Nothing to write.")
+        logger.warning(f"[{profile_name}] No metrics fetched. Nothing to write.")
         return
 
     # Filter for Stress/Activity Summary tabs (historical only)
@@ -101,25 +101,28 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         folder_id = profile_data.get('drive_folder_id')
         if not folder_id:
             logger.error(f"DRIVE_FOLDER_ID not set for {profile_name}.")
-            sys.exit(1)
+            return
 
         ensure_credentials_file_exists()
         
         try:
             drive_client = GoogleDriveClient('credentials/client_secret.json', folder_id)
+            # Standard daily files
             drive_client.update_csv("garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
             drive_client.update_csv("garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
             drive_client.update_csv("garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
             
+            # Historical files (Stress/Summary) - only update if we have historical data
             if metrics_historical:
                 drive_client.update_csv("garmin_stress.csv", metrics_historical, STRESS_HEADERS)
                 drive_client.update_csv("garmin_activity_summary.csv", metrics_historical, ACTIVITY_SUMMARY_HEADERS)
             
+            # Activities List
             drive_client.update_activities_csv("garmin_activities_list.csv", metrics_to_write, ACTIVITY_HEADERS)
-            logger.info("Google Drive CSV sync completed successfully!")
+            logger.info(f"[{profile_name}] Google Drive CSV sync completed successfully!")
         except Exception as e:
-            logger.error(f"Drive Sync Failed: {e}", exc_info=True)
-            sys.exit(1)
+            logger.error(f"[{profile_name}] Drive Sync Failed: {e}", exc_info=True)
+            return
 
     # === GOOGLE SHEETS SYNC (WITH TOGGLE) ===
     # Check if sheets are explicitly requested or enabled via global toggle
@@ -138,7 +141,9 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 sheets_client.sort_sheets()
 
                 # Activities Sheet Logic
-                ACTIVITIES_SHEET_ID = "1EglkT03d_9RCPLXUay63G2b0GdyPKP62ljZa0ruEx1g"
+                # Use a specific sheet ID for activities if provided, or fallback (logic can be customized)
+                # For now, using the ID found in previous code or profile data could be added
+                ACTIVITIES_SHEET_ID = "1EglkT03d_9RCPLXUay63G2b0GdyPKP62ljZa0ruEx1g" 
                 try:
                     act_client = GoogleSheetsClient('credentials/client_secret.json', ACTIVITIES_SHEET_ID, 'Activities')
                     act_client.update_activities_tab(metrics_to_write)
@@ -146,10 +151,10 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 except Exception as e:
                     logger.error(f"Failed to sync activities sheet: {e}")
 
-                logger.info("Google Sheets sync completed successfully!")
+                logger.info(f"[{profile_name}] Google Sheets sync completed successfully!")
         except Exception as sheet_error:
-            logger.error(f"Google Sheets operation failed: {sheet_error}", exc_info=True)
-            sys.exit(1)
+            logger.error(f"[{profile_name}] Google Sheets operation failed: {sheet_error}", exc_info=True)
+            return
 
     # === LOCAL CSV SYNC ===
     elif output_type == 'csv':
@@ -164,7 +169,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 writer.writerow(HEADERS)
             for metric in metrics_to_write:
                 writer.writerow([getattr(metric, HEADER_TO_ATTRIBUTE_MAP.get(h, ""), "") for h in HEADERS])
-        logger.info("Local CSV sync completed.")
+        logger.info(f"[{profile_name}] Local CSV sync completed.")
 
 def load_user_profiles():
     """Parses .env for user profiles (maintains full multi-user support)."""
@@ -191,29 +196,98 @@ def load_user_profiles():
             profiles[profile_name][key_map[var_type]] = value
     return profiles
 
-# --- ASYNC WRAPPER FOR AUTOMATION ---
-async def run_automated_sync():
-    """Fallback: Default sync for automated runs (USER1, Yesterday, Drive)."""
+# --- INTERACTIVE MODE (MANUAL RUN) ---
+async def interactive_mode():
+    """Interactive menu for manual runs."""
+    print("\n" + "="*60)
+    print("Welcome to GarminGo Interactive Mode!")
+    print("="*60 + "\n")
+
     user_profiles = load_user_profiles()
-    profile_data = user_profiles.get("USER1")
-    if not profile_data:
-        logger.error("USER1 profile not found for automated sync.")
+    if not user_profiles:
+        print("No user profiles found in .env file.")
         return
 
-    # Default to syncing yesterday's data
-    yesterday = date.today() - timedelta(days=1)
+    # 1. Select Output Type
+    print("Select Output Type:")
+    print("1. Local CSV")
+    print("2. Google Sheets / Drive")
+    out_choice = input("Enter choice (1 or 2): ").strip()
+    output_type = 'sheets' if out_choice == '2' else 'csv'
+    if out_choice == '2':
+        # Default to Drive mostly, Sheets logic handles the toggle
+        output_type = 'drive' 
+
+    # 2. Select User
+    print("\nAvailable User Profiles:")
+    profile_keys = sorted(user_profiles.keys())
+    for i, key in enumerate(profile_keys):
+        email_display = user_profiles[key].get('email', 'Unknown')
+        print(f"{i + 1}. {key} ({email_display})")
     
+    try:
+        p_idx = int(input(f"Select profile number (1-{len(profile_keys)}): ").strip()) - 1
+        if 0 <= p_idx < len(profile_keys):
+            selected_profile_name = profile_keys[p_idx]
+            selected_profile_data = user_profiles[selected_profile_name]
+        else:
+            print("Invalid selection.")
+            return
+    except ValueError:
+        print("Invalid input.")
+        return
+
+    # 3. Select Dates
+    print(f"\nSelected Profile: {selected_profile_name}")
+    start_str = input("Enter start date (YYYY-MM-DD): ").strip()
+    end_str = input("Enter end date (YYYY-MM-DD): ").strip()
+
+    try:
+        start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+    except ValueError:
+        print("Invalid date format. Use YYYY-MM-DD.")
+        return
+
     await sync(
-        email=profile_data['email'],
-        password=profile_data['password'],
-        start_date=yesterday,
-        end_date=yesterday,
-        output_type='drive', # Default for automation
-        profile_data=profile_data,
-        profile_name="USER1"
+        email=selected_profile_data['email'],
+        password=selected_profile_data['password'],
+        start_date=start_date,
+        end_date=end_date,
+        output_type=output_type,
+        profile_data=selected_profile_data,
+        profile_name=selected_profile_name
     )
 
-# --- COMMAND 1: CLI SYNC ---
+
+# --- AUTOMATED SYNC (DAILY GITHUB ACTION) ---
+async def run_automated_sync():
+    """Iterates through ALL configured user profiles and syncs yesterday's data."""
+    user_profiles = load_user_profiles()
+    
+    if not user_profiles:
+        logger.error("No user profiles found in environment variables.")
+        return
+
+    yesterday = date.today() - timedelta(days=1)
+    logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday}) ---")
+
+    for profile_name, profile_data in user_profiles.items():
+        logger.info(f"Processing {profile_name}...")
+        try:
+            await sync(
+                email=profile_data['email'],
+                password=profile_data['password'],
+                start_date=yesterday,
+                end_date=yesterday,
+                output_type='drive', # Default for automation
+                profile_data=profile_data,
+                profile_name=profile_name
+            )
+        except Exception as e:
+            logger.error(f"Failed to sync {profile_name}: {e}")
+
+# --- COMMANDS ---
 @app.command(name="cli-sync")
 def cli_sync(
     start_date: datetime = typer.Option(..., help="Start date YYYY-MM-DD."),
@@ -239,7 +313,6 @@ def cli_sync(
         profile_name=profile
     ))
 
-# --- COMMAND 2: AUTOMATED (Added to fix Typer single-command error) ---
 @app.command(name="automated")
 def automated_sync_cmd():
     """Run the automated sync manually via CLI."""
@@ -250,13 +323,20 @@ def main():
     if env_file_path:
         load_dotenv(dotenv_path=env_file_path)
     
-    # If arguments are provided (e.g., cli-sync), use Typer
+    # If arguments are provided (e.g. cli-sync), use Typer
     if len(sys.argv) > 1:
         app()
     else:
-        # If no arguments (Automated Mode), run the default sync logic directly
-        logger.info("No arguments provided. Running automated sync (USER1 / Yesterday / Drive)...")
-        asyncio.run(run_automated_sync())
+        # Check if running in GitHub Actions (Automated)
+        if os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("CI") == "true":
+            logger.info("Automated environment detected. Running batch sync for ALL users...")
+            asyncio.run(run_automated_sync())
+        else:
+            # Interactive Mode (Manual Local Run)
+            try:
+                asyncio.run(interactive_mode())
+            except KeyboardInterrupt:
+                print("\nOperation cancelled.")
 
 if __name__ == "__main__":
     main()
