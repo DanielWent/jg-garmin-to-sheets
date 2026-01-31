@@ -26,7 +26,8 @@ from src.config import (
     BODY_COMP_HEADERS,
     BP_HEADERS,
     STRESS_HEADERS,
-    ACTIVITY_SUMMARY_HEADERS
+    ACTIVITY_SUMMARY_HEADERS,
+    ACTIVITY_HEADERS  # <--- NEW IMPORT
 )
 
 # Suppress noisy library warnings
@@ -69,45 +70,6 @@ def ensure_credentials_file_exists():
     except Exception as e:
         logger.error(f"Failed to write credentials file: {e}")
         sys.exit(1)
-
-def aggregate_monthly_metrics(metrics: list[GarminMetrics], month_date: date) -> Optional[GarminMetrics]:
-    """Aggregates daily metrics into a monthly average."""
-    if not metrics:
-        return None
-
-    def get_avg(attr_name):
-        values = [getattr(m, attr_name) for m in metrics if getattr(m, attr_name) is not None]
-        return round(mean(values), 2) if values else None
-
-    def get_avg_int(attr_name):
-        val = get_avg(attr_name)
-        return int(val) if val is not None else None
-
-    return GarminMetrics(
-        date=month_date,
-        sleep_score=get_avg("sleep_score"),
-        sleep_length=get_avg("sleep_length"),
-        weight=get_avg("weight"),
-        bmi=get_avg("bmi"),
-        body_fat=get_avg("body_fat"),
-        resting_heart_rate=get_avg_int("resting_heart_rate"),
-        average_stress=get_avg_int("average_stress"),
-        overnight_hrv=get_avg_int("overnight_hrv"),
-        vo2max_running=get_avg("vo2max_running"),
-        vo2max_cycling=get_avg("vo2max_cycling"),
-        steps=get_avg_int("steps"),
-        active_calories=get_avg_int("active_calories"),
-        resting_calories=get_avg_int("resting_calories"),
-        intensity_minutes=get_avg_int("intensity_minutes"),
-        # Add other fields as needed for monthly summary...
-        activities=[] 
-    )
-
-def get_month_dates(year: int, month: int):
-    _, last_day = calendar.monthrange(year, month)
-    start_date = date(year, month, 1)
-    end_date = date(year, month, last_day)
-    return start_date, end_date
 
 async def sync(email: str, password: str, start_date: date, end_date: date, output_type: str, profile_data: dict, profile_name: str = ""):
     """Core sync logic."""
@@ -161,8 +123,8 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             # 5. Update Activity Summary CSV
             drive_client.update_csv("garmin_activity_summary.csv", metrics_to_write, ACTIVITY_SUMMARY_HEADERS)
             
-            # 6. Update Activities List CSV
-            drive_client.update_activities_csv("garmin_activities_list.csv", metrics_to_write)
+            # 6. Update Activities List CSV (Passing HEADERS now!)
+            drive_client.update_activities_csv("garmin_activities_list.csv", metrics_to_write, ACTIVITY_HEADERS)
 
             logger.info("Google Drive CSV sync completed successfully!")
 
@@ -221,7 +183,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
 def load_user_profiles():
     """Parses .env for user profiles."""
     profiles = {}
-    # REGEX matches USER1_DRIVE_FOLDER_ID
     profile_pattern = re.compile(r"^(USER\d+)_(GARMIN_EMAIL|GARMIN_PASSWORD|SHEET_ID|MONTHLY_SHEET_ID|DRIVE_FOLDER_ID|SHEET_NAME|SPREADSHEET_NAME|CSV_PATH)$")
 
     for key, value in os.environ.items():
@@ -275,10 +236,7 @@ def cli_monthly_sync(
     start_month: str = typer.Option(None, help="YYYY-MM format."),
     end_month: str = typer.Option(None, help="YYYY-MM format.")
 ):
-    """Calculates monthly averages."""
-    # ... [Monthly logic remains unchanged, omitted for brevity but should be kept if you use it] ...
-    # For now, just a placeholder to keep the file runnable if you rely on CLI commands.
-    logger.warning("Monthly sync logic not fully displayed in this snippet, ensure you keep your existing implementation if needed.")
+    logger.warning("Monthly sync logic placeholder.")
     pass 
 
 async def run_interactive_sync():
