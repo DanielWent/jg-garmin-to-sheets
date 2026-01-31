@@ -66,7 +66,6 @@ class GarminMetrics:
 # 2. HEADER LISTS (Columns for the Google Sheets)
 # =========================================================
 
-# Master List (Fallback for CSV or main sheets)
 HEADERS = [
     "Date",
     "Sleep Score",
@@ -168,7 +167,6 @@ ACTIVITY_HEADERS = [
 # =========================================================
 
 HEADER_TO_ATTRIBUTE_MAP = {
-    # --- Sleep Tab ---
     "Date": "date",
     "Sleep Score": "sleep_score",
     "Sleep Length (mins)": "sleep_length",
@@ -183,7 +181,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Garmin HRV Status": "hrv_status",
     "Overnight Resting Heart Rate (bpm)": "resting_heart_rate",
 
-    # --- Body Comp Tab ---
     "Weight (kg)": "weight",
     "BMI": "bmi",
     "Body Fat (%)": "body_fat",
@@ -192,7 +189,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Body Water (%)": "body_water",
     "Visceral Fat Rating": "visceral_fat",
 
-    # --- Stress Tab ---
     "Average Stress": "average_stress",
     "Rest Stress Duration (min)": "rest_stress_duration",
     "Low Stress Duration (min)": "low_stress_duration",
@@ -201,11 +197,9 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Today's Minimum Body Battery": "body_battery_min",
     "Today's Maximum Body Battery": "body_battery_max",
 
-    # --- Blood Pressure Tab ---
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
 
-    # --- Activity Summary Tab ---
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
     "Intensity Minutes": "intensity_minutes",
@@ -216,7 +210,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Lactate Threshold Pace (min / km)": "lactate_threshold_pace",
     "Garmin Training Load (7-Day Sum)": "seven_day_load",
     
-    # --- Headers for Master List (CSV/General) ---
     "Body Battery Max": "body_battery_max",
     "Body Battery Min": "body_battery_min",
     "Training Status": "training_status",
