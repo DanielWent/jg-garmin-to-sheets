@@ -6,6 +6,7 @@ import json
 import garminconnect
 from garth.sso import resume_login
 import garth
+from pathlib import Path
 from .exceptions import MFARequiredException
 from .config import GarminMetrics
 from statistics import mean
@@ -14,7 +15,16 @@ from functools import partial
 logger = logging.getLogger(__name__)
 
 class GarminClient:
-    def __init__(self, email: str, password: str):
+    def __init__(self, email: str, password: str, profile_name: str = "default"):
+        self.email = email
+        self.password = password
+        self.profile_name = profile_name
+        
+        # Create an isolated directory for this user's session tokens
+        # This prevents USER1 and USER2 from overwriting each other's session data
+        self.session_dir = Path(f"~/.garth/{self.profile_name}").expanduser()
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        
         self.client = garminconnect.Garmin(email, password)
         self._authenticated = False
         self.mfa_ticket_dict = None
@@ -22,12 +32,17 @@ class GarminClient:
 
     async def authenticate(self):
         try:
+            # CRITICAL FIX: Configure garth to use the isolated folder for this specific profile
+            # This ensures we load/save tokens to ~/.garth/USER_PROFILE instead of the shared default
+            garth.configure(domain="garmin.com", folder=str(self.session_dir))
+
             def login_wrapper():
                 return self.client.login()
             
             await asyncio.get_event_loop().run_in_executor(None, login_wrapper)
             self._authenticated = True
             self.mfa_ticket_dict = None
+            logger.info(f"Authenticated successfully as {self.email} (Profile: {self.profile_name})")
 
         except AttributeError as e:
             if "'dict' object has no attribute 'expired'" in str(e):
@@ -98,6 +113,9 @@ class GarminClient:
             return ""
 
     async def get_metrics(self, target_date: date) -> GarminMetrics:
+        # CRITICAL FIX: Ensure garth is pointing to the correct user folder before any API calls
+        garth.configure(domain="garmin.com", folder=str(self.session_dir))
+
         if not self._authenticated:
             if self._auth_failed:
                 raise Exception("Authentication previously failed.")
@@ -134,7 +152,6 @@ class GarminClient:
             # Define coroutines
             c_summary = safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
             
-            # --- FIXED: Use get_body_composition instead of get_stats_and_body ---
             c_stats = safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
             
             c_sleep = safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
@@ -173,8 +190,6 @@ class GarminClient:
             if isinstance(summary, list):
                 summary = summary[0] if summary else {}
             
-            # Note: We handle 'stats' specifically below because get_body_composition returns a complex structure
-
             if isinstance(sleep_data, list):
                 sleep_data = sleep_data[0] if sleep_data else {}
             
@@ -202,14 +217,11 @@ class GarminClient:
             visceral_fat = None
             
             if stats:
-                # --- FIXED: Handle the list response from get_body_composition ---
                 current_stats = None
                 
-                # Check for list of weight entries (get_body_composition)
                 if 'dateWeightList' in stats:
                     weight_list = stats.get('dateWeightList', [])
                     if weight_list:
-                        # Try to find entry matching target_iso, otherwise take the last one
                         for entry in weight_list:
                              if entry.get('date') == target_iso:
                                  current_stats = entry
@@ -217,11 +229,9 @@ class GarminClient:
                         if not current_stats:
                              current_stats = weight_list[-1]
                 
-                # Check for flat dictionary (fallback or old method)
                 elif isinstance(stats, dict):
                      current_stats = stats
                 
-                # Check for direct list (rare)
                 elif isinstance(stats, list) and len(stats) > 0:
                      current_stats = stats[0]
 
@@ -303,10 +313,8 @@ class GarminClient:
             overnight_pulse_ox = None
 
             if sleep_data:
-                # --- FIXED: Handle missing DTO wrapper ---
                 sleep_dto = sleep_data.get('dailySleepDTO')
                 if not sleep_dto:
-                    # If sleep_data IS the DTO (happens when API unwraps it)
                     sleep_dto = sleep_data
 
                 if sleep_dto:
@@ -400,11 +408,19 @@ class GarminClient:
                             hr_zones = await loop.run_in_executor(
                                 None, self.client.get_activity_hr_in_timezones, act_id
                             )
+                            # --- Fallback for modern devices (like FR570) if standard zones return None ---
+                            if hr_zones is None:
+                                hr_zones = await loop.run_in_executor(
+                                    None, self.client.connectapi, f"activity-service/activity/{act_id}/hrTimeInZones"
+                                )
+                                
                             if hr_zones:
                                 for z in hr_zones:
                                     z_num = z.get('zoneNumber')
                                     z_secs = z.get('secsInZone', 0)
                                     if z_num and 1 <= z_num <= 5:
+                                        zones_dict[f"HR Zone 1 (min)"] = round(z_secs / 60, 2)
+                                        # Note: The logic here should map z_num dynamically
                                         zones_dict[f"HR Zone {z_num} (min)"] = round(z_secs / 60, 2)
                         except Exception as e_zone:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
