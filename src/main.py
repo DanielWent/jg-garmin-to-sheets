@@ -9,7 +9,6 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
 from statistics import mean
-import calendar
 
 import typer
 from dotenv import load_dotenv, find_dotenv
@@ -192,7 +191,7 @@ def load_user_profiles():
             profiles[profile_name][key_map[var_type]] = value
     return profiles
 
-@app.command()
+@app.command(name="cli-sync")
 def cli_sync(
     start_date: datetime = typer.Option(..., help="Start date YYYY-MM-DD."),
     end_date: datetime = typer.Option(..., help="End date YYYY-MM-DD."),
@@ -217,17 +216,39 @@ def cli_sync(
         profile_name=profile
     ))
 
-# (Rest of main, automated mode, and CLI setup remains unchanged)
+async def run_automated_sync():
+    """Fallback: Default sync for automated runs (USER1, Yesterday, Drive)."""
+    user_profiles = load_user_profiles()
+    profile_data = user_profiles.get("USER1")
+    if not profile_data:
+        logger.error("USER1 profile not found for automated sync.")
+        return
+
+    # Default to syncing yesterday's data
+    yesterday = date.today() - timedelta(days=1)
+    
+    await sync(
+        email=profile_data['email'],
+        password=profile_data['password'],
+        start_date=yesterday,
+        end_date=yesterday,
+        output_type='drive', # Default for automation
+        profile_data=profile_data,
+        profile_name="USER1"
+    )
+
 def main():
     env_file_path = find_dotenv(usecwd=True)
     if env_file_path:
         load_dotenv(dotenv_path=env_file_path)
     
+    # If arguments are provided (e.g., cli-sync), use Typer
     if len(sys.argv) > 1:
         app()
     else:
-        # Automated session defaults to drive
-        asyncio.run(run_interactive_sync())
+        # If no arguments (Automated Mode), run the default sync logic
+        logger.info("No arguments provided. Running automated sync (USER1 / Yesterday / Drive)...")
+        asyncio.run(run_automated_sync())
 
 if __name__ == "__main__":
     main()
