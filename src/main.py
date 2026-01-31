@@ -191,6 +191,29 @@ def load_user_profiles():
             profiles[profile_name][key_map[var_type]] = value
     return profiles
 
+# --- ASYNC WRAPPER FOR AUTOMATION ---
+async def run_automated_sync():
+    """Fallback: Default sync for automated runs (USER1, Yesterday, Drive)."""
+    user_profiles = load_user_profiles()
+    profile_data = user_profiles.get("USER1")
+    if not profile_data:
+        logger.error("USER1 profile not found for automated sync.")
+        return
+
+    # Default to syncing yesterday's data
+    yesterday = date.today() - timedelta(days=1)
+    
+    await sync(
+        email=profile_data['email'],
+        password=profile_data['password'],
+        start_date=yesterday,
+        end_date=yesterday,
+        output_type='drive', # Default for automation
+        profile_data=profile_data,
+        profile_name="USER1"
+    )
+
+# --- COMMAND 1: CLI SYNC ---
 @app.command(name="cli-sync")
 def cli_sync(
     start_date: datetime = typer.Option(..., help="Start date YYYY-MM-DD."),
@@ -216,26 +239,11 @@ def cli_sync(
         profile_name=profile
     ))
 
-async def run_automated_sync():
-    """Fallback: Default sync for automated runs (USER1, Yesterday, Drive)."""
-    user_profiles = load_user_profiles()
-    profile_data = user_profiles.get("USER1")
-    if not profile_data:
-        logger.error("USER1 profile not found for automated sync.")
-        return
-
-    # Default to syncing yesterday's data
-    yesterday = date.today() - timedelta(days=1)
-    
-    await sync(
-        email=profile_data['email'],
-        password=profile_data['password'],
-        start_date=yesterday,
-        end_date=yesterday,
-        output_type='drive', # Default for automation
-        profile_data=profile_data,
-        profile_name="USER1"
-    )
+# --- COMMAND 2: AUTOMATED (Added to fix Typer single-command error) ---
+@app.command(name="automated")
+def automated_sync_cmd():
+    """Run the automated sync manually via CLI."""
+    asyncio.run(run_automated_sync())
 
 def main():
     env_file_path = find_dotenv(usecwd=True)
@@ -246,7 +254,7 @@ def main():
     if len(sys.argv) > 1:
         app()
     else:
-        # If no arguments (Automated Mode), run the default sync logic
+        # If no arguments (Automated Mode), run the default sync logic directly
         logger.info("No arguments provided. Running automated sync (USER1 / Yesterday / Drive)...")
         asyncio.run(run_automated_sync())
 
