@@ -233,10 +233,19 @@ class GarminClient:
             weight = None
             body_fat = None
             bmi = None
+            muscle = None
+            bone = None
+            water = None
+            visceral = None
+
             if stats:
                 if stats.get('weight'): weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
+                if stats.get('muscleMass'): muscle = stats.get('muscleMass') / 1000
+                if stats.get('boneMass'): bone = stats.get('boneMass') / 1000
+                water = stats.get('bodyWater')
+                visceral = stats.get('visceralFat')
 
             # --- Blood Pressure ---
             bp_systolic = None
@@ -340,6 +349,10 @@ class GarminClient:
                 weight=weight,
                 bmi=bmi,
                 body_fat=body_fat,
+                skeletal_muscle=muscle,
+                bone_mass=bone,
+                body_water=water,
+                visceral_fat=visceral,
                 blood_pressure_systolic=bp_systolic,
                 blood_pressure_diastolic=bp_diastolic,
                 resting_heart_rate=resting_hr,
