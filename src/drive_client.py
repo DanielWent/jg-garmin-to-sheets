@@ -110,8 +110,8 @@ class GoogleDriveClient:
         else:
             combined_df = new_df
 
-        # === 365-DAY RETENTION POLICY ===
-        # Filter combined_df to keep only the last 365 days
+        # === 5-YEAR RETENTION POLICY ===
+        # Filter combined_df to keep only the last 5 years
         try:
             # Identify the correct date column
             date_col = 'Date (YYYY-MM-DD)' if is_activity else 'Date'
@@ -120,8 +120,8 @@ class GoogleDriveClient:
                 # Convert to datetime for comparison
                 combined_df[date_col] = pd.to_datetime(combined_df[date_col])
                 
-                # Calculate cutoff date (Today - 365 days)
-                cutoff_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=365)
+                # Calculate cutoff date (Today - 1826 days)
+                cutoff_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=1826)
                 
                 # Filter rows
                 combined_df = combined_df[combined_df[date_col] >= cutoff_date]
@@ -129,7 +129,7 @@ class GoogleDriveClient:
                 # Convert back to string format YYYY-MM-DD
                 combined_df[date_col] = combined_df[date_col].dt.strftime('%Y-%m-%d')
         except Exception as e:
-            logger.warning(f"Could not apply 365-day retention policy to {filename}: {e}")
+            logger.warning(f"Could not apply 1826-day retention policy to {filename}: {e}")
 
         # === SORTING ===
         if is_activity:
