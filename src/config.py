@@ -32,6 +32,7 @@ class GarminMetrics:
     skeletal_muscle: Optional[float] = None
     bone_mass: Optional[float] = None
     body_water: Optional[float] = None
+    visceral_fat: Optional[float] = None
     # Stress
     average_stress: Optional[int] = None
     rest_stress_duration: Optional[int] = None
@@ -103,7 +104,11 @@ BODY_COMP_HEADERS = [
     "Date",
     "Weight (kg)",
     "BMI",
-    "Body Fat (%)"
+    "Body Fat (%)",
+    "Skeletal Muscle Mass (kg)",
+    "Bone Mass (kg)",
+    "Body Water (%)",
+    "Visceral Fat Rating"
 ]
 
 STRESS_HEADERS = [
@@ -182,6 +187,10 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Weight (kg)": "weight",
     "BMI": "bmi",
     "Body Fat (%)": "body_fat",
+    "Skeletal Muscle Mass (kg)": "skeletal_muscle",
+    "Bone Mass (kg)": "bone_mass",
+    "Body Water (%)": "body_water",
+    "Visceral Fat Rating": "visceral_fat",
 
     # --- Stress Tab ---
     "Average Stress": "average_stress",
