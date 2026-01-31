@@ -8,6 +8,14 @@ on:
   
   workflow_dispatch:
     inputs:
+      profile:
+        description: 'Select User Profile'
+        required: true
+        default: 'USER1'
+        type: choice
+        options:
+        - USER1
+        - USER2
       start_date:
         description: 'Start Date (YYYY-MM-DD)'
         required: false
@@ -46,31 +54,31 @@ jobs:
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
         
-        # === USER 2 SECRETS (ADD THESE) ===
+        # === USER 2 SECRETS ===
         USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
         USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
         USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
+        USER2_SHEET_ID: ${{ secrets.USER2_SHEET_ID }}
         
         # === SHARED CONFIG ===
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
-        USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
+        ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "DEBUG"
       run: |
         # Check if manual inputs were provided
         if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
-          echo "🛠️ DEBUG MODE: Running manual sync from ${{ inputs.start_date }} to ${{ inputs.end_date }}..."
+          echo "🛠️ DEBUG MODE: Running manual sync for ${{ inputs.profile }} from ${{ inputs.start_date }} to ${{ inputs.end_date }}..."
           
           OUTPUT_TYPE="${{ inputs.output_type }}"
           if [ -z "$OUTPUT_TYPE" ]; then OUTPUT_TYPE="drive"; fi
           
-          # NOTE: Manual workflow dispatch currently targets USER1 by default. 
-          # To target USER2 manually via GitHub UI, you would need to add a 'profile' input to workflow_dispatch.
-          python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile USER1 --output-type $OUTPUT_TYPE 2>&1 | tee sync_debug.log
+          python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile ${{ inputs.profile }} --output-type $OUTPUT_TYPE 2>&1 | tee sync_debug.log
         else
           echo "🔄 AUTOMATED MODE: Running standard daily sync for ALL configured users..."
-          # The updated main.py will detect it is running in CI and loop through both USER1 and USER2
+          # The main.py logic iterates through all profiles found in the environment
           python -m src.main 2>&1 | tee sync_debug.log
         fi
 
