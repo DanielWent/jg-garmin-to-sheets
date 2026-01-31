@@ -27,7 +27,7 @@ from src.config import (
     BP_HEADERS,
     STRESS_HEADERS,
     ACTIVITY_SUMMARY_HEADERS,
-    ACTIVITY_HEADERS  # <--- NEW IMPORT
+    ACTIVITY_HEADERS
 )
 
 # Suppress noisy library warnings
@@ -93,6 +93,21 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         logger.warning("No metrics fetched. Nothing to write.")
         return
 
+    # --- FILTERING LOGIC ---
+    # Create a separate list for sheets that require completed days only (Stress, Activity Summary)
+    today = date.today()
+    metrics_historical = []
+    for m in metrics_to_write:
+        m_date = m.date
+        if isinstance(m_date, str):
+            try:
+                m_date = date.fromisoformat(m_date)
+            except ValueError:
+                pass
+        # Only include if date is strictly before today
+        if m_date < today:
+            metrics_historical.append(m)
+
     # === GOOGLE DRIVE (CSV) SYNC ===
     if output_type == 'drive':
         folder_id = profile_data.get('drive_folder_id')
@@ -108,22 +123,28 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 folder_id=folder_id
             )
 
-            # 1. Update Sleep CSV
+            # 1. Sleep: Updates immediately (data is from previous night)
             drive_client.update_csv("garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
             
-            # 2. Update Body Comp CSV
+            # 2. Body Comp: Updates immediately
             drive_client.update_csv("garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
             
-            # 3. Update Blood Pressure CSV
+            # 3. Blood Pressure: Updates immediately
             drive_client.update_csv("garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
             
-            # 4. Update Stress CSV
-            drive_client.update_csv("garmin_stress.csv", metrics_to_write, STRESS_HEADERS)
+            # 4. Stress: HISTORICAL ONLY (Matches original sheets behavior)
+            if metrics_historical:
+                drive_client.update_csv("garmin_stress.csv", metrics_historical, STRESS_HEADERS)
+            else:
+                logger.info("Skipping Stress CSV update (no historical data available).")
             
-            # 5. Update Activity Summary CSV
-            drive_client.update_csv("garmin_activity_summary.csv", metrics_to_write, ACTIVITY_SUMMARY_HEADERS)
+            # 5. Activity Summary: HISTORICAL ONLY (Matches original sheets behavior)
+            if metrics_historical:
+                drive_client.update_csv("garmin_activity_summary.csv", metrics_historical, ACTIVITY_SUMMARY_HEADERS)
+            else:
+                logger.info("Skipping Activity Summary CSV update (no historical data available).")
             
-            # 6. Update Activities List CSV (Passing HEADERS now!)
+            # 6. Activities List: Updates immediately (specific activities are discrete events)
             drive_client.update_activities_csv("garmin_activities_list.csv", metrics_to_write, ACTIVITY_HEADERS)
 
             logger.info("Google Drive CSV sync completed successfully!")
