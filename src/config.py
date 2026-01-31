@@ -2,10 +2,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Any
 from datetime import date
 
-# =========================================================
-# 1. DATA CLASS (Structure to hold fetched Garmin data)
-# =========================================================
-
 @dataclass
 class GarminMetrics:
     date: Optional[date] = None
@@ -62,116 +58,54 @@ class GarminMetrics:
     # Activities
     activities: List[Any] = field(default_factory=list)
 
-# =========================================================
-# 2. HEADER LISTS (Columns for the Google Sheets)
-# =========================================================
-
 HEADERS = [
-    "Date",
-    "Sleep Score",
-    "Sleep Length (mins)",
-    "Garmin Overnight HRV (ms)",
-    "Garmin HRV Status",
-    "Overnight Resting Heart Rate (bpm)",
-    "Body Battery Max",
-    "Body Battery Min",
-    "Training Status",
-    "VO2 Max Running",
-    "Steps",
-    "Active Calories",
-    "Resting Calories",
-    "Weight (kg)"
+    "Date", "Sleep Score", "Sleep Length (mins)", "Garmin Overnight HRV (ms)",
+    "Garmin HRV Status", "Overnight Resting Heart Rate (bpm)", "Body Battery Max",
+    "Body Battery Min", "Training Status", "VO2 Max Running", "Steps",
+    "Active Calories", "Resting Calories", "Weight (kg)"
 ]
 
 SLEEP_HEADERS = [
-    "Date",
-    "Sleep Score",
-    "Sleep Length (mins)",
-    "Sleep Need (mins)",
-    "Sleep Start Time",
-    "Sleep End Time",
-    "Deep Sleep (min)",
-    "Light Sleep (min)",
-    "REM Sleep (min)",
-    "Awake Time (min)",
-    "Garmin Overnight HRV (ms)",          
-    "Garmin HRV Status",                  
-    "Overnight Resting Heart Rate (bpm)"  
+    "Date", "Sleep Score", "Sleep Length (mins)", "Sleep Need (mins)",
+    "Sleep Start Time", "Sleep End Time", "Deep Sleep (min)", "Light Sleep (min)",
+    "REM Sleep (min)", "Awake Time (min)", "Garmin Overnight HRV (ms)",
+    "Garmin HRV Status", "Overnight Resting Heart Rate (bpm)"
 ]
 
 BODY_COMP_HEADERS = [
-    "Date",
-    "Weight (kg)",
-    "BMI",
-    "Body Fat (%)",
-    "Skeletal Muscle Mass (kg)",
-    "Bone Mass (kg)",
-    "Body Water (%)",
-    "Visceral Fat Rating"
+    "Date", "Weight (kg)", "BMI", "Body Fat (%)", "Skeletal Muscle Mass (kg)",
+    "Bone Mass (kg)", "Body Water (%)", "Visceral Fat Rating"
 ]
 
 STRESS_HEADERS = [
-    "Date",
-    "Average Stress",
-    "Rest Stress Duration (min)",
-    "Low Stress Duration (min)",
-    "Medium Stress Duration (min)",
-    "High Stress Duration (min)",
-    "Today's Minimum Body Battery",
-    "Today's Maximum Body Battery"
+    "Date", "Average Stress", "Rest Stress Duration (min)", "Low Stress Duration (min)",
+    "Medium Stress Duration (min)", "High Stress Duration (min)",
+    "Today's Minimum Body Battery", "Today's Maximum Body Battery"
 ]
 
-BP_HEADERS = [
-    "Date",
-    "Systolic (mmHg)",
-    "Diastolic (mmHg)"
-]
+BP_HEADERS = ["Date", "Systolic (mmHg)", "Diastolic (mmHg)"]
 
 ACTIVITY_SUMMARY_HEADERS = [
-    "Date",
-    "Intensity Minutes",
-    "Steps",
-    "Floors Climbed",
-    "VO2 Max (ml/kg/min)",
-    "Lactate Threshold Heart Rate (bpm)",
-    "Lactate Threshold Pace (min / km)",
+    "Date", "Intensity Minutes", "Steps", "Floors Climbed", "VO2 Max (ml/kg/min)",
+    "Lactate Threshold Heart Rate (bpm)", "Lactate Threshold Pace (min / km)",
     "Garmin Training Load (7-Day Sum)"
 ]
 
 ACTIVITY_HEADERS = [
-    "Activity ID",
-    "Date (YYYY-MM-DD)",
-    "Start Time (HH:MM)",
-    "Activity Type",
-    "Distance (km)",
-    "Duration (min)",
-    "Avg Pace (min/km)",
-    "Average Grade Adjusted Pace (min/km)",
-    "Avg HR (bpm)",
-    "Max HR (bpm)",
-    "Total Ascent (m)",
-    "Total Descent (m)",
-    "Aerobic TE (0-5.0)",
-    "Anaerobic TE (0-5.0)",
-    "Avg Power (Watts)",
-    "Garmin Training Effect Label",
-    "HR Zone 1 (min)",
-    "HR Zone 2 (min)",
-    "HR Zone 3 (min)",
-    "HR Zone 4 (min)",
-    "HR Zone 5 (min)"
+    "Activity ID", "Date (YYYY-MM-DD)", "Start Time (HH:MM)", "Activity Type",
+    "Distance (km)", "Duration (min)", "Avg Pace (min/km)",
+    "Average Grade Adjusted Pace (min/km)", "Avg HR (bpm)", "Max HR (bpm)",
+    "Total Ascent (m)", "Total Descent (m)", "Aerobic TE (0-5.0)",
+    "Anaerobic TE (0-5.0)", "Avg Power (Watts)", "Garmin Training Effect Label",
+    "HR Zone 1 (min)", "HR Zone 2 (min)", "HR Zone 3 (min)", "HR Zone 4 (min)", "HR Zone 5 (min)"
 ]
-
-# =========================================================
-# 3. DATA MAPPING (Connects Headers to Garmin Data)
-# =========================================================
 
 HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
     "Sleep Score": "sleep_score",
     "Sleep Length (mins)": "sleep_length",
     "Sleep Need (mins)": "sleep_need",
-    "Sleep Start Time": "sleep_start_time",
+    "Sleep Start_Time": "sleep_start_time",
     "Sleep End Time": "sleep_end_time",
     "Deep Sleep (min)": "sleep_deep",
     "Light Sleep (min)": "sleep_light",
@@ -180,7 +114,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Garmin Overnight HRV (ms)": "overnight_hrv",
     "Garmin HRV Status": "hrv_status",
     "Overnight Resting Heart Rate (bpm)": "resting_heart_rate",
-
     "Weight (kg)": "weight",
     "BMI": "bmi",
     "Body Fat (%)": "body_fat",
@@ -188,7 +121,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Bone Mass (kg)": "bone_mass",
     "Body Water (%)": "body_water",
     "Visceral Fat Rating": "visceral_fat",
-
     "Average Stress": "average_stress",
     "Rest Stress Duration (min)": "rest_stress_duration",
     "Low Stress Duration (min)": "low_stress_duration",
@@ -196,20 +128,17 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "High Stress Duration (min)": "high_stress_duration",
     "Today's Minimum Body Battery": "body_battery_min",
     "Today's Maximum Body Battery": "body_battery_max",
-
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
-
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
-    "Intensity Minutes": "intensity_minutes",
+    "Intensity Minutes": "intensity_min",
     "Steps": "steps",
     "Floors Climbed": "floors_climbed",
     "VO2 Max (ml/kg/min)": "vo2max_running",
     "Lactate Threshold Heart Rate (bpm)": "lactate_threshold_bpm",
     "Lactate Threshold Pace (min / km)": "lactate_threshold_pace",
     "Garmin Training Load (7-Day Sum)": "seven_day_load",
-    
     "Body Battery Max": "body_battery_max",
     "Body Battery Min": "body_battery_min",
     "Training Status": "training_status",
