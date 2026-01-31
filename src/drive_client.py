@@ -59,8 +59,9 @@ class GoogleDriveClient:
 
         df = pd.DataFrame(all_activities)
         
-        # CRITICAL FIX: This aligns the CSV columns exactly with your Google Sheets headers.
-        # It drops extra columns and fills missing ones with empty values.
+        # CRITICAL: This reindex is what forces the CSV to match your config exactly.
+        # It keeps only the columns listed in 'headers' (ACTIVITY_HEADERS)
+        # and creates empty columns for any missing ones (e.g. if an activity had no HR data).
         df = df.reindex(columns=headers)
         
         return df
