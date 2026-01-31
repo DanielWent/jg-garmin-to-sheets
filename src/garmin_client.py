@@ -164,7 +164,11 @@ class GarminClient:
              training_status_std, training_status_modern, 
              lactate_data, lactate_range_hr, lactate_range_speed) = results
 
-            # --- FIX: Restore original list handling logic to prevent crashes ---
+            # =========================================================
+            # CRITICAL FIX 1: Handle List Responses Safely
+            # This prevents the "AttributeError: 'list' object has no attribute 'get'"
+            # which was killing the script before it could save ANY data.
+            # =========================================================
             if isinstance(summary, list):
                 summary = summary[0] if summary else {}
             
@@ -187,7 +191,7 @@ class GarminClient:
                 bb_min = summary.get('bodyBatteryLowestValue')
 
             # ---------------------------------------------------------
-            # Stats (Weight/Body/BMI) Parsing
+            # Stats Parsing (Including CRITICAL FIX 2: Body Comp Fields)
             # ---------------------------------------------------------
             weight = None
             body_fat = None
@@ -202,46 +206,47 @@ class GarminClient:
                     weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
-                # --- Added missing fields you requested ---
-                if stats.get('muscleMass'): skeletal_muscle = stats.get('muscleMass') / 1000
-                if stats.get('boneMass'): bone_mass = stats.get('boneMass') / 1000
+                
+                # These were missing in your file, causing blank columns
+                if stats.get('muscleMass'): 
+                    skeletal_muscle = stats.get('muscleMass') / 1000
+                if stats.get('boneMass'): 
+                    bone_mass = stats.get('boneMass') / 1000
                 body_water = stats.get('bodyWater')
                 visceral_fat = stats.get('visceralFat')
 
             # ---------------------------------------------------------
-            # Blood Pressure Parsing (Preserved your robustness logic)
+            # Blood Pressure Parsing (Enhanced Robustness)
             # ---------------------------------------------------------
             bp_systolic = None
             bp_diastolic = None
             
             if bp_payload:
                 readings = []
-                try:
-                    if isinstance(bp_payload, dict) and 'measurementSummaries' in bp_payload:
-                        summaries = bp_payload.get('measurementSummaries', [])
-                        if isinstance(summaries, list):
-                            for summary_item in summaries:
-                                if isinstance(summary_item, dict) and 'measurements' in summary_item:
-                                    batch = summary_item['measurements']
-                                    if isinstance(batch, list):
-                                        readings.extend(batch)
-                    elif isinstance(bp_payload, list):
-                        readings = bp_payload
-                    elif isinstance(bp_payload, dict) and 'userDailyBloodPressureDTOList' in bp_payload:
-                        readings = bp_payload['userDailyBloodPressureDTOList']
+                # Helper to find readings recursively (handles weird nesting)
+                stack = [bp_payload]
+                while stack:
+                    curr = stack.pop()
+                    if isinstance(curr, dict):
+                        if 'systolic' in curr and 'diastolic' in curr:
+                            readings.append(curr)
+                        else:
+                            for k, v in curr.items():
+                                if isinstance(v, (dict, list)):
+                                    stack.append(v)
+                    elif isinstance(curr, list):
+                        for item in curr:
+                            stack.append(item)
 
-                    if readings:
-                        sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
-                        dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
-                        
-                        if sys_values: bp_systolic = int(round(mean(sys_values)))
-                        if dia_values: bp_diastolic = int(round(mean(dia_values)))
-
-                except Exception as e_bp:
-                    logger.error(f"[{target_date}] Error parsing Blood Pressure: {e_bp}")
+                if readings:
+                    sys_values = [r['systolic'] for r in readings if isinstance(r, dict) and r.get('systolic')]
+                    dia_values = [r['diastolic'] for r in readings if isinstance(r, dict) and r.get('diastolic')]
+                    
+                    if sys_values: bp_systolic = int(round(mean(sys_values)))
+                    if dia_values: bp_diastolic = int(round(mean(dia_values)))
 
             # ---------------------------------------------------------
-            # Fallbacks (Steps) (Preserved your logic)
+            # Fallbacks (Steps)
             # ---------------------------------------------------------
             steps = None
             if summary:
