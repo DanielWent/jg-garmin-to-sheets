@@ -6,7 +6,6 @@ on:
     - cron: '0 6,7,8,9,10,13,18,19,20 * * *'
     - cron: '30 18 * * *'
   
-  # UPDATED: Allows manual triggering with specific dates for debugging
   workflow_dispatch:
     inputs:
       start_date:
@@ -15,6 +14,14 @@ on:
       end_date:
         description: 'End Date (YYYY-MM-DD)'
         required: false
+      output_type:
+        description: 'Output Destination'
+        required: true
+        default: 'drive'
+        type: choice
+        options:
+        - drive
+        - sheets
 
 jobs:
   sync:
@@ -33,30 +40,36 @@ jobs:
       run: |
         pip install -r requirements.txt
 
-    # UPDATED STEP: Run with logic to handle manual dates and capture logs
     - name: Run Sync Script with Logging
       env:
+        # Secrets must be set in GitHub Repo Settings > Secrets and variables > Actions
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        # SHEET_ID is optional if only using Drive/CSV
         USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
-        PYTHONUNBUFFERED: "1" # Ensures logs are flushed immediately
-        LOG_LEVEL: "DEBUG"    # <--- NEW: Set log level cleanly via env var
+        # CRITICAL: Ensure you added this secret for the CSV folder
+        USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        PYTHONUNBUFFERED: "1"
+        LOG_LEVEL: "DEBUG"
       run: |
-        # Check if manual inputs were provided (from workflow_dispatch)
+        # Check if manual inputs were provided
         if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
           echo "🛠️ DEBUG MODE: Running manual sync from ${{ inputs.start_date }} to ${{ inputs.end_date }}..."
-          # Run CLI mode with the provided dates, piping output to console AND a file
-          python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile USER1 --output-type sheets 2>&1 | tee sync_debug.log
+          
+          # Default to 'drive' if the input is somehow missing, otherwise use the input
+          OUTPUT_TYPE="${{ inputs.output_type }}"
+          if [ -z "$OUTPUT_TYPE" ]; then OUTPUT_TYPE="drive"; fi
+          
+          python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile USER1 --output-type $OUTPUT_TYPE 2>&1 | tee sync_debug.log
         else
-          echo "🔄 AUTOMATED MODE: Running standard daily sync..."
-          # Run standard mode
+          echo "🔄 AUTOMATED MODE: Running standard daily sync (Default to Drive)..."
+          # The main() function in src/main.py defaults to 'drive'
           python -m src.main 2>&1 | tee sync_debug.log
         fi
 
-    # NEW STEP: Upload the log file so you can download and read it
     - name: Upload Debug Log
-      if: always() # Run this even if the script crashes
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: garmin-debug-log
