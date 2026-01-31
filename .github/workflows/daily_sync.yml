@@ -42,14 +42,19 @@ jobs:
 
     - name: Run Sync Script with Logging
       env:
-        # Secrets must be set in GitHub Repo Settings > Secrets and variables > Actions
+        # === USER 1 SECRETS ===
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
-        GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
-        # SHEET_ID is optional if only using Drive/CSV
-        USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
-        # CRITICAL: Ensure you added this secret for the CSV folder
         USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        
+        # === USER 2 SECRETS (ADD THESE) ===
+        USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
+        USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
+        USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
+        
+        # === SHARED CONFIG ===
+        GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "DEBUG"
       run: |
@@ -57,14 +62,15 @@ jobs:
         if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
           echo "🛠️ DEBUG MODE: Running manual sync from ${{ inputs.start_date }} to ${{ inputs.end_date }}..."
           
-          # Default to 'drive' if the input is somehow missing, otherwise use the input
           OUTPUT_TYPE="${{ inputs.output_type }}"
           if [ -z "$OUTPUT_TYPE" ]; then OUTPUT_TYPE="drive"; fi
           
+          # NOTE: Manual workflow dispatch currently targets USER1 by default. 
+          # To target USER2 manually via GitHub UI, you would need to add a 'profile' input to workflow_dispatch.
           python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile USER1 --output-type $OUTPUT_TYPE 2>&1 | tee sync_debug.log
         else
-          echo "🔄 AUTOMATED MODE: Running standard daily sync (Default to Drive)..."
-          # The main() function in src/main.py defaults to 'drive'
+          echo "🔄 AUTOMATED MODE: Running standard daily sync for ALL configured users..."
+          # The updated main.py will detect it is running in CI and loop through both USER1 and USER2
           python -m src.main 2>&1 | tee sync_debug.log
         fi
 
