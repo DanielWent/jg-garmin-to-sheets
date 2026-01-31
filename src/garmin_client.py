@@ -31,7 +31,6 @@ class GarminClient:
 
         except AttributeError as e:
             if "'dict' object has no attribute 'expired'" in str(e):
-                logger.info("Caught AttributeError indicating MFA challenge.")
                 if hasattr(self.client.garth, 'oauth2_token') and isinstance(self.client.garth.oauth2_token, dict):
                     self.mfa_ticket_dict = self.client.garth.oauth2_token
                     raise MFARequiredException(message="MFA code is required.", mfa_data=self.mfa_ticket_dict)
@@ -59,11 +58,9 @@ class GarminClient:
     def _find_training_load(self, data: Any) -> Optional[int]:
         if not data:
             return None
-        
         stack = [data]
         while stack:
             current = stack.pop()
-            
             if isinstance(current, dict):
                 if 'dailyTrainingLoadAcute' in current and current['dailyTrainingLoadAcute'] is not None:
                     return int(round(current['dailyTrainingLoadAcute']))
@@ -71,18 +68,13 @@ class GarminClient:
                     return int(round(current['acuteLoad']))
                 if 'sevenDayLoad' in current and current['sevenDayLoad'] is not None:
                     return int(round(current['sevenDayLoad']))
-                if 'timeInZoneLoad' in current and current['timeInZoneLoad'] is not None:
-                     return int(round(current['timeInZoneLoad']))
-                
                 for value in current.values():
                     if isinstance(value, (dict, list)):
                         stack.append(value)
-            
             elif isinstance(current, list):
                 for item in current:
                     if isinstance(item, (dict, list)):
                         stack.append(item)
-                        
         return None
 
     def _calculate_pace(self, speed_ms: float) -> str:
@@ -98,8 +90,6 @@ class GarminClient:
 
     async def get_metrics(self, target_date: date) -> GarminMetrics:
         if not self._authenticated:
-            if self._auth_failed:
-                raise Exception("Authentication previously failed.")
             await self.authenticate()
 
         async def safe_fetch(name, coro):
@@ -137,14 +127,8 @@ class GarminClient:
             modern_url = f"metrics-service/metrics/trainingstatus/aggregated/{target_iso}"
             c_training_modern = direct_fetch("Training Status (Modern)", modern_url)
             c_lactate_direct = safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
-            
-            c_lactate_range_hr = safe_fetch("Lactate Range HR", loop.run_in_executor(
-                None, partial(self.client.connectapi, task_lactate_hr_url, params=lactate_params)
-            ))
-            
-            c_lactate_range_speed = safe_fetch("Lactate Range Speed", loop.run_in_executor(
-                None, partial(self.client.connectapi, task_lactate_speed_url, params=lactate_params)
-            ))
+            c_lactate_range_hr = safe_fetch("Lactate Range HR", loop.run_in_executor(None, partial(self.client.connectapi, task_lactate_hr_url, params=lactate_params)))
+            c_lactate_range_speed = safe_fetch("Lactate Range Speed", loop.run_in_executor(None, partial(self.client.connectapi, task_lactate_speed_url, params=lactate_params)))
 
             results = await asyncio.gather(
                 c_summary, c_stats, c_sleep, c_hrv, c_bp, c_activities, 
@@ -159,27 +143,26 @@ class GarminClient:
             bb_max = summary.get('bodyBatteryHighestValue') if summary else None
             bb_min = summary.get('bodyBatteryLowestValue') if summary else None
 
-            # --- Body Parsing with full metrics ---
-            weight = None
-            body_fat = None
-            bmi = None
-            skeletal_muscle = None
-            bone_mass = None
-            body_water = None
-            visceral_fat = None
+            # --- Safe Body Parsing ---
+            weight = body_fat = bmi = skeletal_muscle = bone_mass = body_water = visceral_fat = None
             
-            if stats:
-                if stats.get('weight'): 
-                    weight = stats.get('weight') / 1000
-                body_fat = stats.get('bodyFat')
-                bmi = stats.get('bmi')
-                if stats.get('muscleMass'): skeletal_muscle = stats.get('muscleMass') / 1000
-                if stats.get('boneMass'): bone_mass = stats.get('boneMass') / 1000
-                body_water = stats.get('bodyWater')
-                visceral_fat = stats.get('visceralFat')
+            # Handle stats if returned as a list
+            body_dict = None
+            if isinstance(stats, list) and len(stats) > 0:
+                body_dict = stats[0]
+            elif isinstance(stats, dict):
+                body_dict = stats
 
-            bp_systolic = None
-            bp_diastolic = None
+            if body_dict:
+                if body_dict.get('weight'): weight = body_dict.get('weight') / 1000
+                body_fat = body_dict.get('bodyFat')
+                bmi = body_dict.get('bmi')
+                if body_dict.get('muscleMass'): skeletal_muscle = body_dict.get('muscleMass') / 1000
+                if body_dict.get('boneMass'): bone_mass = body_dict.get('boneMass') / 1000
+                body_water = body_dict.get('bodyWater')
+                visceral_fat = body_dict.get('visceralFat')
+
+            bp_systolic = bp_diastolic = None
             if bp_payload:
                 try:
                     readings = []
@@ -188,7 +171,6 @@ class GarminClient:
                         for s_item in summaries:
                             if 'measurements' in s_item: readings.extend(s_item['measurements'])
                     elif isinstance(bp_payload, list): readings = bp_payload
-                    
                     if readings:
                         sys_v = [r['systolic'] for r in readings if r.get('systolic')]
                         dia_v = [r['diastolic'] for r in readings if r.get('diastolic')]
@@ -240,7 +222,6 @@ class GarminClient:
                         d_min = (act.get('duration') or 0) / 60
                         pace_s = self._calculate_pace(act.get('averageSpeed'))
                         gap_s = self._calculate_pace(act.get('avgGradeAdjustedSpeed'))
-                        
                         z_dict = {f"HR Zone {i} (min)": 0 for i in range(1, 6)}
                         try:
                             hz = await loop.run_in_executor(None, self.client.get_activity_hr_in_timezones, act_id)
@@ -249,7 +230,6 @@ class GarminClient:
                                     zn, zs = z.get('zoneNumber'), z.get('secsInZone', 0)
                                     if zn and 1 <= zn <= 5: z_dict[f"HR Zone {zn} (min)"] = round(zs/60, 2)
                         except Exception: pass
-
                         entry = {
                             "Activity ID": act_id,
                             "Date (YYYY-MM-DD)": target_iso,
@@ -287,67 +267,35 @@ class GarminClient:
                 rf = summary.get('floorsAscended') or summary.get('floorsClimbed')
                 if rf is not None: floors = round(float(rf))
 
-            vo2_r = vo2_c = train_p = l_bpm = l_pace = None
+            vo2_r = train_p = l_bpm = l_pace = None
             if lactate_data:
                 l_bpm = lactate_data.get('heartRate')
                 l_pace = self._calculate_pace(lactate_data.get('speed'))
-            
             if training_status_std:
                 mrv = training_status_std.get('mostRecentVO2Max', {})
                 vo2_r = mrv.get('generic', {}).get('vo2MaxValue')
-                vo2_c = mrv.get('cycling', {}).get('vo2MaxValue')
                 tsf = training_status_std.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
                 for v in tsf.values():
                     train_p = v.get('trainingStatusFeedbackPhrase')
                     break
-
             seven_day_load = self._find_training_load(training_status_modern or training_status_std or summary)
 
             return GarminMetrics(
                 date=target_date,
-                sleep_score=sleep_score,
-                sleep_need=sleep_need,
-                sleep_efficiency=sleep_efficiency,
-                sleep_length=sleep_length,
-                sleep_start_time=sleep_start_time, 
-                sleep_end_time=sleep_end_time,     
-                sleep_deep=sleep_deep,             
-                sleep_light=sleep_light,           
-                sleep_rem=sleep_rem,               
-                sleep_awake=sleep_awake,
-                overnight_respiration=overnight_respiration, 
-                overnight_pulse_ox=overnight_pulse_ox,       
-                weight=weight,
-                bmi=bmi,
-                body_fat=body_fat,
-                skeletal_muscle=skeletal_muscle,
-                bone_mass=bone_mass,
-                body_water=body_water,
-                visceral_fat=visceral_fat,
-                blood_pressure_systolic=bp_systolic,
-                blood_pressure_diastolic=bp_diastolic,
-                resting_heart_rate=resting_hr,
-                average_stress=avg_stress,
-                rest_stress_duration=rsd,
-                low_stress_duration=lsd,
-                medium_stress_duration=msd,
-                high_stress_duration=hsd,
-                body_battery_max=bb_max,
-                body_battery_min=bb_min,
-                overnight_hrv=overnight_hrv_v,
-                hrv_status=hrv_status_v,
-                vo2max_running=vo2_r,
-                vo2max_cycling=vo2_c,
-                seven_day_load=seven_day_load,
-                lactate_threshold_bpm=l_bpm,
-                lactate_threshold_pace=l_pace,
-                training_status=train_p,
-                active_calories=active_cal,
-                resting_calories=resting_cal,
-                intensity_minutes=intensity_min,
-                steps=steps,
-                floors_climbed=floors,
-                activities=processed_activities
+                sleep_score=sleep_score, sleep_need=sleep_need, sleep_efficiency=sleep_efficiency,
+                sleep_length=sleep_length, sleep_start_time=sleep_start_time, sleep_end_time=sleep_end_time,
+                sleep_deep=sleep_deep, sleep_light=sleep_light, sleep_rem=sleep_rem, sleep_awake=sleep_awake,
+                overnight_respiration=overnight_respiration, overnight_pulse_ox=overnight_pulse_ox,
+                weight=weight, bmi=bmi, body_fat=body_fat, skeletal_muscle=skeletal_muscle,
+                bone_mass=bone_mass, body_water=body_water, visceral_fat=visceral_fat,
+                blood_pressure_systolic=bp_systolic, blood_pressure_diastolic=bp_diastolic,
+                resting_heart_rate=resting_hr, average_stress=avg_stress,
+                rest_stress_duration=rsd, low_stress_duration=lsd, medium_stress_duration=msd, high_stress_duration=hsd,
+                body_battery_max=bb_max, body_battery_min=bb_min, overnight_hrv=overnight_hrv_v,
+                hrv_status=hrv_status_v, vo2max_running=vo2_r, seven_day_load=seven_day_load,
+                lactate_threshold_bpm=l_bpm, lactate_threshold_pace=l_pace, training_status=train_p,
+                active_calories=active_cal, resting_calories=resting_cal, intensity_minutes=intensity_min,
+                steps=steps, floors_climbed=floors, activities=processed_activities
             )
         except Exception as e:
             logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
