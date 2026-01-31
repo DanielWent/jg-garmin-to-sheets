@@ -164,11 +164,11 @@ class GarminClient:
              training_status_std, training_status_modern, 
              lactate_data, lactate_range_hr, lactate_range_speed) = results
 
-            # --- FIX: Handle List vs Dict Responses to prevent crashes ---
-            if isinstance(summary, list): 
+            # --- FIX: Restore original list handling logic to prevent crashes ---
+            if isinstance(summary, list):
                 summary = summary[0] if summary else {}
             
-            if isinstance(stats, list): 
+            if isinstance(stats, list):
                 stats = stats[0] if stats else {}
 
             if isinstance(sleep_data, list):
@@ -202,13 +202,14 @@ class GarminClient:
                     weight = stats.get('weight') / 1000
                 body_fat = stats.get('bodyFat')
                 bmi = stats.get('bmi')
+                # --- Added missing fields you requested ---
                 if stats.get('muscleMass'): skeletal_muscle = stats.get('muscleMass') / 1000
                 if stats.get('boneMass'): bone_mass = stats.get('boneMass') / 1000
                 body_water = stats.get('bodyWater')
                 visceral_fat = stats.get('visceralFat')
 
             # ---------------------------------------------------------
-            # Blood Pressure Parsing
+            # Blood Pressure Parsing (Preserved your robustness logic)
             # ---------------------------------------------------------
             bp_systolic = None
             bp_diastolic = None
@@ -240,7 +241,7 @@ class GarminClient:
                     logger.error(f"[{target_date}] Error parsing Blood Pressure: {e_bp}")
 
             # ---------------------------------------------------------
-            # Fallbacks (Steps)
+            # Fallbacks (Steps) (Preserved your logic)
             # ---------------------------------------------------------
             steps = None
             if summary:
@@ -344,23 +345,18 @@ class GarminClient:
 
                         cal = activity.get('calories')
                         
-                        # --- FIX 1: Map elevationGain/Loss correctly ---
-                        elev_gain = activity.get('elevationGain') # Used for Total Ascent
-                        elev_loss = activity.get('elevationLoss') # Used for Total Descent
+                        elev_gain = activity.get('elevationGain') 
+                        elev_loss = activity.get('elevationLoss') 
                         
                         aerobic_te = activity.get('aerobicTrainingEffect')
                         anaerobic_te = activity.get('anaerobicTrainingEffect')
 
-                        # Metrics
                         avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
                         training_effect = activity.get('trainingEffectLabel')
 
-                        # --- FIX 2: Calculate GAP from avgGradeAdjustedSpeed ---
-                        # Note: 'avgGradeAdjustedSpeed' is in m/s, matching 'averageSpeed'.
                         gap_speed = activity.get('avgGradeAdjustedSpeed')
                         gap_str = self._calculate_pace(gap_speed)
 
-                        # HR Zones
                         zones_dict = {
                             "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
                             "HR Zone 3 (min)": 0, "HR Zone 4 (min)": 0, "HR Zone 5 (min)": 0
@@ -379,7 +375,6 @@ class GarminClient:
                         except Exception as e_zone:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
 
-                        # Build Entry
                         activity_entry = {
                             "Activity ID": act_id,
                             "Date (YYYY-MM-DD)": target_date.isoformat(),
@@ -392,20 +387,16 @@ class GarminClient:
                             "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
                             "Max HR (bpm)": int(max_hr) if max_hr else "",
                             "Total Calories (kcal)": int(cal) if cal else "",
-                            
-                            # Mapped fields
                             "Elevation Gain (m)": int(elev_gain) if elev_gain else "",
                             "Total Ascent (m)": int(elev_gain) if elev_gain else "",
                             "Total Descent (m)": int(elev_loss) if elev_loss else "",
                             "Average Grade Adjusted Pace (min/km)": gap_str,
-                            
                             "Aerobic TE (0-5.0)": aerobic_te,
                             "Anaerobic TE (0-5.0)": anaerobic_te,
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
                             "Garmin Training Effect Label": training_effect if training_effect else "",
                         }
                         activity_entry.update(zones_dict)
-                        
                         processed_activities.append(activity_entry)
 
                     except Exception as e_act:
@@ -431,7 +422,6 @@ class GarminClient:
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
                 
-                # --- UPDATED: Convert Stress Durations from Seconds to Minutes ---
                 rsd = summary.get('restStressDuration')
                 if rsd is not None:
                     rest_stress_dur = int(round(rsd / 60))
@@ -447,7 +437,6 @@ class GarminClient:
                 hsd = summary.get('highStressDuration')
                 if hsd is not None:
                     high_stress_dur = int(round(hsd / 60))
-                # -----------------------------------------------------------------
 
                 raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
                 if raw_floors is not None:
@@ -456,14 +445,13 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
 
-            # --- Training Load & Lactate (APPLYING WORKING LOGIC) ---
+            # --- Training Load & Lactate ---
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
             lactate_bpm = None
             lactate_pace = None
 
-            # 1. Try Method A (Direct Latest)
             if lactate_data:
                 if 'heartRate' in lactate_data:
                     lactate_bpm = lactate_data['heartRate']
@@ -471,12 +459,10 @@ class GarminClient:
                     speed_ms = lactate_data['speed']
                     lactate_pace = self._calculate_pace(speed_ms)
             
-            # 2. Try Method B (Range Query) - If Method A failed
             if not lactate_bpm and lactate_range_hr and isinstance(lactate_range_hr, list):
                 try:
                     last_entry = lactate_range_hr[-1] 
-                    if isinstance(last_entry, dict):
-                         if 'value' in last_entry:
+                    if isinstance(last_entry, dict) and 'value' in last_entry:
                              lactate_bpm = int(last_entry['value'])
                 except Exception as e:
                     logger.debug(f"Parsing lactate HR range failed: {e}")
@@ -486,16 +472,13 @@ class GarminClient:
                     last_entry = lactate_range_speed[-1]
                     if isinstance(last_entry, dict) and 'value' in last_entry:
                         speed_ms = last_entry['value']
-                        # Sometimes range data is in different units, but typically m/s
                         if speed_ms and speed_ms > 0:
-                            if speed_ms < 1.0: # Heuristic for potential unit mismatch if needed
+                            if speed_ms < 1.0: 
                                 speed_ms *= 10  
                             lactate_pace = self._calculate_pace(speed_ms)
-
                 except Exception as e:
                      logger.debug(f"Parsing lactate Speed range failed: {e}")
 
-            # 3. Method C: Extract from Training Status (Last Resort)
             if training_status_std:
                 mr_vo2 = training_status_std.get('mostRecentVO2Max', {})
                 if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
@@ -512,7 +495,6 @@ class GarminClient:
                     if mr_ts and 'lactateThresholdHeartRate' in mr_ts:
                         lactate_bpm = mr_ts['lactateThresholdHeartRate']
 
-            # Modern Training Status fallback for Load
             seven_day_load = None
             if training_status_modern:
                 seven_day_load = self._find_training_load(training_status_modern)
