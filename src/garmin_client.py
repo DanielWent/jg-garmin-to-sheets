@@ -145,8 +145,6 @@ class GarminClient:
 
             # --- Safe Body Parsing ---
             weight = body_fat = bmi = skeletal_muscle = bone_mass = body_water = visceral_fat = None
-            
-            # Handle stats if returned as a list
             body_dict = None
             if isinstance(stats, list) and len(stats) > 0:
                 body_dict = stats[0]
