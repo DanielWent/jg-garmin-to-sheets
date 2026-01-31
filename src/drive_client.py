@@ -34,11 +34,15 @@ class GoogleDriveClient:
                 attr = HEADER_TO_ATTRIBUTE_MAP.get(h)
                 val = getattr(m, attr, None) if attr else None
                 
-                # Apply same formatting logic as Sheets
+                # Formatting Logic
                 if isinstance(val, date):
                     val = val.isoformat()
                 elif isinstance(val, float):
-                    val = round(val, 2)
+                    # --- NEW LOGIC: Specific rounding for VO2 Max ---
+                    if "VO2 Max" in h:
+                        val = round(val, 1)
+                    else:
+                        val = round(val, 2)
                 
                 row[h] = val
             data.append(row)
@@ -54,14 +58,11 @@ class GoogleDriveClient:
                 all_activities.extend(m.activities)
         
         if not all_activities:
-            # Return empty DF with correct columns if no data
             return pd.DataFrame(columns=headers)
 
         df = pd.DataFrame(all_activities)
         
-        # CRITICAL: This reindex is what forces the CSV to match your config exactly.
-        # It keeps only the columns listed in 'headers' (ACTIVITY_HEADERS)
-        # and creates empty columns for any missing ones (e.g. if an activity had no HR data).
+        # Strict column enforcement
         df = df.reindex(columns=headers)
         
         return df
@@ -101,7 +102,6 @@ class GoogleDriveClient:
                 
                 # Sort
                 if is_activity:
-                    # Activities usually sort by Date (YYYY-MM-DD)
                     if 'Date (YYYY-MM-DD)' in combined_df.columns:
                         combined_df = combined_df.sort_values(by='Date (YYYY-MM-DD)', ascending=False)
                 elif sort_date_desc and 'Date' in combined_df.columns:
