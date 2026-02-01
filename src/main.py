@@ -44,7 +44,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 metrics_to_write.append(m)
             current_date += timedelta(days=1)
 
-        # 3. Filter for Historical Data (Strict "No Today" Rule for specific files)
+        # 3. Filter for Historical Data (Strict "No Today" Rule for General Summary)
         today = date.today()
         # This list excludes any data from today.
         metrics_historical = [m for m in metrics_to_write if m.date < today]
@@ -61,20 +61,20 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 drive_client = GoogleDriveClient('credentials/client_secret.json', folder_id)
                 
                 # A. LIVE FILES (Update with 'metrics_to_write' to include today's data)
-                # These update immediately with whatever data is available for today.
+                # You requested these stay as they are (updating live).
                 drive_client.update_csv("garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
                 drive_client.update_csv("garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
                 drive_client.update_csv("garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
                 drive_client.update_activities_csv("garmin_activities_list.csv", metrics_to_write, ACTIVITY_HEADERS)
                 
                 # B. HISTORICAL ONLY FILES (Update with 'metrics_historical')
+                # These files will strictly EXCLUDE today's data.
                 if metrics_historical:
-                    # STRICTLY HISTORICAL: This file will NOT contain today's data.
                     drive_client.update_csv("general_summary.csv", metrics_historical, GENERAL_SUMMARY_HEADERS)
-                    
-                    # These are typically historical too, as stress/daily summary is best calculated end-of-day
                     drive_client.update_csv("garmin_stress.csv", metrics_historical, STRESS_HEADERS)
                     drive_client.update_csv("garmin_activity_summary.csv", metrics_historical, ACTIVITY_SUMMARY_HEADERS)
+                else:
+                    logger.info(f"[{profile_name}] Skipping General Summary update (No historical data found).")
                 
                 logger.info(f"[{profile_name}] Google Drive CSV sync completed successfully!")
             except Exception as e:
@@ -90,7 +90,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             
             try:
                 sheets_client = GoogleSheetsClient('credentials/client_secret.json', sheet_id, profile_data.get('sheet_name', 'Garmin Data'))
-                # Update Sheets (Sheets client uses its own logic, assuming live update is fine here as per request)
+                # Update Sheets (Sheets logic handles its own filtering/sorting)
                 sheets_client.update_metrics(metrics_to_write)
                 sheets_client.update_activities_tab(metrics_to_write)
                 sheets_client.sort_sheets()
@@ -147,7 +147,7 @@ def interactive():
     choice = input("Select output (1/2): ")
     output_type = 'drive' if choice == '1' else 'sheets'
     
-    # Simple profile selector (defaults to USER1 for simplicity in this example)
+    # Simple profile selector (defaults to USER1 for simplicity)
     profile = "USER1" 
     
     start_str = input("Enter start date (YYYY-MM-DD): ")
@@ -155,11 +155,13 @@ def interactive():
     
     cli_sync(start_str, end_str, profile, output_type)
 
-def main():
-    if len(sys.argv) > 1:
-        app()
-    else:
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context):
+    """
+    Entry point: Runs interactive mode if no sub-command is passed.
+    """
+    if ctx.invoked_subcommand is None:
         interactive()
 
 if __name__ == "__main__":
-    main()
+    app()
