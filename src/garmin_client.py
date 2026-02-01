@@ -28,6 +28,9 @@ class GarminClient:
         self._authenticated = False
         self.mfa_ticket_dict = None
         self._auth_failed = False
+        
+        self.user_full_name = None
+        self.user_age = None
 
     async def authenticate(self):
         """
@@ -51,6 +54,7 @@ class GarminClient:
                 self.client.garth.load(saved_tokens)
                 self._authenticated = True
                 logger.info(f"Resumed session successfully for {self.email}")
+                await self._fetch_user_profile_info()
                 return
             except Exception as e:
                 logger.warning(f"Failed to resume session for {self.profile_name}: {e}")
@@ -65,6 +69,7 @@ class GarminClient:
             self._authenticated = True
             self.mfa_ticket_dict = None
             logger.info(f"Authenticated successfully as {self.email} (Fresh Login)")
+            await self._fetch_user_profile_info()
 
             # 3. Save tokens to isolated file
             try:
@@ -91,6 +96,40 @@ class GarminClient:
         except Exception as e:
             logger.error(f"Authentication error: {str(e)}")
             raise garminconnect.GarminConnectAuthenticationError(f"Authentication error: {str(e)}") from e
+
+    async def _fetch_user_profile_info(self):
+        """Fetches User Name and Age after authentication."""
+        loop = asyncio.get_event_loop()
+        try:
+            # Fetch User Name
+            if not self.user_full_name:
+                try:
+                    display_name = self.client.display_name
+                    if display_name:
+                        social_profile = await loop.run_in_executor(
+                            None, self.client.get_social_profile, display_name
+                        )
+                        if social_profile:
+                            self.user_full_name = social_profile.get('fullName')
+                except Exception as e:
+                    logger.warning(f"Failed to fetch user name: {e}")
+
+            # Fetch Age (via DOB)
+            if not self.user_age:
+                try:
+                    # Attempt to get user settings which often contains birthDate
+                    user_settings = await loop.run_in_executor(None, self.client.get_user_settings)
+                    if user_settings and 'userData' in user_settings:
+                        dob_str = user_settings['userData'].get('birthDate')
+                        if dob_str:
+                            dob = datetime.strptime(dob_str, "%Y-%m-%d").date()
+                            today = date.today()
+                            self.user_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                except Exception as e:
+                    logger.warning(f"Failed to fetch or calculate user age: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"Error in _fetch_user_profile_info: {e}")
 
     async def _fetch_hrv_data(self, target_date_iso: str) -> Optional[Dict[str, Any]]:
         try:
@@ -581,6 +620,10 @@ class GarminClient:
 
             return GarminMetrics(
                 date=target_date,
+                # User Profile Info
+                user_name=self.user_full_name,
+                user_age=self.user_age,
+                # Sleep
                 sleep_score=sleep_score,
                 sleep_need=sleep_need,
                 sleep_efficiency=sleep_efficiency,
@@ -592,7 +635,8 @@ class GarminClient:
                 sleep_rem=sleep_rem,               
                 sleep_awake=sleep_awake,
                 overnight_respiration=overnight_respiration, 
-                overnight_pulse_ox=overnight_pulse_ox,       
+                overnight_pulse_ox=overnight_pulse_ox,
+                # Body
                 weight=weight,
                 bmi=bmi,
                 body_fat=body_fat,
@@ -602,6 +646,7 @@ class GarminClient:
                 visceral_fat=visceral_fat,
                 blood_pressure_systolic=bp_systolic,
                 blood_pressure_diastolic=bp_diastolic,
+                # Stress/Heart
                 resting_heart_rate=resting_hr,
                 average_stress=avg_stress,
                 rest_stress_duration=rest_stress_dur,
@@ -610,14 +655,17 @@ class GarminClient:
                 high_stress_duration=high_stress_dur,
                 body_battery_max=bb_max,
                 body_battery_min=bb_min,
+                # HRV
                 overnight_hrv=overnight_hrv_value,
                 hrv_status=hrv_status_value,
+                # Training
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
                 seven_day_load=seven_day_load,
                 lactate_threshold_bpm=lactate_bpm,
                 lactate_threshold_pace=lactate_pace,
                 training_status=train_phrase,
+                # Summary
                 active_calories=active_cal,
                 resting_calories=resting_cal,
                 intensity_minutes=intensity_min,
