@@ -2,7 +2,7 @@ import logging
 import asyncio
 import os
 import sys
-from datetime import date, datetime, timedelta # <--- FIXED: Added missing imports
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 import typer
 from dotenv import load_dotenv
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+# Initialize Typer App
 app = typer.Typer()
 
 async def sync(email: str, password: str, start_date: date, end_date: date, output_type: str, profile_data: dict, profile_name: str = ""):
@@ -43,7 +44,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 metrics_to_write.append(m)
             current_date += timedelta(days=1)
 
-        # 3. Filter for Historical Data Only
+        # 3. Filter for Historical Data (Strict "No Today" Rule for specific files)
         today = date.today()
         # This list excludes any data from today.
         metrics_historical = [m for m in metrics_to_write if m.date < today]
@@ -60,6 +61,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 drive_client = GoogleDriveClient('credentials/client_secret.json', folder_id)
                 
                 # A. LIVE FILES (Update with 'metrics_to_write' to include today's data)
+                # These update immediately with whatever data is available for today.
                 drive_client.update_csv("garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
                 drive_client.update_csv("garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
                 drive_client.update_csv("garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
@@ -88,7 +90,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             
             try:
                 sheets_client = GoogleSheetsClient('credentials/client_secret.json', sheet_id, profile_data.get('sheet_name', 'Garmin Data'))
-                # Update Sheets
+                # Update Sheets (Sheets client uses its own logic, assuming live update is fine here as per request)
                 sheets_client.update_metrics(metrics_to_write)
                 sheets_client.update_activities_tab(metrics_to_write)
                 sheets_client.sort_sheets()
@@ -100,7 +102,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         logger.error(f"[{profile_name}] Sync process failed: {e}", exc_info=True)
 
 
-@app.command()
+@app.command(name="cli-sync")
 def cli_sync(
     start_date: str = typer.Option(..., help="Start date YYYY-MM-DD"),
     end_date: str = typer.Option(..., help="End date YYYY-MM-DD"),
