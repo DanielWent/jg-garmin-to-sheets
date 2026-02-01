@@ -55,12 +55,20 @@ jobs:
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
+        # New Hardcoded Values for User 1
+        USER1_NAME: ${{ secrets.USER1_NAME }}
+        USER1_DOB: ${{ secrets.USER1_DOB }}
+        USER1_GENDER: ${{ secrets.USER1_GENDER }}
         
         # === USER 2 SECRETS ===
         USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
         USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
         USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
         USER2_SHEET_ID: ${{ secrets.USER2_SHEET_ID }}
+        # New Hardcoded Values for User 2
+        USER2_NAME: ${{ secrets.USER2_NAME }}
+        USER2_DOB: ${{ secrets.USER2_DOB }}
+        USER2_GENDER: ${{ secrets.USER2_GENDER }}
         
         # === SHARED CONFIG ===
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
@@ -78,7 +86,6 @@ jobs:
           python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile ${{ inputs.profile }} --output-type $OUTPUT_TYPE 2>&1 | tee sync_debug.log
         else
           echo "🔄 AUTOMATED MODE: Running standard daily sync for ALL configured users..."
-          # The main.py logic iterates through all profiles found in the environment
           python -m src.main 2>&1 | tee sync_debug.log
         fi
 
