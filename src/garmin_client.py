@@ -14,10 +14,14 @@ from functools import partial
 logger = logging.getLogger(__name__)
 
 class GarminClient:
-    def __init__(self, email: str, password: str, profile_name: str = "default"):
+    def __init__(self, email: str, password: str, profile_name: str = "default", 
+                 manual_name: str = None, manual_dob: str = None, manual_gender: str = None):
         self.email = email
         self.password = password
         self.profile_name = profile_name
+        self.manual_name = manual_name
+        self.manual_dob = manual_dob
+        self.manual_gender = manual_gender  # <--- NEW
         
         # Create an isolated directory for this user's session tokens
         self.session_dir = Path(f"~/.garth/{self.profile_name}").expanduser()
@@ -31,16 +35,15 @@ class GarminClient:
         
         self.user_full_name = None
         self.user_age = None
+        self.user_gender = None # <--- NEW
 
     async def authenticate(self):
         """
         Authenticate using isolated token storage.
-        Attempts to resume a session from the profile-specific folder.
-        If that fails, performs a fresh login and saves the new tokens to that folder.
         """
         loop = asyncio.get_event_loop()
         
-        # Configure global garth domain (without invalid 'folder' argument)
+        # Configure global garth domain
         garth.configure(domain="garmin.com")
 
         # 1. Try to resume from isolated token file
@@ -50,7 +53,6 @@ class GarminClient:
                 with open(self.token_file, "r") as f:
                     saved_tokens = json.load(f)
                 
-                # Load tokens directly into this client's garth instance
                 self.client.garth.load(saved_tokens)
                 self._authenticated = True
                 logger.info(f"Resumed session successfully for {self.email}")
@@ -58,7 +60,6 @@ class GarminClient:
                 return
             except Exception as e:
                 logger.warning(f"Failed to resume session for {self.profile_name}: {e}")
-                # Fall through to fresh login
 
         # 2. Fresh Login
         try:
@@ -98,38 +99,48 @@ class GarminClient:
             raise garminconnect.GarminConnectAuthenticationError(f"Authentication error: {str(e)}") from e
 
     async def _fetch_user_profile_info(self):
-        """Fetches User Name and Age after authentication."""
+        """Fetches User Name and Age, preferring manual overrides."""
         loop = asyncio.get_event_loop()
-        try:
-            # Fetch User Name
-            if not self.user_full_name:
-                try:
-                    display_name = self.client.display_name
-                    if display_name:
-                        social_profile = await loop.run_in_executor(
-                            None, self.client.get_social_profile, display_name
-                        )
-                        if social_profile:
-                            self.user_full_name = social_profile.get('fullName')
-                except Exception as e:
-                    logger.warning(f"Failed to fetch user name: {e}")
+        
+        # 1. Set Name
+        if self.manual_name:
+            self.user_full_name = self.manual_name
+        
+        # 2. Set Gender
+        if self.manual_gender:
+            self.user_gender = self.manual_gender
 
-            # Fetch Age (via DOB)
+        # 3. Set Age (from DOB)
+        if self.manual_dob:
+            try:
+                dob = datetime.strptime(self.manual_dob, "%Y-%m-%d").date()
+                today = date.today()
+                self.user_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            except ValueError:
+                logger.warning(f"Invalid format for USER_DOB: {self.manual_dob}. Use YYYY-MM-DD.")
+
+        # Fallback to API if not manually set
+        try:
+            if not self.user_full_name:
+                display_name = self.client.display_name
+                if display_name:
+                    social_profile = await loop.run_in_executor(
+                        None, self.client.get_social_profile, display_name
+                    )
+                    if social_profile:
+                        self.user_full_name = social_profile.get('fullName')
+            
             if not self.user_age:
-                try:
-                    # Attempt to get user settings which often contains birthDate
-                    user_settings = await loop.run_in_executor(None, self.client.get_user_settings)
-                    if user_settings and 'userData' in user_settings:
-                        dob_str = user_settings['userData'].get('birthDate')
-                        if dob_str:
-                            dob = datetime.strptime(dob_str, "%Y-%m-%d").date()
-                            today = date.today()
-                            self.user_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-                except Exception as e:
-                    logger.warning(f"Failed to fetch or calculate user age: {e}")
+                user_settings = await loop.run_in_executor(None, self.client.get_user_settings)
+                if user_settings and 'userData' in user_settings:
+                    dob_str = user_settings['userData'].get('birthDate')
+                    if dob_str:
+                        dob = datetime.strptime(dob_str, "%Y-%m-%d").date()
+                        today = date.today()
+                        self.user_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
                     
         except Exception as e:
-            logger.warning(f"Error in _fetch_user_profile_info: {e}")
+            logger.warning(f"Error in _fetch_user_profile_info (fallback): {e}")
 
     async def _fetch_hrv_data(self, target_date_iso: str) -> Optional[Dict[str, Any]]:
         try:
@@ -141,13 +152,10 @@ class GarminClient:
             return None
 
     def _find_training_load(self, data: Any) -> Optional[int]:
-        if not data:
-            return None
-        
+        if not data: return None
         stack = [data]
         while stack:
             current = stack.pop()
-            
             if isinstance(current, dict):
                 if 'dailyTrainingLoadAcute' in current and current['dailyTrainingLoadAcute'] is not None:
                     return int(round(current['dailyTrainingLoadAcute']))
@@ -157,22 +165,17 @@ class GarminClient:
                     return int(round(current['sevenDayLoad']))
                 if 'timeInZoneLoad' in current and current['timeInZoneLoad'] is not None:
                      return int(round(current['timeInZoneLoad']))
-                
                 for value in current.values():
                     if isinstance(value, (dict, list)):
                         stack.append(value)
-            
             elif isinstance(current, list):
                 for item in current:
                     if isinstance(item, (dict, list)):
                         stack.append(item)
-                        
         return None
 
     def _calculate_pace(self, speed_ms: float) -> str:
-        """Converts speed (m/s) to pace (mm:ss/km)."""
-        if not speed_ms or speed_ms <= 0:
-            return ""
+        if not speed_ms or speed_ms <= 0: return ""
         try:
             sec_per_km = 1000 / speed_ms
             p_min = int(sec_per_km / 60)
@@ -182,14 +185,10 @@ class GarminClient:
             return ""
 
     async def get_metrics(self, target_date: date) -> GarminMetrics:
-        # Check authentication state (and re-prime session if needed)
         if not self._authenticated:
-            if self._auth_failed:
-                raise Exception("Authentication previously failed.")
+            if self._auth_failed: raise Exception("Authentication previously failed.")
             await self.authenticate()
         else:
-            # Ensure the client is using the correct tokens for this profile
-            # (In case global state drifted, though instance isolation should handle it)
             try:
                  if self.token_file.exists():
                      with open(self.token_file, "r") as f:
@@ -198,17 +197,13 @@ class GarminClient:
                 pass
 
         async def safe_fetch(name, coro):
-            try:
-                return await coro
+            try: return await coro
             except Exception as e:
                 logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
                 return None
 
         async def direct_fetch(name, endpoint):
-            try:
-                return await asyncio.get_event_loop().run_in_executor(
-                    None, self.client.connectapi, endpoint
-                )
+            try: return await asyncio.get_event_loop().run_in_executor(None, self.client.connectapi, endpoint)
             except Exception as e:
                 logger.debug(f"Direct fetch for {name} failed: {e}")
                 return None
@@ -216,16 +211,11 @@ class GarminClient:
         try:
             target_iso = target_date.isoformat()
             loop = asyncio.get_event_loop()
-
-            # ---------------------------------------------------------
-            # 1. DEFINE TASKS
-            # ---------------------------------------------------------
             
             task_lactate_hr_url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
             task_lactate_speed_url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
             lactate_params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
 
-            # Define coroutines
             c_summary = safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
             c_stats = safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
             c_sleep = safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
@@ -247,7 +237,6 @@ class GarminClient:
                 None, partial(self.client.connectapi, task_lactate_speed_url, params=lactate_params)
             ))
 
-            # 2. Execute Parallel Fetch
             results = await asyncio.gather(
                 c_summary, c_stats, c_sleep, c_hrv, c_bp, c_activities, 
                 c_training_std, c_training_modern, 
@@ -258,9 +247,6 @@ class GarminClient:
              training_status_std, training_status_modern, 
              lactate_data, lactate_range_hr, lactate_range_speed) = results
 
-            # =========================================================
-            # CRITICAL FIX: Handle Null/List Responses Safely
-            # =========================================================
             summary = summary or {}
             if isinstance(summary, list): summary = summary[0] if summary else {}
 
@@ -270,18 +256,12 @@ class GarminClient:
             training_status_std = training_status_std or {}
             if isinstance(training_status_std, list): training_status_std = training_status_std[0] if training_status_std else {}
 
-            # ---------------------------------------------------------
-            # Body Battery Parsing
-            # ---------------------------------------------------------
             bb_max = None
             bb_min = None
             if summary:
                 bb_max = summary.get('bodyBatteryHighestValue')
                 bb_min = summary.get('bodyBatteryLowestValue')
 
-            # ---------------------------------------------------------
-            # Stats (Weight/Body/BMI/Muscle/Water) Parsing
-            # ---------------------------------------------------------
             weight = None
             body_fat = None
             bmi = None
@@ -318,9 +298,6 @@ class GarminClient:
                     body_water = current_stats.get('bodyWater')
                     visceral_fat = current_stats.get('visceralFat')
 
-            # ---------------------------------------------------------
-            # Blood Pressure Parsing
-            # ---------------------------------------------------------
             bp_systolic = None
             bp_diastolic = None
             
@@ -350,9 +327,6 @@ class GarminClient:
                 except Exception as e_bp:
                     logger.error(f"[{target_date}] Error parsing Blood Pressure: {e_bp}")
 
-            # ---------------------------------------------------------
-            # Fallbacks (Steps)
-            # ---------------------------------------------------------
             steps = None
             if summary:
                 steps = summary.get('totalSteps')
@@ -365,11 +339,6 @@ class GarminClient:
                 except Exception:
                     pass
 
-            # ---------------------------------------------------------
-            # Standard Parsing
-            # ---------------------------------------------------------
-            
-            # --- Sleep ---
             sleep_score = None
             sleep_length = None
             sleep_need = None
@@ -421,7 +390,6 @@ class GarminClient:
                         awake_sec = sleep_dto.get('awakeSleepSeconds') or 0
                         sleep_efficiency = round(((sleep_time_seconds - awake_sec) / sleep_time_seconds) * 100)
 
-            # --- HRV ---
             overnight_hrv_value = None
             hrv_status_value = None
             if hrv_payload and 'hrvSummary' in hrv_payload:
@@ -429,25 +397,20 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # --- Activities ---
             processed_activities = []
             if activities:
                 for activity in activities:
                     if not isinstance(activity, dict): continue
-                    
                     atype = activity.get('activityType', {})
                     try:
                         act_id = activity.get('activityId')
                         act_name = activity.get('activityName')
                         act_start_local = activity.get('startTimeLocal')
-
                         act_time_str = ""
                         if act_start_local:
                              act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
-                        
                         dist_km = (activity.get('distance') or 0) / 1000
                         dur_min = (activity.get('duration') or 0) / 60
-                        
                         pace_str = ""
                         if dist_km > 0 and dur_min > 0:
                              pace_decimal = dur_min / dist_km
@@ -457,11 +420,9 @@ class GarminClient:
 
                         avg_hr = activity.get('averageHR')
                         max_hr = activity.get('maxHR')
-
                         cal = activity.get('calories')
                         elev_gain = activity.get('elevationGain') 
                         elev_loss = activity.get('elevationLoss') 
-                        
                         aerobic_te = activity.get('aerobicTrainingEffect')
                         anaerobic_te = activity.get('anaerobicTrainingEffect')
                         avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
@@ -473,18 +434,10 @@ class GarminClient:
                             "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
                             "HR Zone 3 (min)": 0, "HR Zone 4 (min)": 0, "HR Zone 5 (min)": 0
                         }
-                        
-                        # Fetch HR Zones safely
                         try:
-                            hr_zones = await loop.run_in_executor(
-                                None, self.client.get_activity_hr_in_timezones, act_id
-                            )
-                            # Fallback for modern devices if standard zones are null
+                            hr_zones = await loop.run_in_executor(None, self.client.get_activity_hr_in_timezones, act_id)
                             if hr_zones is None:
-                                hr_zones = await loop.run_in_executor(
-                                    None, self.client.connectapi, f"activity-service/activity/{act_id}/hrTimeInZones"
-                                )
-                                
+                                hr_zones = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}/hrTimeInZones")
                             if hr_zones and isinstance(hr_zones, list):
                                 for z in hr_zones:
                                     if not isinstance(z, dict): continue
@@ -523,7 +476,6 @@ class GarminClient:
                         logger.error(f"Error parsing activity detail: {e_act}")
                         continue
 
-            # --- Summary Stats ---
             active_cal = None
             resting_cal = None
             intensity_min = None
@@ -561,7 +513,6 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
 
-            # --- Training Load & Lactate ---
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
@@ -623,6 +574,7 @@ class GarminClient:
                 # User Profile Info
                 user_name=self.user_full_name,
                 user_age=self.user_age,
+                user_gender=self.user_gender, # <--- NEW
                 # Sleep
                 sleep_score=sleep_score,
                 sleep_need=sleep_need,
