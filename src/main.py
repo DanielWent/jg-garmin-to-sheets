@@ -101,6 +101,13 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
     manual_name = profile_data.get('manual_name')
     manual_gender = profile_data.get('manual_gender')
     manual_age = calculate_age(profile_data.get('manual_dob'))
+    
+    # Determine filename prefix based on user profile
+    file_prefix = ""
+    if profile_name == "USER1":
+        file_prefix = "drw_"
+    elif profile_name == "USER2":
+        file_prefix = "aflw_"
 
     while current_date <= end_date:
         logger.info(f"[{profile_name}] Fetching metrics for {current_date.isoformat()}")
@@ -137,19 +144,19 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         try:
             drive_client = GoogleDriveClient('credentials/client_secret.json', folder_id)
             # Standard daily files
-            drive_client.update_csv("garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
-            drive_client.update_csv("garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
-            drive_client.update_csv("garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
+            drive_client.update_csv(f"{file_prefix}garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
+            drive_client.update_csv(f"{file_prefix}garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
+            drive_client.update_csv(f"{file_prefix}garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
             
             # Use metrics_historical so that a row is only added the day AFTER it has finished.
             # This contains the new headers (Gender, Body Battery Min/Max)
             if metrics_historical:
-                drive_client.update_csv("general_summary.csv", metrics_historical, GENERAL_SUMMARY_HEADERS)
-                drive_client.update_csv("garmin_stress.csv", metrics_historical, STRESS_HEADERS)
-                drive_client.update_csv("garmin_activity_summary.csv", metrics_historical, ACTIVITY_SUMMARY_HEADERS)
+                drive_client.update_csv(f"{file_prefix}general_summary.csv", metrics_historical, GENERAL_SUMMARY_HEADERS)
+                drive_client.update_csv(f"{file_prefix}garmin_stress.csv", metrics_historical, STRESS_HEADERS)
+                drive_client.update_csv(f"{file_prefix}garmin_activity_summary.csv", metrics_historical, ACTIVITY_SUMMARY_HEADERS)
             
             # Activities List
-            drive_client.update_activities_csv("garmin_activities_list.csv", metrics_to_write, ACTIVITY_HEADERS)
+            drive_client.update_activities_csv(f"{file_prefix}garmin_activities_list.csv", metrics_to_write, ACTIVITY_HEADERS)
             logger.info(f"[{profile_name}] Google Drive CSV sync completed successfully!")
         except Exception as e:
             logger.error(f"[{profile_name}] Drive Sync Failed: {e}", exc_info=True)
@@ -187,7 +194,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
     elif output_type == 'csv':
         output_dir = Path("./output")
         output_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = output_dir / f"garmingo_{profile_name if profile_name else 'output'}.csv"
+        csv_path = output_dir / f"{file_prefix}garmingo_{profile_name if profile_name else 'output'}.csv"
         
         logger.info(f"Writing metrics to local CSV: {csv_path}")
         with open(csv_path, 'a', newline='') as f:
