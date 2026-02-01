@@ -74,7 +74,15 @@ def ensure_credentials_file_exists():
 async def sync(email: str, password: str, start_date: date, end_date: date, output_type: str, profile_data: dict, profile_name: str = ""):
     """Core sync logic with Sheets toggle."""
     try:
-        garmin_client = GarminClient(email, password)
+        # Pass the manual data to the client
+        garmin_client = GarminClient(
+            email, 
+            password, 
+            profile_name=profile_name,
+            manual_name=profile_data.get('manual_name'),
+            manual_dob=profile_data.get('manual_dob'),
+            manual_gender=profile_data.get('manual_gender')
+        )
         await garmin_client.authenticate()
     except Exception as e:
         logger.error(f"Authentication failed for {profile_name}: {e}")
@@ -112,7 +120,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             drive_client.update_csv("garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
             drive_client.update_csv("garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
             drive_client.update_csv("garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
-            # New General Summary File
+            # New General Summary File (Will now contain Gender, Min/Max Body Battery)
             drive_client.update_csv("general_summary.csv", metrics_to_write, GENERAL_SUMMARY_HEADERS)
             
             # Historical files (Stress/Summary) - only update if we have historical data
@@ -143,9 +151,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 sheets_client.update_metrics(metrics_to_write)
                 sheets_client.sort_sheets()
 
-                # Activities Sheet Logic
-                # Use a specific sheet ID for activities if provided, or fallback (logic can be customized)
-                # For now, using the ID found in previous code or profile data could be added
                 ACTIVITIES_SHEET_ID = "1EglkT03d_9RCPLXUay63G2b0GdyPKP62ljZa0ruEx1g" 
                 try:
                     act_client = GoogleSheetsClient('credentials/client_secret.json', ACTIVITIES_SHEET_ID, 'Activities')
@@ -177,7 +182,8 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
 def load_user_profiles():
     """Parses .env for user profiles (maintains full multi-user support)."""
     profiles = {}
-    profile_pattern = re.compile(r"^(USER\d+)_(GARMIN_EMAIL|GARMIN_PASSWORD|SHEET_ID|MONTHLY_SHEET_ID|DRIVE_FOLDER_ID|SHEET_NAME|SPREADSHEET_NAME|CSV_PATH)$")
+    # Update regex to include NAME, DOB, and GENDER
+    profile_pattern = re.compile(r"^(USER\d+)_(GARMIN_EMAIL|GARMIN_PASSWORD|SHEET_ID|MONTHLY_SHEET_ID|DRIVE_FOLDER_ID|SHEET_NAME|SPREADSHEET_NAME|CSV_PATH|NAME|DOB|GENDER)$")
 
     for key, value in os.environ.items():
         match = profile_pattern.match(key)
@@ -194,7 +200,10 @@ def load_user_profiles():
                 "DRIVE_FOLDER_ID": "drive_folder_id",
                 "SHEET_NAME": "sheet_name",
                 "SPREADSHEET_NAME": "spreadsheet_name",
-                "CSV_PATH": "csv_path"
+                "CSV_PATH": "csv_path",
+                "NAME": "manual_name",   # <--- Mapped
+                "DOB": "manual_dob",     # <--- Mapped
+                "GENDER": "manual_gender" # <--- Mapped
             }
             profiles[profile_name][key_map[var_type]] = value
     return profiles
