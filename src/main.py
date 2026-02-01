@@ -19,6 +19,7 @@ from src.drive_client import GoogleDriveClient
 from src.exceptions import MFARequiredException
 from src.config import (
     HEADERS, 
+    GENERAL_SUMMARY_HEADERS,
     HEADER_TO_ATTRIBUTE_MAP, 
     GarminMetrics,
     SLEEP_HEADERS,
@@ -111,6 +112,8 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             drive_client.update_csv("garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
             drive_client.update_csv("garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
             drive_client.update_csv("garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
+            # New General Summary File
+            drive_client.update_csv("general_summary.csv", metrics_to_write, GENERAL_SUMMARY_HEADERS)
             
             # Historical files (Stress/Summary) - only update if we have historical data
             if metrics_historical:
