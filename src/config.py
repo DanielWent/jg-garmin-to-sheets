@@ -9,6 +9,9 @@ from datetime import date
 @dataclass
 class GarminMetrics:
     date: Optional[date] = None
+    # User Profile
+    user_name: Optional[str] = None
+    user_age: Optional[int] = None
     # Sleep
     sleep_score: Optional[int] = None
     sleep_length: Optional[float] = None
@@ -81,6 +84,29 @@ HEADERS = [
     "Active Calories",
     "Resting Calories",
     "Weight (kg)"
+]
+
+GENERAL_SUMMARY_HEADERS = [
+    "Date",
+    "User Name",
+    "User Age",
+    "Weight (kg)",
+    "Body Fat (%)",
+    "VO2 Max (ml/kg/min)",
+    "Lactate Threshold Pace (min/km)",
+    "Sleep Score",
+    "Sleep Start Time",
+    "Awake Time (min)",
+    "Sleep Length (min)",
+    "Sleep Need (min)",
+    "Avg Stress Score",
+    "Daily Steps",
+    "Daily Intensity Minutes",
+    "Garmin Training Load (7 Day Sum)",
+    "Overnight Resting HR (bpm)",
+    "Overnight HRV (ms)",
+    "Garmin HRV Status",
+    "Garmin Training Status"
 ]
 
 SLEEP_HEADERS = [
@@ -168,9 +194,14 @@ ACTIVITY_HEADERS = [
 
 HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
+    "User Name": "user_name",
+    "User Age": "user_age",
+    
     "Sleep Score": "sleep_score",
     "Sleep Length (mins)": "sleep_length",
+    "Sleep Length (min)": "sleep_length",
     "Sleep Need (mins)": "sleep_need",
+    "Sleep Need (min)": "sleep_need",
     "Sleep Start Time": "sleep_start_time",
     "Sleep End Time": "sleep_end_time",
     "Deep Sleep (min)": "sleep_deep",
@@ -178,8 +209,10 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "REM Sleep (min)": "sleep_rem",
     "Awake Time (min)": "sleep_awake",
     "Garmin Overnight HRV (ms)": "overnight_hrv",
+    "Overnight HRV (ms)": "overnight_hrv",
     "Garmin HRV Status": "hrv_status",
     "Overnight Resting Heart Rate (bpm)": "resting_heart_rate",
+    "Overnight Resting HR (bpm)": "resting_heart_rate",
 
     "Weight (kg)": "weight",
     "BMI": "bmi",
@@ -190,6 +223,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Visceral Fat Rating": "visceral_fat",
 
     "Average Stress": "average_stress",
+    "Avg Stress Score": "average_stress",
     "Rest Stress Duration (min)": "rest_stress_duration",
     "Low Stress Duration (min)": "low_stress_duration",
     "Medium Stress Duration (min)": "medium_stress_duration",
@@ -203,15 +237,20 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
     "Intensity Minutes": "intensity_minutes",
+    "Daily Intensity Minutes": "intensity_minutes",
     "Steps": "steps",
+    "Daily Steps": "steps",
     "Floors Climbed": "floors_climbed",
     "VO2 Max (ml/kg/min)": "vo2max_running",
     "Lactate Threshold Heart Rate (bpm)": "lactate_threshold_bpm",
     "Lactate Threshold Pace (min / km)": "lactate_threshold_pace",
+    "Lactate Threshold Pace (min/km)": "lactate_threshold_pace",
     "Garmin Training Load (7-Day Sum)": "seven_day_load",
+    "Garmin Training Load (7 Day Sum)": "seven_day_load",
     
     "Body Battery Max": "body_battery_max",
     "Body Battery Min": "body_battery_min",
     "Training Status": "training_status",
+    "Garmin Training Status": "training_status",
     "VO2 Max Running": "vo2max_running"
 }
