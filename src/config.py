@@ -12,6 +12,7 @@ class GarminMetrics:
     # User Profile
     user_name: Optional[str] = None
     user_age: Optional[int] = None
+    user_gender: Optional[str] = None  # <--- NEW FIELD
     # Sleep
     sleep_score: Optional[int] = None
     sleep_length: Optional[float] = None
@@ -90,6 +91,7 @@ GENERAL_SUMMARY_HEADERS = [
     "Date",
     "User Name",
     "User Age",
+    "User Gender",                   # <--- NEW COLUMN
     "Weight (kg)",
     "Body Fat (%)",
     "VO2 Max (ml/kg/min)",
@@ -100,6 +102,8 @@ GENERAL_SUMMARY_HEADERS = [
     "Sleep Length (min)",
     "Sleep Need (min)",
     "Avg Stress Score",
+    "Daily Min Body Battery (0-100)", # <--- NEW COLUMN
+    "Daily Max Body Battery (0-100)", # <--- NEW COLUMN
     "Daily Steps",
     "Daily Intensity Minutes",
     "Garmin Training Load (7 Day Sum)",
@@ -196,6 +200,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Date": "date",
     "User Name": "user_name",
     "User Age": "user_age",
+    "User Gender": "user_gender", # <--- NEW MAPPING
     
     "Sleep Score": "sleep_score",
     "Sleep Length (mins)": "sleep_length",
@@ -230,6 +235,8 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "High Stress Duration (min)": "high_stress_duration",
     "Today's Minimum Body Battery": "body_battery_min",
     "Today's Maximum Body Battery": "body_battery_max",
+    "Daily Min Body Battery (0-100)": "body_battery_min", # <--- NEW MAPPING
+    "Daily Max Body Battery (0-100)": "body_battery_max", # <--- NEW MAPPING
 
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
