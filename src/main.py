@@ -155,7 +155,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 drive_client.update_csv(f"{file_prefix}garmin_stress.csv", metrics_historical, STRESS_HEADERS)
                 drive_client.update_csv(f"{file_prefix}garmin_activity_summary.csv", metrics_historical, ACTIVITY_SUMMARY_HEADERS)
             
-            # Activities List
+            # Activities List (Uses metrics_to_write to include TODAY's activities)
             drive_client.update_activities_csv(f"{file_prefix}garmin_activities_list.csv", metrics_to_write, ACTIVITY_HEADERS)
             logger.info(f"[{profile_name}] Google Drive CSV sync completed successfully!")
         except Exception as e:
@@ -299,15 +299,17 @@ async def interactive_mode():
 
 # --- AUTOMATED SYNC (DAILY GITHUB ACTION) ---
 async def run_automated_sync():
-    """Iterates through ALL configured user profiles and syncs yesterday's data."""
+    """Iterates through ALL configured user profiles and syncs data up to TODAY."""
     user_profiles = load_user_profiles()
     
     if not user_profiles:
         logger.error("No user profiles found in environment variables.")
         return
 
-    yesterday = date.today() - timedelta(days=1)
-    logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday}) ---")
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    
+    logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday} to {today}) ---")
 
     for profile_name, profile_data in user_profiles.items():
         logger.info(f"Processing {profile_name}...")
@@ -316,7 +318,7 @@ async def run_automated_sync():
                 email=profile_data['email'],
                 password=profile_data['password'],
                 start_date=yesterday,
-                end_date=yesterday,
+                end_date=today, # UPDATED: Include today so activities appear immediately
                 output_type='drive', 
                 profile_data=profile_data,
                 profile_name=profile_name
