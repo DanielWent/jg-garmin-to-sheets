@@ -149,14 +149,14 @@ STRESS_HEADERS = [
     "High Stress Duration (min)",
     "Today's Minimum Body Battery",
     "Today's Maximum Body Battery",
-    "Systolic Blood Pressure (mmHg)",
-    "Diastolic Blood Pressure (mmHg)"
+    "Systolic Blood Pressure (mmHg)", # <--- RENAMED & ADDED
+    "Diastolic Blood Pressure (mmHg)" # <--- RENAMED & ADDED
 ]
 
 BP_HEADERS = [
     "Date",
-    "Systolic (mmHg)",
-    "Diastolic (mmHg)"
+    "Systolic Blood Pressure (mmHg)", # <--- RENAMED
+    "Diastolic Blood Pressure (mmHg)" # <--- RENAMED
 ]
 
 ACTIVITY_SUMMARY_HEADERS = [
@@ -240,10 +240,8 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Daily Min Body Battery (0-100)": "body_battery_min", # <--- NEW MAPPING
     "Daily Max Body Battery (0-100)": "body_battery_max", # <--- NEW MAPPING
 
-    "Systolic (mmHg)": "blood_pressure_systolic",
-    "Diastolic (mmHg)": "blood_pressure_diastolic",
-    "Systolic Blood Pressure (mmHg)": "blood_pressure_systolic", # <--- NEW MAPPING for Stress Sheet
-    "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic", # <--- NEW MAPPING for Stress Sheet
+    "Systolic Blood Pressure (mmHg)": "blood_pressure_systolic", # <--- RENAMED key
+    "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic", # <--- RENAMED key
 
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
