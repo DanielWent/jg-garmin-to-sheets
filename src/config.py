@@ -149,8 +149,8 @@ STRESS_HEADERS = [
     "High Stress Duration (min)",
     "Today's Minimum Body Battery",
     "Today's Maximum Body Battery",
-    "Systolic (mmHg)",
-    "Diastolic (mmHg)"
+    "Systolic Blood Pressure (mmHg)",
+    "Diastolic Blood Pressure (mmHg)"
 ]
 
 BP_HEADERS = [
@@ -242,6 +242,8 @@ HEADER_TO_ATTRIBUTE_MAP = {
 
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
+    "Systolic Blood Pressure (mmHg)": "blood_pressure_systolic", # <--- NEW MAPPING for Stress Sheet
+    "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic", # <--- NEW MAPPING for Stress Sheet
 
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
