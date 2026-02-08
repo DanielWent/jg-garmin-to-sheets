@@ -148,7 +148,9 @@ STRESS_HEADERS = [
     "Medium Stress Duration (min)",
     "High Stress Duration (min)",
     "Today's Minimum Body Battery",
-    "Today's Maximum Body Battery"
+    "Today's Maximum Body Battery",
+    "Systolic (mmHg)",
+    "Diastolic (mmHg)"
 ]
 
 BP_HEADERS = [
