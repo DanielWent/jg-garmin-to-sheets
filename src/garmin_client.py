@@ -21,7 +21,7 @@ class GarminClient:
         self.profile_name = profile_name
         self.manual_name = manual_name
         self.manual_dob = manual_dob
-        self.manual_gender = manual_gender  # <--- NEW
+        self.manual_gender = manual_gender
         
         # Create an isolated directory for this user's session tokens
         self.session_dir = Path(f"~/.garth/{self.profile_name}").expanduser()
@@ -35,7 +35,7 @@ class GarminClient:
         
         self.user_full_name = None
         self.user_age = None
-        self.user_gender = None # <--- NEW
+        self.user_gender = None
 
     async def authenticate(self):
         """
@@ -478,6 +478,7 @@ class GarminClient:
 
             active_cal = None
             resting_cal = None
+            total_cal = None
             intensity_min = None
             resting_hr = None
             avg_stress = None
@@ -490,6 +491,9 @@ class GarminClient:
             if summary:
                 active_cal = summary.get('activeKilocalories')
                 resting_cal = summary.get('bmrKilocalories')
+                if active_cal is not None or resting_cal is not None:
+                    total_cal = (active_cal or 0) + (resting_cal or 0)
+
                 intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
@@ -574,7 +578,7 @@ class GarminClient:
                 # User Profile Info
                 user_name=self.user_full_name,
                 user_age=self.user_age,
-                user_gender=self.user_gender, # <--- NEW
+                user_gender=self.user_gender, 
                 # Sleep
                 sleep_score=sleep_score,
                 sleep_need=sleep_need,
@@ -620,6 +624,7 @@ class GarminClient:
                 # Summary
                 active_calories=active_cal,
                 resting_calories=resting_cal,
+                total_calories=total_cal,
                 intensity_minutes=intensity_min,
                 steps=steps,
                 floors_climbed=floors,
