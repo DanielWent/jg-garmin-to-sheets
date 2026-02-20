@@ -49,6 +49,7 @@ class GarminMetrics:
     # Activity Summary
     active_calories: Optional[int] = None
     resting_calories: Optional[int] = None
+    total_calories: Optional[int] = None
     intensity_minutes: Optional[int] = None
     steps: Optional[int] = None
     floors_climbed: Optional[float] = None
@@ -84,6 +85,7 @@ HEADERS = [
     "Steps",
     "Active Calories",
     "Resting Calories",
+    "Total Calories (kcal)",
     "Weight (kg)"
 ]
 
@@ -106,6 +108,7 @@ GENERAL_SUMMARY_HEADERS = [
     "Daily Max Body Battery (0-100)",
     "Daily Steps",
     "Daily Intensity Minutes",
+    "Total Calories (kcal)",
     "Garmin Training Load (7 Day Sum)",
     "Overnight Resting HR (bpm)",
     "Overnight HRV (ms)",
@@ -149,14 +152,14 @@ STRESS_HEADERS = [
     "High Stress Duration (min)",
     "Today's Minimum Body Battery",
     "Today's Maximum Body Battery",
-    "Systolic Blood Pressure (mmHg)", # <--- NEW COLUMN (Long Name)
-    "Diastolic Blood Pressure (mmHg)" # <--- NEW COLUMN (Long Name)
+    "Systolic Blood Pressure (mmHg)", 
+    "Diastolic Blood Pressure (mmHg)" 
 ]
 
 BP_HEADERS = [
     "Date",
-    "Systolic (mmHg)", # <--- REVERTED to Original
-    "Diastolic (mmHg)" # <--- REVERTED to Original
+    "Systolic (mmHg)", 
+    "Diastolic (mmHg)" 
 ]
 
 ACTIVITY_SUMMARY_HEADERS = [
@@ -164,6 +167,7 @@ ACTIVITY_SUMMARY_HEADERS = [
     "Intensity Minutes",
     "Steps",
     "Floors Climbed",
+    "Total Calories (kcal)",
     "VO2 Max (ml/kg/min)",
     "Lactate Threshold Heart Rate (bpm)",
     "Lactate Threshold Pace (min / km)",
@@ -240,16 +244,17 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Daily Min Body Battery (0-100)": "body_battery_min",
     "Daily Max Body Battery (0-100)": "body_battery_max",
 
-    # Original Mappings for BP Sheet (REVERTED)
+    # Original Mappings for BP Sheet
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
     
-    # New Mappings for Stress Sheet (ADDED)
+    # New Mappings for Stress Sheet
     "Systolic Blood Pressure (mmHg)": "blood_pressure_systolic",
     "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic",
 
     "Active Calories": "active_calories",
     "Resting Calories": "resting_calories",
+    "Total Calories (kcal)": "total_calories",
     "Intensity Minutes": "intensity_minutes",
     "Daily Intensity Minutes": "intensity_minutes",
     "Steps": "steps",
