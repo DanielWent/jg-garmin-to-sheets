@@ -37,22 +37,22 @@ class GarminMetrics:
     bone_mass: Optional[float] = None
     body_water: Optional[float] = None
     visceral_fat: Optional[float] = None
-    # Stress
-    average_stress: Optional[int] = None
-    rest_stress_duration: Optional[int] = None
-    low_stress_duration: Optional[int] = None
-    medium_stress_duration: Optional[int] = None
-    high_stress_duration: Optional[int] = None
+    # Stress (Typed as Any to allow "NA" or "PENDING")
+    average_stress: Optional[Any] = None
+    rest_stress_duration: Optional[Any] = None
+    low_stress_duration: Optional[Any] = None
+    medium_stress_duration: Optional[Any] = None
+    high_stress_duration: Optional[Any] = None
     # BP
     blood_pressure_systolic: Optional[int] = None
     blood_pressure_diastolic: Optional[int] = None
-    # Activity Summary
+    # Activity Summary (Typed as Any to allow "NA" or "PENDING")
     active_calories: Optional[int] = None
     resting_calories: Optional[int] = None
-    total_calories: Optional[int] = None
-    intensity_minutes: Optional[int] = None
-    steps: Optional[int] = None
-    floors_climbed: Optional[float] = None
+    total_calories: Optional[Any] = None
+    intensity_minutes: Optional[Any] = None
+    steps: Optional[Any] = None
+    floors_climbed: Optional[Any] = None
     resting_heart_rate: Optional[int] = None
     # Training / VO2 / Lactate
     vo2max_running: Optional[float] = None
@@ -63,7 +63,7 @@ class GarminMetrics:
     training_status: Optional[str] = None
     # Body Battery
     body_battery_max: Optional[int] = None
-    body_battery_min: Optional[int] = None
+    body_battery_min: Optional[Any] = None
     # Activities
     activities: List[Any] = field(default_factory=list)
 
@@ -95,20 +95,32 @@ GENERAL_SUMMARY_HEADERS = [
     "User Age",
     "User Gender",
     "Weight (kg)",
+    "BMI",
     "Body Fat (%)",
     "VO2 Max (ml/kg/min)",
     "Lactate Threshold Pace (min/km)",
     "Sleep Score",
     "Sleep Start Time",
+    "Sleep End Time",
+    "Deep Sleep (min)",
+    "Light Sleep (min)",
+    "REM Sleep (min)",
     "Awake Time (min)",
     "Sleep Length (min)",
     "Sleep Need (min)",
     "Avg Stress Score",
+    "Rest Stress Duration (min)",
+    "Low Stress Duration (min)",
+    "Medium Stress Duration (min)",
+    "High Stress Duration (min)",
     "Daily Min Body Battery (0-100)",
     "Daily Max Body Battery (0-100)",
     "Daily Steps",
+    "Daily Floors Climbed",
     "Daily Intensity Minutes",
     "Total Calories (kcal)",
+    "Systolic Blood Pressure (mmHg)",
+    "Diastolic Blood Pressure (mmHg)",
     "Garmin Training Load (7 Day Sum)",
     "Overnight Resting HR (bpm)",
     "Overnight HRV (ms)",
@@ -248,7 +260,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
     
-    # New Mappings for Stress Sheet
+    # New Mappings for Stress Sheet and General Summary
     "Systolic Blood Pressure (mmHg)": "blood_pressure_systolic",
     "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic",
 
@@ -260,6 +272,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Steps": "steps",
     "Daily Steps": "steps",
     "Floors Climbed": "floors_climbed",
+    "Daily Floors Climbed": "floors_climbed",
     "VO2 Max (ml/kg/min)": "vo2max_running",
     "Lactate Threshold Heart Rate (bpm)": "lactate_threshold_bpm",
     "Lactate Threshold Pace (min / km)": "lactate_threshold_pace",
