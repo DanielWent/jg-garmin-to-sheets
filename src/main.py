@@ -109,6 +109,14 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
     elif profile_name == "USER2":
         file_prefix = "aflw_"
 
+    # Fields that should use NA/PENDING logic
+    fields_to_validate = [
+        'average_stress', 'rest_stress_duration', 'low_stress_duration', 
+        'medium_stress_duration', 'high_stress_duration',
+        'steps', 'floors_climbed', 'total_calories', 'intensity_minutes',
+        'body_battery_min'
+    ]
+
     while current_date <= end_date:
         logger.info(f"[{profile_name}] Fetching metrics for {current_date.isoformat()}")
         daily_metrics = await garmin_client.get_metrics(current_date)
@@ -121,6 +129,27 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         if manual_age:
             daily_metrics.user_age = manual_age
         
+        # === CUSTOM LOGIC 1: ADJUST BODY FAT FOR USER 1 FROM 25 JAN 2026 ONWARDS ===
+        if profile_name == "USER1" and current_date >= date(2026, 1, 25):
+            if daily_metrics.body_fat is not None:
+                original_bf = daily_metrics.body_fat
+                daily_metrics.body_fat = original_bf + 3.0
+                logger.info(f"[{current_date}] Adjusted Body Fat for {profile_name}: {original_bf}% -> {daily_metrics.body_fat}%")
+
+        # === CUSTOM LOGIC 2: PENDING/NA HANDLING ===
+        # If the date is Today (or future), set specific fields to "PENDING".
+        # If the date is Past, and values are missing (None), set them to "NA" (to avoid AI seeing 0).
+        
+        if current_date >= date.today():
+            for f in fields_to_validate:
+                setattr(daily_metrics, f, "PENDING")
+            logger.debug(f"[{current_date}] Set daily aggregate fields to PENDING (day incomplete).")
+        else:
+            for f in fields_to_validate:
+                val = getattr(daily_metrics, f)
+                if val is None:
+                    setattr(daily_metrics, f, "NA")
+
         metrics_to_write.append(daily_metrics)
         current_date += timedelta(days=1)
 
@@ -150,7 +179,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             drive_client.update_csv(f"{file_prefix}general_summary.csv", metrics_to_write, GENERAL_SUMMARY_HEADERS)
             
             # Use metrics_historical so that a row is only added the day AFTER it has finished.
-            # This contains the new headers (Gender, Body Battery Min/Max)
             if metrics_historical:
                 drive_client.update_csv(f"{file_prefix}garmin_stress.csv", metrics_historical, STRESS_HEADERS)
                 drive_client.update_csv(f"{file_prefix}garmin_activity_summary.csv", metrics_historical, ACTIVITY_SUMMARY_HEADERS)
