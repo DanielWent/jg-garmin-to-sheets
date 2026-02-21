@@ -176,7 +176,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             drive_client.update_csv(f"{file_prefix}garmin_sleep.csv", metrics_to_write, SLEEP_HEADERS)
             drive_client.update_csv(f"{file_prefix}garmin_body_composition.csv", metrics_to_write, BODY_COMP_HEADERS)
             drive_client.update_csv(f"{file_prefix}garmin_blood_pressure.csv", metrics_to_write, BP_HEADERS)
-            drive_client.update_csv(f"{file_prefix}general_summary.csv", metrics_to_write, GENERAL_SUMMARY_HEADERS)
+            drive_client.update_csv(f"{file_prefix}garmin_data.csv", metrics_to_write, GENERAL_SUMMARY_HEADERS)
             
             # Use metrics_historical so that a row is only added the day AFTER it has finished.
             if metrics_historical:
