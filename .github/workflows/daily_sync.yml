@@ -3,7 +3,7 @@ name: Daily Garmin Sync
 on:
   schedule:
     # Runs at 06:00, 07:00, 08:00, 09:00, and 10:00 UTC daily.
-    - cron: '0 5,6,7,8,9,10,12,14,16,18,20,22 * * *'
+    - cron: '0 6,8,10,12,14,16,18,19,20,22 * * *'
   
   workflow_dispatch:
     inputs:
