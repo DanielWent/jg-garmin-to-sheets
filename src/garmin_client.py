@@ -148,7 +148,8 @@ class GarminClient:
                 None, self.client.get_hrv_data, target_date_iso
             )
         except Exception as e:
-            logger.error(f"Error fetching HRV data: {str(e)}")
+            # HRV data often missing for older watches, log as debug to avoid clutter
+            logger.debug(f"Error fetching HRV data: {str(e)}")
             return None
 
     def _find_training_load(self, data: Any) -> Optional[int]:
@@ -354,11 +355,12 @@ class GarminClient:
 
             if sleep_data:
                 sleep_dto = sleep_data.get('dailySleepDTO')
-                if not sleep_dto:
+                # If dailySleepDTO is None, sleep_data itself might be the DTO
+                if not sleep_dto and isinstance(sleep_data, dict):
                     sleep_dto = sleep_data
 
                 if sleep_dto:
-                    # FIX: Safely handle if sleepScores is None
+                    # FIX: Handle cases where keys exist but values are None
                     sleep_scores = sleep_dto.get('sleepScores') or {}
                     sleep_score = sleep_scores.get('overall', {}).get('value')
                     
@@ -394,7 +396,7 @@ class GarminClient:
 
             overnight_hrv_value = None
             hrv_status_value = None
-            # FIX: Ensure hrvSummary is not None
+            # FIX: Ensure hrvSummary is not None before accessing keys
             if hrv_payload and hrv_payload.get('hrvSummary'):
                 hrv_summary = hrv_payload['hrvSummary']
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
@@ -553,20 +555,24 @@ class GarminClient:
                 except Exception:
                      pass
 
+            # FIX: Robust processing for training status fields which can be null/None
             if training_status_std:
-                mr_vo2 = training_status_std.get('mostRecentVO2Max', {})
-                if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
-                if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
+                # Safe fetch for mr_vo2
+                mr_vo2 = training_status_std.get('mostRecentVO2Max')
+                if mr_vo2:
+                    if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
+                    if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
                 
-                ts_data = training_status_std.get('mostRecentTrainingStatus', {}).get('latestTrainingStatusData', {})
-                if ts_data:
-                    for dev_data in ts_data.values():
-                        train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
-                        break
-                
-                if not lactate_bpm:
-                    mr_ts = training_status_std.get('mostRecentTrainingStatus', {})
-                    if mr_ts and 'lactateThresholdHeartRate' in mr_ts:
+                # Safe fetch for ts_data
+                mr_ts = training_status_std.get('mostRecentTrainingStatus')
+                if mr_ts:
+                    ts_data = mr_ts.get('latestTrainingStatusData')
+                    if ts_data:
+                        for dev_data in ts_data.values():
+                            train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
+                            break
+                    
+                    if not lactate_bpm and 'lactateThresholdHeartRate' in mr_ts:
                         lactate_bpm = mr_ts['lactateThresholdHeartRate']
 
             seven_day_load = None
