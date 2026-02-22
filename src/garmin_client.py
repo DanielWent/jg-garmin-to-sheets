@@ -358,7 +358,9 @@ class GarminClient:
                     sleep_dto = sleep_data
 
                 if sleep_dto:
-                    sleep_score = sleep_dto.get('sleepScores', {}).get('overall', {}).get('value')
+                    # FIX: Safely handle if sleepScores is None
+                    sleep_scores = sleep_dto.get('sleepScores') or {}
+                    sleep_score = sleep_scores.get('overall', {}).get('value')
                     
                     sleep_need_obj = sleep_dto.get('sleepNeed')
                     if isinstance(sleep_need_obj, dict):
@@ -392,7 +394,8 @@ class GarminClient:
 
             overnight_hrv_value = None
             hrv_status_value = None
-            if hrv_payload and 'hrvSummary' in hrv_payload:
+            # FIX: Ensure hrvSummary is not None
+            if hrv_payload and hrv_payload.get('hrvSummary'):
                 hrv_summary = hrv_payload['hrvSummary']
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
@@ -401,7 +404,8 @@ class GarminClient:
             if activities:
                 for activity in activities:
                     if not isinstance(activity, dict): continue
-                    atype = activity.get('activityType', {})
+                    # FIX: Handle cases where activityType is None
+                    atype = activity.get('activityType') or {}
                     try:
                         act_id = activity.get('activityId')
                         act_name = activity.get('activityName')
