@@ -541,14 +541,19 @@ class GarminClient:
                                         
                                         needs_conversion = False
                                         if watch_temp_c is not None:
-                                            # If there's more than a 15-degree difference between the API and the watch, 
-                                            # it is mathematically impossible for them to both be Celsius. Ergo, API is Fahrenheit.
-                                            if abs(w_temp - float(watch_temp_c)) > 15:
+                                            # Reduced threshold to 8 degrees to catch smaller F/C mismatches
+                                            if abs(w_temp - float(watch_temp_c)) > 8:
                                                 needs_conversion = True
-                                        elif w_temp > 35 or w_temp < -15:
-                                            # Fallback: if we have no watch temp to compare against, use basic thresholds 
-                                            # (35C in Scotland in March is impossible)
-                                            needs_conversion = True
+                                        else:
+                                            # SMART FALLBACK: Seasonal heuristics for the UK if watch sensor is missing
+                                            month = target_date.month
+                                            
+                                            # If it's over 20 degrees between October and April, it's undeniably Fahrenheit
+                                            if w_temp > 20 and (month < 5 or month > 9):
+                                                needs_conversion = True
+                                            # If it's over 35 degrees at any time in Scotland, it's undeniably Fahrenheit
+                                            elif w_temp > 35:
+                                                needs_conversion = True
                                             
                                         if needs_conversion:
                                             w_temp = (w_temp - 32) * 5.0 / 9.0
