@@ -5,7 +5,6 @@ from pathlib import Path
 from .exceptions import MFARequiredException
 from .config import GarminMetrics
 from statistics import mean
-from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,8 @@ class GarminClient:
         await loop.run_in_executor(None, self.client.login)
         self._authenticated = True
         await self._fetch_user_profile_info()
-        with open(self.token_file, "w") as f: json.dump(self.client.garth.dump(), f)
+        # Fix: Provide path to dump
+        self.client.garth.dump(str(self.session_dir))
 
     async def _fetch_user_profile_info(self):
         loop = asyncio.get_event_loop()
@@ -46,7 +46,7 @@ class GarminClient:
             try:
                 social = await loop.run_in_executor(None, self.client.get_social_profile, self.client.display_name)
                 self.user_full_name = social.get('fullName')
-            except Exception: pass
+            except Exception: self.user_full_name = self.client.display_name
 
     def _find_training_load(self, data):
         if not data: return None
@@ -84,24 +84,21 @@ class GarminClient:
         summary = (summary[0] if isinstance(summary, list) and summary else summary) or {}
         sleep_dto = (sleep.get('dailySleepDTO') or sleep) if isinstance(sleep, dict) else {}
         
-        # New Field Extractions
-        bb_charged = summary.get('bodyBatteryChargedValue')
-        bb_drain = summary.get('bodyBatteryDrainedValue')
-        pulse_ox = sleep_dto.get('averageSpO2Value')
-        t_readiness = readiness.get('score') if isinstance(readiness, dict) else None
-        t_focus = ts_mod.get('trainingLoadFocus') if isinstance(ts_mod, dict) else None
+        # Safely handle BP list indexing
+        sys = dia = None
+        if bp and bp.get('measurementSummaries'):
+            readings = bp['measurementSummaries'][0].get('measurements', [])
+            if readings:
+                sys = int(round(mean(r['systolic'] for r in readings if r.get('systolic'))))
+                dia = int(round(mean(r['diastolic'] for r in readings if r.get('diastolic'))))
 
-        # Existing Field Extractions (preserving your original logic)
+        # Safely handle Stats list indexing
         weight = bmi = body_fat = muscle = bone = water = visceral = None
         if stats and stats.get('dateWeightList'):
             curr_w = stats['dateWeightList'][-1]
-            weight, body_fat, bmi, water, visceral = curr_w.get('weight', 0)/1000, curr_w.get('bodyFat'), curr_w.get('bmi'), curr_w.get('bodyWater'), curr_w.get('visceralFat')
+            weight, body_fat, bmi = curr_w.get('weight', 0)/1000, curr_w.get('bodyFat'), curr_w.get('bmi')
+            water, visceral = curr_w.get('bodyWater'), curr_w.get('visceralFat')
             muscle, bone = curr_w.get('muscleMass', 0)/1000, curr_w.get('boneMass', 0)/1000
-
-        sys = dia = None
-        if bp and bp.get('measurementSummaries') and bp['measurementSummaries'][0].get('measurements'):
-            m = bp['measurementSummaries'][0]['measurements']
-            sys, dia = int(round(mean(r['systolic'] for r in m))), int(round(mean(r['diastolic'] for r in m)))
 
         vrun = vcyc = tstat = None
         if ts_std:
@@ -116,9 +113,12 @@ class GarminClient:
             date=target_date, user_name=self.user_full_name, user_age=self.user_age, user_gender=self.user_gender,
             sleep_score=sleep_dto.get('sleepScores', {}).get('overall', {}).get('value'),
             sleep_length=round(sleep_dto.get('sleepTimeSeconds', 0)/60) if sleep_dto.get('sleepTimeSeconds') else None,
-            overnight_pulse_ox=pulse_ox, body_battery_charged=bb_charged, body_battery_drain=bb_drain,
-            training_readiness=t_readiness, training_load_focus=t_focus, weight=weight, bmi=bmi, body_fat=body_fat,
-            skeletal_muscle=muscle, bone_mass=bone, body_water=water, visceral_fat=visceral,
+            overnight_pulse_ox=sleep_dto.get('averageSpO2Value'),
+            body_battery_charged=summary.get('bodyBatteryChargedValue'),
+            body_battery_drain=summary.get('bodyBatteryDrainedValue'),
+            training_readiness=readiness.get('score') if isinstance(readiness, dict) else None,
+            training_load_focus=ts_mod.get('trainingLoadFocus') if isinstance(ts_mod, dict) else None,
+            weight=weight, bmi=bmi, body_fat=body_fat, skeletal_muscle=muscle, bone_mass=bone, body_water=water, visceral_fat=visceral,
             blood_pressure_systolic=sys, blood_pressure_diastolic=dia, resting_heart_rate=summary.get('restingHeartRate'),
             average_stress=summary.get('averageStressLevel'), body_battery_max=summary.get('bodyBatteryHighestValue'),
             body_battery_min=summary.get('bodyBatteryLowestValue'), vo2max_running=vrun, vo2max_cycling=vcyc,
