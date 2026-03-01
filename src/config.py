@@ -2,13 +2,19 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Any
 from datetime import date
 
+# =========================================================
+# 1. DATA CLASS (Structure to hold fetched Garmin data)
+# =========================================================
+
 @dataclass
 class GarminMetrics:
     date: Optional[date] = None
+    # User Profile
     user_name: Optional[str] = None
     user_age: Optional[int] = None
     user_gender: Optional[str] = None
     max_hr_hunt: Optional[int] = None
+    # Sleep
     sleep_score: Optional[int] = None
     sleep_length: Optional[float] = None
     sleep_start_time: Optional[str] = None
@@ -21,8 +27,10 @@ class GarminMetrics:
     sleep_efficiency: Optional[int] = None
     overnight_respiration: Optional[float] = None
     overnight_pulse_ox: Optional[float] = None
+    # HRV
     overnight_hrv: Optional[float] = None
     hrv_status: Optional[str] = None
+    # Body
     weight: Optional[float] = None
     bmi: Optional[float] = None
     body_fat: Optional[float] = None
@@ -30,9 +38,12 @@ class GarminMetrics:
     bone_mass: Optional[float] = None
     body_water: Optional[float] = None
     visceral_fat: Optional[float] = None
+    # Stress
     average_stress: Optional[Any] = None
+    # BP
     blood_pressure_systolic: Optional[int] = None
     blood_pressure_diastolic: Optional[int] = None
+    # Activity Summary
     active_calories: Optional[Any] = None
     resting_calories: Optional[Any] = None
     total_calories: Optional[Any] = None
@@ -40,6 +51,7 @@ class GarminMetrics:
     steps: Optional[Any] = None
     floors_climbed: Optional[Any] = None
     resting_heart_rate: Optional[int] = None
+    # Training
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
     seven_day_load: Optional[int] = None
@@ -48,11 +60,17 @@ class GarminMetrics:
     training_status: Optional[str] = None
     training_readiness: Optional[Any] = None
     training_load_focus: Optional[str] = None
+    # Body Battery
     body_battery_max: Optional[int] = None
     body_battery_min: Optional[Any] = None
     body_battery_charged: Optional[Any] = None
     body_battery_drain: Optional[Any] = None
+    # Activities
     activities: List[Any] = field(default_factory=list)
+
+# =========================================================
+# 2. HEADER LISTS
+# =========================================================
 
 GENERAL_SUMMARY_HEADERS = [
     "Date", "User Name", "User Age", "User Gender", "VO2 Max (ml/kg/min)",
@@ -71,10 +89,9 @@ GENERAL_SUMMARY_HEADERS = [
     "Garmin Training Status", "Physiological Max Heart Rate (bpm)"
 ]
 
-# Preserve your other header lists but update STRESS_HEADERS
-STRESS_HEADERS = ["Date", "Average Stress", "Today's Minimum Body Battery", "Today's Maximum Body Battery", "Body Battery Charged", "Body Battery Drain", "Systolic Blood Pressure (mmHg)", "Diastolic Blood Pressure (mmHg)"]
 SLEEP_HEADERS = ["Date", "Sleep Score", "Sleep Length (mins)", "Sleep Need (mins)", "Sleep Start Time", "Sleep End Time", "Deep Sleep (min)", "Light Sleep (min)", "REM Sleep (min)", "Awake Time (min)", "Garmin Overnight HRV (ms)", "Garmin HRV Status", "Overnight Resting Heart Rate (bpm)"]
 BODY_COMP_HEADERS = ["Date", "Weight (kg)", "BMI", "Body Fat (%)", "Skeletal Muscle Mass (kg)", "Bone Mass (kg)", "Body Water (%)", "Visceral Fat Rating"]
+STRESS_HEADERS = ["Date", "Average Stress", "Today's Minimum Body Battery", "Today's Maximum Body Battery", "Body Battery Charged", "Body Battery Drain", "Systolic Blood Pressure (mmHg)", "Diastolic Blood Pressure (mmHg)"]
 BP_HEADERS = ["Date", "Systolic (mmHg)", "Diastolic (mmHg)"]
 ACTIVITY_SUMMARY_HEADERS = ["Date", "Intensity Minutes", "Steps", "Floors Climbed", "Total Calories (kcal)", "VO2 Max (ml/kg/min)", "Lactate Threshold Heart Rate (bpm)", "Lactate Threshold Pace (min / km)", "Garmin Training Load (7-Day Sum)"]
 ACTIVITY_HEADERS = ["Activity ID", "Date (YYYY-MM-DD)", "Start Time (HH:MM)", "Activity Type", "Distance (km)", "Duration (min)", "Avg Pace (min/km)", "Average Grade Adjusted Pace (min/km)", "Avg HR (bpm)", "Max HR (bpm)", "Total Ascent (m)", "Total Descent (m)", "Aerobic TE (0-5.0)", "Anaerobic TE (0-5.0)", "Avg Power (Watts)", "Garmin Training Effect Label", "HR Zone 1 (min)", "HR Zone 2 (min)", "HR Zone 3 (min)", "HR Zone 4 (min)", "HR Zone 5 (min)"]
