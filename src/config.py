@@ -101,6 +101,30 @@ GENERAL_SUMMARY_HEADERS = [
     "Garmin Training Status"
 ]
 
+ACTIVITY_HEADERS = [
+    "Activity ID",
+    "Date (YYYY-MM-DD)",
+    "Start Time (HH:MM)",
+    "Activity Type",
+    "Distance (km)",
+    "Duration (min)",
+    "Avg Pace (min/km)",
+    "Average Grade Adjusted Pace (min/km)",
+    "Avg HR (bpm)",
+    "Max HR (bpm)",
+    "Total Ascent (m)",
+    "Total Descent (m)",
+    "Aerobic TE (0-5.0)",
+    "Anaerobic TE (0-5.0)",
+    "Avg Power (Watts)",
+    "Garmin Training Effect Label",
+    "HR Zone 1 (min)",
+    "HR Zone 2 (min)",
+    "HR Zone 3 (min)",
+    "HR Zone 4 (min)",
+    "HR Zone 5 (min)"
+]
+
 # =========================================================
 # 3. DATA MAPPING (Connects Headers to Garmin Data)
 # =========================================================
