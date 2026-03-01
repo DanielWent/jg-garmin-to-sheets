@@ -196,10 +196,12 @@ class GarminClient:
         if not data: return None
         
         # Garmin API often returns readiness as a list of dicts, sorted latest first
-        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-            if 'score' in data[0] and data[0]['score'] is not None:
-                try: return int(data[0]['score'])
-                except (ValueError, TypeError): pass
+        # We want the MORNING (earliest) value, which is at the end of the list
+        if isinstance(data, list) and len(data) > 0:
+            for item in reversed(data):
+                if isinstance(item, dict) and 'score' in item and item['score'] is not None:
+                    try: return int(item['score'])
+                    except (ValueError, TypeError): pass
 
         stack = [data]
         while stack:
