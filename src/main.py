@@ -65,8 +65,21 @@ def calculate_age(dob_str: Optional[str]) -> Optional[int]:
         return None
 
 async def sync(email: str, password: str, start_date: date, end_date: date, output_type: str, profile_data: dict, profile_name: str = ""):
+    manual_name = profile_data.get('manual_name')
+    manual_gender = profile_data.get('manual_gender')
+    manual_dob = profile_data.get('manual_dob')
+    manual_age = calculate_age(manual_dob)
+
     try:
-        garmin_client = GarminClient(email, password, profile_name=profile_name)
+        # Properly pass the manual config to the GarminClient instantiation
+        garmin_client = GarminClient(
+            email, 
+            password, 
+            profile_name=profile_name,
+            manual_name=manual_name,
+            manual_dob=manual_dob,
+            manual_gender=manual_gender
+        )
         await garmin_client.authenticate()
     except Exception as e:
         logger.error(f"Authentication failed for {profile_name}: {e}")
@@ -75,10 +88,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
     logger.info(f"[{profile_name}] Fetching metrics from {start_date.isoformat()} to {end_date.isoformat()}...")
     metrics_to_write = []
     current_date = start_date
-    
-    manual_name = profile_data.get('manual_name')
-    manual_gender = profile_data.get('manual_gender')
-    manual_age = calculate_age(profile_data.get('manual_dob'))
     
     file_prefix = ""
     if profile_name == "USER1":
