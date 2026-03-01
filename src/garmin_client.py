@@ -148,7 +148,6 @@ class GarminClient:
                 None, self.client.get_hrv_data, target_date_iso
             )
         except Exception as e:
-            # HRV data often missing for older watches, log as debug to avoid clutter
             logger.debug(f"Error fetching HRV data: {str(e)}")
             return None
 
@@ -169,6 +168,26 @@ class GarminClient:
                 for value in current.values():
                     if isinstance(value, (dict, list)):
                         stack.append(value)
+            elif isinstance(current, list):
+                for item in current:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+        return None
+
+    def _find_training_load_focus(self, data: Any) -> Optional[str]:
+        if not data: return None
+        stack = [data]
+        while stack:
+            current = stack.pop()
+            if isinstance(current, dict):
+                for k, v in current.items():
+                    if 'loadbalance' in k.lower() and isinstance(v, dict):
+                        if v.get('statusText'): return v.get('statusText')
+                        if v.get('feedbackPhrase'): return v.get('feedbackPhrase')
+                        if v.get('status'): return v.get('status')
+                for v in current.values():
+                    if isinstance(v, (dict, list)):
+                        stack.append(v)
             elif isinstance(current, list):
                 for item in current:
                     if isinstance(item, (dict, list)):
@@ -359,12 +378,10 @@ class GarminClient:
 
             if sleep_data:
                 sleep_dto = sleep_data.get('dailySleepDTO')
-                # If dailySleepDTO is None, sleep_data itself might be the DTO
                 if not sleep_dto and isinstance(sleep_data, dict):
                     sleep_dto = sleep_data
 
                 if sleep_dto:
-                    # FIX: Handle cases where keys exist but values are None
                     sleep_scores = sleep_dto.get('sleepScores') or {}
                     sleep_score = sleep_scores.get('overall', {}).get('value')
                     
@@ -400,7 +417,6 @@ class GarminClient:
 
             overnight_hrv_value = None
             hrv_status_value = None
-            # FIX: Ensure hrvSummary is not None before accessing keys
             if hrv_payload and hrv_payload.get('hrvSummary'):
                 hrv_summary = hrv_payload['hrvSummary']
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
@@ -410,7 +426,6 @@ class GarminClient:
             if activities:
                 for activity in activities:
                     if not isinstance(activity, dict): continue
-                    # FIX: Handle cases where activityType is None
                     atype = activity.get('activityType') or {}
                     try:
                         act_id = activity.get('activityId')
@@ -549,29 +564,35 @@ class GarminClient:
                 except Exception:
                      pass
 
-            # FIX: Robust processing for training status fields which can be null/None
             if training_status_std:
                 mr_vo2 = training_status_std.get('mostRecentVO2Max')
                 if mr_vo2:
                     if mr_vo2.get('generic'): 
-                        vo2_run = mr_vo2['generic'].get('preciseVo2Max', mr_vo2['generic'].get('vo2MaxValue'))
+                        vo2_run = mr_vo2['generic'].get('vo2MaxPreciseValue', mr_vo2['generic'].get('vo2MaxValue'))
+                        if vo2_run is not None:
+                            try: vo2_run = round(float(vo2_run), 1)
+                            except ValueError: pass
                     if mr_vo2.get('cycling'): 
-                        vo2_cycle = mr_vo2['cycling'].get('preciseVo2Max', mr_vo2['cycling'].get('vo2MaxValue'))
+                        vo2_cycle = mr_vo2['cycling'].get('vo2MaxPreciseValue', mr_vo2['cycling'].get('vo2MaxValue'))
+                        if vo2_cycle is not None:
+                            try: vo2_cycle = round(float(vo2_cycle), 1)
+                            except ValueError: pass
                 
                 mr_ts = training_status_std.get('mostRecentTrainingStatus')
                 if mr_ts:
                     ts_data = mr_ts.get('latestTrainingStatusData')
                     if ts_data:
                         for dev_data in ts_data.values():
-                            train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
-                            break
+                            if isinstance(dev_data, dict):
+                                train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
+                                if train_phrase: break
                     
                     if not lactate_bpm and 'lactateThresholdHeartRate' in mr_ts:
                         lactate_bpm = mr_ts['lactateThresholdHeartRate']
-                        
-                mr_load = training_status_std.get('mostRecentTrainingLoadBalance')
-                if mr_load:
-                    train_load_focus = mr_load.get('statusText')
+
+            train_load_focus = self._find_training_load_focus(training_status_modern)
+            if not train_load_focus:
+                train_load_focus = self._find_training_load_focus(training_status_std)
 
             seven_day_load = None
             if training_status_modern:
@@ -583,7 +604,9 @@ class GarminClient:
 
             training_readiness = None
             if readiness_data and isinstance(readiness_data, dict):
-                training_readiness = readiness_data.get('latestDailyReadiness', {}).get('trainingReadinessScore')
+                training_readiness = readiness_data.get('score')
+                if training_readiness is None:
+                    training_readiness = readiness_data.get('latestDailyReadiness', {}).get('trainingReadinessScore')
                 
             max_hr_hunt = None
             if self.user_age:
