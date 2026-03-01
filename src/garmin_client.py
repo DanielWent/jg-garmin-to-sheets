@@ -180,11 +180,45 @@ class GarminClient:
         while stack:
             current = stack.pop()
             if isinstance(current, dict):
+                # Check explicitly known dictionary path names first
+                for key in ['latestTrainingLoadBalance', 'mostRecentTrainingLoadBalance', 'trainingLoadBalance']:
+                    if key in current and isinstance(current[key], dict):
+                        for sub_key in ['statusText', 'status', 'feedbackPhrase']:
+                            if current[key].get(sub_key):
+                                return str(current[key].get(sub_key))
+                
+                # Fallback: Scour all strings indicating "loadbalance" inside dict keys
                 for k, v in current.items():
                     if 'loadbalance' in k.lower() and isinstance(v, dict):
-                        if v.get('statusText'): return v.get('statusText')
-                        if v.get('feedbackPhrase'): return v.get('feedbackPhrase')
-                        if v.get('status'): return v.get('status')
+                        for sub_key in ['statusText', 'status', 'feedbackPhrase']:
+                            if v.get(sub_key): 
+                                return str(v.get(sub_key))
+
+                # Traverse deeper
+                for v in current.values():
+                    if isinstance(v, (dict, list)):
+                        stack.append(v)
+            elif isinstance(current, list):
+                for item in current:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+        return None
+
+    def _find_training_readiness(self, data: Any) -> Optional[int]:
+        if not data: return None
+        stack = [data]
+        while stack:
+            current = stack.pop()
+            if isinstance(current, dict):
+                # Look for common direct scoring keys
+                if 'trainingReadinessScore' in current and current['trainingReadinessScore'] is not None:
+                    try: return int(current['trainingReadinessScore'])
+                    except (ValueError, TypeError): pass
+                if 'readinessScore' in current and current['readinessScore'] is not None:
+                    try: return int(current['readinessScore'])
+                    except (ValueError, TypeError): pass
+
+                # Traverse deeper
                 for v in current.values():
                     if isinstance(v, (dict, list)):
                         stack.append(v)
@@ -590,9 +624,12 @@ class GarminClient:
                     if not lactate_bpm and 'lactateThresholdHeartRate' in mr_ts:
                         lactate_bpm = mr_ts['lactateThresholdHeartRate']
 
+            # Robust Recursive Sweepers to pull variables regardless of nested JSON layout
             train_load_focus = self._find_training_load_focus(training_status_modern)
             if not train_load_focus:
                 train_load_focus = self._find_training_load_focus(training_status_std)
+
+            training_readiness = self._find_training_readiness(readiness_data)
 
             seven_day_load = None
             if training_status_modern:
@@ -601,12 +638,6 @@ class GarminClient:
                 seven_day_load = self._find_training_load(training_status_std)
             if seven_day_load is None and summary:
                 seven_day_load = self._find_training_load(summary)
-
-            training_readiness = None
-            if readiness_data and isinstance(readiness_data, dict):
-                training_readiness = readiness_data.get('score')
-                if training_readiness is None:
-                    training_readiness = readiness_data.get('latestDailyReadiness', {}).get('trainingReadinessScore')
                 
             max_hr_hunt = None
             if self.user_age:
