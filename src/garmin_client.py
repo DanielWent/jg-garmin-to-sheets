@@ -482,6 +482,19 @@ class GarminClient:
                         gap_speed = activity.get('avgGradeAdjustedSpeed')
                         gap_str = self._calculate_pace(gap_speed)
 
+                        # Extract New Biomechanics and Elevation
+                        avg_cadence = activity.get('averageRunningCadenceInStepsPerMinute')
+                        if not avg_cadence:
+                            avg_cadence = activity.get('averageBikingCadenceInRevPerMinute')
+                        
+                        stride_length = activity.get('strideLength')
+                        gct = activity.get('avgGroundContactTime')
+                        vertical_osc = activity.get('avgVerticalOscillation')
+                        
+                        start_elev = activity.get('startElevation')
+                        if start_elev is None:
+                            start_elev = activity.get('minElevation')
+
                         zones_dict = {
                             "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
                             "HR Zone 3 (min)": 0, "HR Zone 4 (min)": 0, "HR Zone 5 (min)": 0
@@ -500,6 +513,22 @@ class GarminClient:
                         except Exception as e_zone:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
 
+                        # Fetch Historical Weather Forecast from Garmin Connect
+                        weather_temp = ""
+                        weather_condition = ""
+                        try:
+                            weather_data = await loop.run_in_executor(None, self.client.get_activity_weather, act_id)
+                            if weather_data and isinstance(weather_data, dict):
+                                # 'issueTemp' is the forecasted/recorded temperature at the time of the activity
+                                weather_temp = weather_data.get('issueTemp', "")
+                                
+                                # Extract the text-based weather condition (e.g., "Sunny", "Rainy")
+                                weather_type = weather_data.get('issueWeatherType') or weather_data.get('weatherTypeDTO') or {}
+                                if isinstance(weather_type, dict):
+                                    weather_condition = weather_type.get('desc', weather_condition)
+                        except Exception as e_weather:
+                            logger.debug(f"Failed to fetch weather for {act_id}: {e_weather}")
+
                         activity_entry = {
                             "Activity ID": act_id,
                             "Date (YYYY-MM-DD)": target_date.isoformat(),
@@ -509,13 +538,18 @@ class GarminClient:
                             "Distance (km)": round(dist_km, 2) if dist_km else 0,
                             "Duration (min)": round(dur_min, 1) if dur_min else 0,
                             "Avg Pace (min/km)": pace_str,
-                            "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
-                            "Max HR (bpm)": int(max_hr) if max_hr else "",
-                            "Total Calories (kcal)": int(cal) if cal else "",
-                            "Elevation Gain (m)": int(elev_gain) if elev_gain else "",
+                            "Average Grade Adjusted Pace (min/km)": gap_str,
+                            "Starting Elevation (m)": int(start_elev) if start_elev else "",
                             "Total Ascent (m)": int(elev_gain) if elev_gain else "",
                             "Total Descent (m)": int(elev_loss) if elev_loss else "",
-                            "Average Grade Adjusted Pace (min/km)": gap_str,
+                            "Average Temperature (Celsius)": weather_temp,
+                            "Weather Condition": weather_condition,
+                            "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
+                            "Max HR (bpm)": int(max_hr) if max_hr else "",
+                            "Average Cadence (spm)": int(avg_cadence) if avg_cadence else "",
+                            "Average Stride Length (m)": round(stride_length, 2) if stride_length else "",
+                            "Average Ground Contact Time (ms)": int(gct) if gct else "",
+                            "Vertical Oscillation (cm)": round(vertical_osc, 2) if vertical_osc else "",
                             "Aerobic Training Effect (0.0-5.0)": aerobic_te,
                             "Anaerobic Training Effect (0.0-5.0)": anaerobic_te,
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
@@ -617,7 +651,6 @@ class GarminClient:
                     if not lactate_bpm and 'lactateThresholdHeartRate' in mr_ts:
                         lactate_bpm = mr_ts['lactateThresholdHeartRate']
 
-            # Apply optimized JSON Sweepers to locate the missing metrics
             train_load_focus = self._find_training_load_focus(training_status_modern)
             if not train_load_focus:
                 train_load_focus = self._find_training_load_focus(training_status_std)
