@@ -449,6 +449,13 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
+            # =========================================================================
+            # TOGGLE: Force Garmin Connect Weather API to Celsius
+            # Set to True if your Garmin Connect distance units are in Miles,
+            # as this forces the Garmin backend to send weather data in Fahrenheit.
+            # =========================================================================
+            FORCE_API_WEATHER_TO_CELSIUS = True
+
             processed_activities = []
             if activities:
                 for activity in activities:
@@ -536,25 +543,22 @@ class GarminClient:
                                 if raw_temp is not None:
                                     try:
                                         w_temp = float(raw_temp)
-                                        # Watch's internal sensor is ALWAYS natively in Celsius.
                                         watch_temp_c = full_act.get('averageTemperature') or activity.get('averageTemperature')
                                         
                                         needs_conversion = False
+                                        
                                         if watch_temp_c is not None:
-                                            # Reduced threshold to 8 degrees to catch smaller F/C mismatches
+                                            # Watch sensor exists: mathematically prove it's Fahrenheit
                                             if abs(w_temp - float(watch_temp_c)) > 8:
                                                 needs_conversion = True
                                         else:
-                                            # SMART FALLBACK: Seasonal heuristics for the UK if watch sensor is missing
-                                            month = target_date.month
-                                            
-                                            # If it's over 20 degrees between October and April, it's undeniably Fahrenheit
-                                            if w_temp > 20 and (month < 5 or month > 9):
+                                            # Watch sensor is missing: rely on the override toggle
+                                            if FORCE_API_WEATHER_TO_CELSIUS:
                                                 needs_conversion = True
-                                            # If it's over 35 degrees at any time in Scotland, it's undeniably Fahrenheit
-                                            elif w_temp > 35:
+                                            elif w_temp > 45 or w_temp < -15:
+                                                # Extreme safety net just in case toggle is off
                                                 needs_conversion = True
-                                            
+                                                
                                         if needs_conversion:
                                             w_temp = (w_temp - 32) * 5.0 / 9.0
                                             
