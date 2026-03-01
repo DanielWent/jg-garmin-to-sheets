@@ -95,6 +95,7 @@ GENERAL_SUMMARY_HEADERS = [
     "User Age",
     "User Gender",
     "VO2 Max (ml/kg/min)",
+    "Lactate Threshold Heart Rate (bpm)",
     "Lactate Threshold Pace (min/km)",
     "Sleep Score",
     "Sleep Start Time",
