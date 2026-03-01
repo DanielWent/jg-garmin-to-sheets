@@ -482,18 +482,34 @@ class GarminClient:
                         gap_speed = activity.get('avgGradeAdjustedSpeed')
                         gap_str = self._calculate_pace(gap_speed)
 
-                        # Extract New Biomechanics and Elevation
-                        avg_cadence = activity.get('averageRunningCadenceInStepsPerMinute')
-                        if not avg_cadence:
-                            avg_cadence = activity.get('averageBikingCadenceInRevPerMinute')
+                        # --- GET FULL ACTIVITY DETAILS FOR ADVANCED METRICS ---
+                        # The daily summary doesn't always contain stride length or temperature. 
+                        # We must fetch the unabridged dictionary for this specific activity ID.
+                        full_act = activity
+                        try:
+                            if hasattr(self.client, 'get_activity'):
+                                fetched_act = await loop.run_in_executor(None, self.client.get_activity, act_id)
+                                if fetched_act: full_act = fetched_act
+                            else:
+                                fetched_act = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}")
+                                if fetched_act: full_act = fetched_act
+                        except Exception as e_full:
+                            logger.debug(f"Failed to fetch full activity {act_id}: {e_full}")
                         
-                        stride_length = activity.get('strideLength')
-                        gct = activity.get('avgGroundContactTime')
-                        vertical_osc = activity.get('avgVerticalOscillation')
+                        avg_cadence = full_act.get('averageRunningCadenceInStepsPerMinute') or full_act.get('averageBikingCadenceInRevPerMinute') or activity.get('averageRunningCadenceInStepsPerMinute')
                         
-                        start_elev = activity.get('startElevation')
+                        # We now look for Stride length in the unabridged `full_act` dictionary
+                        stride_length = full_act.get('avgStrideLength') or full_act.get('averageStrideLength') or full_act.get('strideLength') or activity.get('avgStrideLength') or activity.get('strideLength')
+                        # If stride length is reported in centimeters (e.g., 105 instead of 1.05), convert to meters
+                        if stride_length and stride_length > 10:
+                            stride_length = stride_length / 100
+                            
+                        gct = full_act.get('avgGroundContactTime') or full_act.get('averageGroundContactTime') or full_act.get('groundContactTime') or activity.get('avgGroundContactTime')
+                        vertical_osc = full_act.get('avgVerticalOscillation') or full_act.get('averageVerticalOscillation') or full_act.get('verticalOscillation') or activity.get('avgVerticalOscillation')
+                        
+                        start_elev = full_act.get('startElevation') or activity.get('startElevation')
                         if start_elev is None:
-                            start_elev = activity.get('minElevation')
+                            start_elev = full_act.get('minElevation') or activity.get('minElevation')
 
                         zones_dict = {
                             "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
@@ -519,15 +535,18 @@ class GarminClient:
                         try:
                             weather_data = await loop.run_in_executor(None, self.client.get_activity_weather, act_id)
                             if weather_data and isinstance(weather_data, dict):
-                                # 'issueTemp' is the forecasted/recorded temperature at the time of the activity
-                                weather_temp = weather_data.get('issueTemp', "")
+                                # Broaden the search keys just in case the API format changed
+                                weather_temp = weather_data.get('issueTemp') or weather_data.get('temp') or weather_data.get('temperature') or ""
                                 
-                                # Extract the text-based weather condition (e.g., "Sunny", "Rainy")
                                 weather_type = weather_data.get('issueWeatherType') or weather_data.get('weatherTypeDTO') or {}
                                 if isinstance(weather_type, dict):
                                     weather_condition = weather_type.get('desc', weather_condition)
                         except Exception as e_weather:
                             logger.debug(f"Failed to fetch weather for {act_id}: {e_weather}")
+                            
+                        # FALLBACK: If weather API failed or is missing temperature, pull the watch's internal sensor temp from the unabridged dictionary
+                        if weather_temp == "" or weather_temp is None:
+                            weather_temp = full_act.get('averageTemperature') or activity.get('averageTemperature') or ""
 
                         activity_entry = {
                             "Activity ID": act_id,
