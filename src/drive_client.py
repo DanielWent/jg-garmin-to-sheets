@@ -49,9 +49,17 @@ class GoogleDriveClient:
         if new_df.empty:
             return
             
-        self._upload_df(filename, new_df, 'Date', sort_date_desc)
+        self._upload_df(filename, new_df, dedup_col='Date', sort_date_col='Date', sort_date_desc=sort_date_desc)
 
-    def _upload_df(self, filename: str, new_df: pd.DataFrame, dedup_col: str, sort_date_desc: bool):
+    def update_activities_csv(self, filename: str, activities: List[dict], headers: List[str], sort_date_desc: bool = True):
+        if not activities:
+            return
+        new_df = pd.DataFrame(activities, columns=headers)
+        if new_df.empty:
+            return
+        self._upload_df(filename, new_df, dedup_col='Activity ID', sort_date_col='Date (YYYY-MM-DD)', sort_date_desc=sort_date_desc)
+
+    def _upload_df(self, filename: str, new_df: pd.DataFrame, dedup_col: str, sort_date_col: str, sort_date_desc: bool):
         file_id = self._get_file_id(filename)
         combined_df = None
         
@@ -74,18 +82,17 @@ class GoogleDriveClient:
 
         # === 5-YEAR RETENTION POLICY ===
         try:
-            date_col = 'Date'
-            if date_col in combined_df.columns:
-                combined_df[date_col] = pd.to_datetime(combined_df[date_col])
+            if sort_date_col in combined_df.columns:
+                combined_df[sort_date_col] = pd.to_datetime(combined_df[sort_date_col])
                 cutoff_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=1826)
-                combined_df = combined_df[combined_df[date_col] >= cutoff_date]
-                combined_df[date_col] = combined_df[date_col].dt.strftime('%Y-%m-%d')
+                combined_df = combined_df[combined_df[sort_date_col] >= cutoff_date]
+                combined_df[sort_date_col] = combined_df[sort_date_col].dt.strftime('%Y-%m-%d')
         except Exception as e:
             logger.warning(f"Could not apply 1826-day retention policy to {filename}: {e}")
 
         # === SORTING ===
-        if sort_date_desc and 'Date' in combined_df.columns:
-            combined_df = combined_df.sort_values(by='Date', ascending=False)
+        if sort_date_desc and sort_date_col in combined_df.columns:
+            combined_df = combined_df.sort_values(by=sort_date_col, ascending=False)
 
         # Upload
         csv_buffer = io.StringIO()
