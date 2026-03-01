@@ -13,6 +13,7 @@ class GarminMetrics:
     user_name: Optional[str] = None
     user_age: Optional[int] = None
     user_gender: Optional[str] = None
+    max_hr_hunt: Optional[int] = None
     # Sleep
     sleep_score: Optional[int] = None
     sleep_length: Optional[float] = None
@@ -124,7 +125,8 @@ GENERAL_SUMMARY_HEADERS = [
     "Overnight Resting HR (bpm)",
     "Overnight HRV (ms)",
     "Garmin HRV Status",
-    "Garmin Training Status"
+    "Garmin Training Status",
+    "Physiological Max Heart Rate (bpm)"
 ]
 
 SLEEP_HEADERS = [
@@ -218,6 +220,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "User Name": "user_name",
     "User Age": "user_age",
     "User Gender": "user_gender",
+    "Physiological Max Heart Rate (bpm)": "max_hr_hunt",
     
     "Sleep Score": "sleep_score",
     "Sleep Length (mins)": "sleep_length",
