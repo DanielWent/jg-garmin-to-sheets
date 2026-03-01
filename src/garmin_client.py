@@ -560,8 +560,13 @@ class GarminClient:
                 # Safe fetch for mr_vo2
                 mr_vo2 = training_status_std.get('mostRecentVO2Max')
                 if mr_vo2:
-                    if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
-                    if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
+                    if mr_vo2.get('generic'): 
+                        raw_run = mr_vo2['generic'].get('vo2MaxPreciseValue') or mr_vo2['generic'].get('vo2MaxValue')
+                        if raw_run is not None: vo2_run = round(float(raw_run), 1)
+                        
+                    if mr_vo2.get('cycling'): 
+                        raw_cyc = mr_vo2['cycling'].get('vo2MaxPreciseValue') or mr_vo2['cycling'].get('vo2MaxValue')
+                        if raw_cyc is not None: vo2_cycle = round(float(raw_cyc), 1)
                 
                 # Safe fetch for ts_data
                 mr_ts = training_status_std.get('mostRecentTrainingStatus')
@@ -589,6 +594,7 @@ class GarminClient:
                 user_name=self.user_full_name,
                 user_age=self.user_age,
                 user_gender=self.user_gender, 
+                max_hr_hunt=self.max_hr_hunt if hasattr(self, 'max_hr_hunt') else None,
                 # Sleep
                 sleep_score=sleep_score,
                 sleep_need=sleep_need,
