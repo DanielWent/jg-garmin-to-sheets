@@ -237,16 +237,20 @@ class GarminClient:
             c_lactate_range_speed = safe_fetch("Lactate Range Speed", loop.run_in_executor(
                 None, partial(self.client.connectapi, task_lactate_speed_url, params=lactate_params)
             ))
+            
+            c_readiness = safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
 
             results = await asyncio.gather(
                 c_summary, c_stats, c_sleep, c_hrv, c_bp, c_activities, 
                 c_training_std, c_training_modern, 
-                c_lactate_direct, c_lactate_range_hr, c_lactate_range_speed
+                c_lactate_direct, c_lactate_range_hr, c_lactate_range_speed,
+                c_readiness
             )
 
             (summary, stats, sleep_data, hrv_payload, bp_payload, activities, 
              training_status_std, training_status_modern, 
-             lactate_data, lactate_range_hr, lactate_range_speed) = results
+             lactate_data, lactate_range_hr, lactate_range_speed,
+             readiness_data) = results
 
             summary = summary or {}
             if isinstance(summary, list): summary = summary[0] if summary else {}
@@ -489,10 +493,8 @@ class GarminClient:
             resting_hr = None
             avg_stress = None
             floors = None
-            rest_stress_dur = None
-            low_stress_dur = None
-            med_stress_dur = None
-            high_stress_dur = None
+            bb_charged = None
+            bb_drained = None
             
             if summary:
                 active_cal = summary.get('activeKilocalories')
@@ -504,17 +506,8 @@ class GarminClient:
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
                 
-                rsd = summary.get('restStressDuration')
-                if rsd is not None: rest_stress_dur = int(round(rsd / 60))
-                
-                lsd = summary.get('lowStressDuration')
-                if lsd is not None: low_stress_dur = int(round(lsd / 60))
-                
-                msd = summary.get('mediumStressDuration')
-                if msd is not None: med_stress_dur = int(round(msd / 60))
-                
-                hsd = summary.get('highStressDuration')
-                if hsd is not None: high_stress_dur = int(round(hsd / 60))
+                bb_charged = summary.get('bodyBatteryChargedValue')
+                bb_drained = summary.get('bodyBatteryDrainedValue')
 
                 raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
                 if raw_floors is not None:
@@ -528,6 +521,7 @@ class GarminClient:
             train_phrase = None
             lactate_bpm = None
             lactate_pace = None
+            train_load_focus = None
 
             if lactate_data:
                 if 'heartRate' in lactate_data:
@@ -557,13 +551,13 @@ class GarminClient:
 
             # FIX: Robust processing for training status fields which can be null/None
             if training_status_std:
-                # Safe fetch for mr_vo2
                 mr_vo2 = training_status_std.get('mostRecentVO2Max')
                 if mr_vo2:
-                    if mr_vo2.get('generic'): vo2_run = mr_vo2['generic'].get('vo2MaxValue')
-                    if mr_vo2.get('cycling'): vo2_cycle = mr_vo2['cycling'].get('vo2MaxValue')
+                    if mr_vo2.get('generic'): 
+                        vo2_run = mr_vo2['generic'].get('preciseVo2Max', mr_vo2['generic'].get('vo2MaxValue'))
+                    if mr_vo2.get('cycling'): 
+                        vo2_cycle = mr_vo2['cycling'].get('preciseVo2Max', mr_vo2['cycling'].get('vo2MaxValue'))
                 
-                # Safe fetch for ts_data
                 mr_ts = training_status_std.get('mostRecentTrainingStatus')
                 if mr_ts:
                     ts_data = mr_ts.get('latestTrainingStatusData')
@@ -574,6 +568,10 @@ class GarminClient:
                     
                     if not lactate_bpm and 'lactateThresholdHeartRate' in mr_ts:
                         lactate_bpm = mr_ts['lactateThresholdHeartRate']
+                        
+                mr_load = training_status_std.get('mostRecentTrainingLoadBalance')
+                if mr_load:
+                    train_load_focus = mr_load.get('statusText')
 
             seven_day_load = None
             if training_status_modern:
@@ -583,13 +581,20 @@ class GarminClient:
             if seven_day_load is None and summary:
                 seven_day_load = self._find_training_load(summary)
 
+            training_readiness = None
+            if readiness_data and isinstance(readiness_data, dict):
+                training_readiness = readiness_data.get('latestDailyReadiness', {}).get('trainingReadinessScore')
+                
+            max_hr_hunt = None
+            if self.user_age:
+                max_hr_hunt = int(round(211 - 0.64 * self.user_age))
+
             return GarminMetrics(
                 date=target_date,
-                # User Profile Info
                 user_name=self.user_full_name,
                 user_age=self.user_age,
                 user_gender=self.user_gender, 
-                # Sleep
+                max_hr_hunt=max_hr_hunt,
                 sleep_score=sleep_score,
                 sleep_need=sleep_need,
                 sleep_efficiency=sleep_efficiency,
@@ -602,7 +607,6 @@ class GarminClient:
                 sleep_awake=sleep_awake,
                 overnight_respiration=overnight_respiration, 
                 overnight_pulse_ox=overnight_pulse_ox,
-                # Body
                 weight=weight,
                 bmi=bmi,
                 body_fat=body_fat,
@@ -612,26 +616,22 @@ class GarminClient:
                 visceral_fat=visceral_fat,
                 blood_pressure_systolic=bp_systolic,
                 blood_pressure_diastolic=bp_diastolic,
-                # Stress/Heart
                 resting_heart_rate=resting_hr,
                 average_stress=avg_stress,
-                rest_stress_duration=rest_stress_dur,
-                low_stress_duration=low_stress_dur,
-                medium_stress_duration=med_stress_dur,
-                high_stress_duration=high_stress_dur,
                 body_battery_max=bb_max,
                 body_battery_min=bb_min,
-                # HRV
+                body_battery_charged=bb_charged,
+                body_battery_drained=bb_drained,
                 overnight_hrv=overnight_hrv_value,
                 hrv_status=hrv_status_value,
-                # Training
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
                 seven_day_load=seven_day_load,
                 lactate_threshold_bpm=lactate_bpm,
                 lactate_threshold_pace=lactate_pace,
                 training_status=train_phrase,
-                # Summary
+                training_load_focus=train_load_focus,
+                training_readiness=training_readiness,
                 active_calories=active_cal,
                 resting_calories=resting_cal,
                 total_calories=total_cal,
