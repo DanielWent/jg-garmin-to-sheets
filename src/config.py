@@ -40,10 +40,6 @@ class GarminMetrics:
     visceral_fat: Optional[float] = None
     # Stress (Typed as Any to allow "NA" or "PENDING")
     average_stress: Optional[Any] = None
-    rest_stress_duration: Optional[Any] = None
-    low_stress_duration: Optional[Any] = None
-    medium_stress_duration: Optional[Any] = None
-    high_stress_duration: Optional[Any] = None
     # BP
     blood_pressure_systolic: Optional[int] = None
     blood_pressure_diastolic: Optional[int] = None
@@ -62,9 +58,13 @@ class GarminMetrics:
     lactate_threshold_bpm: Optional[int] = None
     lactate_threshold_pace: Optional[str] = None
     training_status: Optional[str] = None
+    training_readiness: Optional[Any] = None
+    training_load_focus: Optional[str] = None
     # Body Battery
     body_battery_max: Optional[int] = None
     body_battery_min: Optional[Any] = None
+    body_battery_charged: Optional[Any] = None
+    body_battery_drain: Optional[Any] = None
     # Activities
     activities: List[Any] = field(default_factory=list)
 
@@ -108,13 +108,14 @@ GENERAL_SUMMARY_HEADERS = [
     "Sleep Length (min)",
     "Sleep Need (min)",
     "Overnight Breathing Rate (breaths per minute)",
+    "Overnight Pulse Ox (0-100%)",
     "Avg Stress Score",
-    "Rest Stress Duration (min)",
-    "Low Stress Duration (min)",
-    "Medium Stress Duration (min)",
-    "High Stress Duration (min)",
+    "Morning Training Readiness (0-100)",
+    "Training Load Focus",
     "Daily Min Body Battery (0-100)",
     "Daily Max Body Battery (0-100)",
+    "Body Battery Charged",
+    "Body Battery Drain",
     "Daily Steps",
     "Daily Floors Climbed",
     "Daily Intensity Minutes",
@@ -161,12 +162,10 @@ BODY_COMP_HEADERS = [
 STRESS_HEADERS = [
     "Date",
     "Average Stress",
-    "Rest Stress Duration (min)",
-    "Low Stress Duration (min)",
-    "Medium Stress Duration (min)",
-    "High Stress Duration (min)",
     "Today's Minimum Body Battery",
     "Today's Maximum Body Battery",
+    "Body Battery Charged",
+    "Body Battery Drain",
     "Systolic Blood Pressure (mmHg)", 
     "Diastolic Blood Pressure (mmHg)" 
 ]
@@ -230,6 +229,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Sleep Need (mins)": "sleep_need",
     "Sleep Need (min)": "sleep_need",
     "Overnight Breathing Rate (breaths per minute)": "overnight_respiration",
+    "Overnight Pulse Ox (0-100%)": "overnight_pulse_ox",
     "Sleep Start Time": "sleep_start_time",
     "Sleep End Time": "sleep_end_time",
     "Deep Sleep (min)": "sleep_deep",
@@ -252,20 +252,18 @@ HEADER_TO_ATTRIBUTE_MAP = {
 
     "Average Stress": "average_stress",
     "Avg Stress Score": "average_stress",
-    "Rest Stress Duration (min)": "rest_stress_duration",
-    "Low Stress Duration (min)": "low_stress_duration",
-    "Medium Stress Duration (min)": "medium_stress_duration",
-    "High Stress Duration (min)": "high_stress_duration",
     "Today's Minimum Body Battery": "body_battery_min",
     "Today's Maximum Body Battery": "body_battery_max",
     "Daily Min Body Battery (0-100)": "body_battery_min",
     "Daily Max Body Battery (0-100)": "body_battery_max",
+    "Body Battery Charged": "body_battery_charged",
+    "Body Battery Drain": "body_battery_drain",
+    
+    "Morning Training Readiness (0-100)": "training_readiness",
+    "Training Load Focus": "training_load_focus",
 
-    # Original Mappings for BP Sheet
     "Systolic (mmHg)": "blood_pressure_systolic",
     "Diastolic (mmHg)": "blood_pressure_diastolic",
-    
-    # New Mappings for Stress Sheet and General Summary
     "Systolic Blood Pressure (mmHg)": "blood_pressure_systolic",
     "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic",
 
