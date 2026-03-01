@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional, List
 import asyncio
 import logging
 import json
+import requests
 import garminconnect
 import garth
 from pathlib import Path
@@ -509,10 +510,38 @@ class GarminClient:
                             
                         gct = full_act.get('avgGroundContactTime') or full_act.get('averageGroundContactTime') or full_act.get('groundContactTime') or activity.get('avgGroundContactTime')
                         vertical_osc = full_act.get('avgVerticalOscillation') or full_act.get('averageVerticalOscillation') or full_act.get('verticalOscillation') or activity.get('avgVerticalOscillation')
+
+                        # ===================================================================================
+                        # --- TRUE TOPOGRAPHIC STARTING ELEVATION FIX ---
+                        # Ignore the watch's drifty barometric altimeter. We extract the exact GPS 
+                        # coordinates of the start of the run and query the Open-Meteo Topographic Database.
+                        # ===================================================================================
+                        start_elev = None
+                        start_lat = full_act.get('startLatitude') or activity.get('startLatitude')
+                        start_lon = full_act.get('startLongitude') or activity.get('startLongitude')
                         
-                        start_elev = full_act.get('startElevation') or activity.get('startElevation')
+                        if start_lat is not None and start_lon is not None:
+                            try:
+                                def fetch_true_elevation():
+                                    url = f"https://api.open-meteo.com/v1/elevation?latitude={start_lat}&longitude={start_lon}"
+                                    resp = requests.get(url, timeout=5)
+                                    if resp.status_code == 200:
+                                        data = resp.json()
+                                        if 'elevation' in data and data['elevation']:
+                                            return data['elevation'][0]
+                                    return None
+                                    
+                                true_elev = await loop.run_in_executor(None, fetch_true_elevation)
+                                if true_elev is not None:
+                                    start_elev = true_elev
+                            except Exception as e_elev:
+                                logger.debug(f"Failed to fetch true elevation for {act_id}: {e_elev}")
+                                
+                        # FALLBACK: If the API fails or you ran on a treadmill with no GPS data
                         if start_elev is None:
-                            start_elev = full_act.get('minElevation') or activity.get('minElevation')
+                            start_elev = full_act.get('startElevation') or activity.get('startElevation')
+                            if start_elev is None:
+                                start_elev = full_act.get('minElevation') or activity.get('minElevation')
 
                         zones_dict = {
                             "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
@@ -586,7 +615,8 @@ class GarminClient:
                             "Duration (min)": round(dur_min, 1) if dur_min else 0,
                             "Avg Pace (min/km)": pace_str,
                             "Average Grade Adjusted Pace (min/km)": gap_str,
-                            "Starting Elevation (m)": int(start_elev) if start_elev else "",
+                            # Notice we explicitly check that start_elev is not None, as an elevation of 0m (sea level) is a valid, required number!
+                            "Starting Elevation (m)": int(round(start_elev)) if start_elev is not None and start_elev != "" else "",
                             "Total Ascent (m)": int(elev_gain) if elev_gain else "",
                             "Total Descent (m)": int(elev_loss) if elev_loss else "",
                             "Average Temperature (Celsius)": weather_temp,
