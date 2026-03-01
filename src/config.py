@@ -52,10 +52,10 @@ class GarminMetrics:
     training_status: Optional[str] = None
     training_load_focus: Optional[str] = None
     training_readiness: Optional[int] = None
-    body_battery_max: Optional[int] = None
+    body_battery_max: Optional[Any] = None
     body_battery_min: Optional[Any] = None
-    body_battery_charged: Optional[int] = None
-    body_battery_drained: Optional[int] = None
+    body_battery_charged: Optional[Any] = None
+    body_battery_drained: Optional[Any] = None
     activities: List[Any] = field(default_factory=list)
 
 # =========================================================
@@ -71,7 +71,7 @@ GENERAL_SUMMARY_HEADERS = [
     "VO2 Max (ml/kg/min)",
     "Lactate Threshold Pace (min/km)",
     "Lactate Threshold Heart Rate (bpm)",
-    "Sleep Score",
+    "Garmin Sleep Score (0-100)",
     "Sleep Start Time",
     "Sleep End Time",
     "Deep Sleep (min)",
@@ -135,7 +135,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "User Age": "user_age",
     "User Gender": "user_gender",
     "Physiological Maximum Heart Rate (bpm)": "max_hr_hunt",
-    "Sleep Score": "sleep_score",
+    "Garmin Sleep Score (0-100)": "sleep_score",
     "Sleep Length (min)": "sleep_length",
     "Sleep Need (min)": "sleep_need",
     "Sleep Start Time": "sleep_start_time",
