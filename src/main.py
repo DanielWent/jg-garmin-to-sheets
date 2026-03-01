@@ -71,14 +71,13 @@ def ensure_credentials_file_exists():
         logger.error(f"Failed to write credentials file: {e}")
         sys.exit(1)
 
-def calculate_age(dob_str: Optional[str]) -> Optional[int]:
-    """Calculates age from YYYY-MM-DD string."""
+def calculate_age(dob_str: Optional[str], target_date: date) -> Optional[int]:
+    """Calculates age from YYYY-MM-DD string for a specific date."""
     if not dob_str:
         return None
     try:
         dob = datetime.strptime(dob_str, "%Y-%m-%d").date()
-        today = date.today()
-        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        return target_date.year - dob.year - ((target_date.month, target_date.day) < (dob.month, dob.day))
     except ValueError:
         logger.warning(f"Invalid DOB format: {dob_str}")
         return None
@@ -100,7 +99,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
     # Pre-calculate manual profile data
     manual_name = profile_data.get('manual_name')
     manual_gender = profile_data.get('manual_gender')
-    manual_age = calculate_age(profile_data.get('manual_dob'))
     
     # Determine filename prefix based on user profile
     file_prefix = ""
@@ -121,13 +119,19 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         logger.info(f"[{profile_name}] Fetching metrics for {current_date.isoformat()}")
         daily_metrics = await garmin_client.get_metrics(current_date)
         
+        # Calculate precise age for the current day being processed
+        current_age = calculate_age(profile_data.get('manual_dob'), current_date)
+        
         # === MANUALLY INJECT SECRETS INTO METRICS ===
         if manual_name:
             daily_metrics.user_name = manual_name
         if manual_gender:
             daily_metrics.user_gender = manual_gender
-        if manual_age:
-            daily_metrics.user_age = manual_age
+            
+        if current_age is not None:
+            daily_metrics.user_age = current_age
+            # Calculate Physiological Maximum Heart Rate (HUNT Formula)
+            daily_metrics.max_hr_hunt = int(round(211 - (0.64 * current_age)))
         
         # === CUSTOM LOGIC 1: ADJUST BODY FAT FOR USER 1 FROM 25 JAN 2026 ONWARDS ===
         if profile_name == "USER1" and current_date >= date(2026, 1, 25):
