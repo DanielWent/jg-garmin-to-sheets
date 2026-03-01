@@ -112,7 +112,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         'average_stress', 'rest_stress_duration', 'low_stress_duration', 
         'medium_stress_duration', 'high_stress_duration',
         'steps', 'floors_climbed', 'total_calories', 'intensity_minutes',
-        'body_battery_min'
+        'body_battery_min', 'active_calories'
     ]
 
     while current_date <= end_date:
