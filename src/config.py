@@ -12,7 +12,7 @@ class GarminMetrics:
     user_name: Optional[str] = None
     user_age: Optional[int] = None
     user_gender: Optional[str] = None
-    max_hr_hunt: Optional[int] = None           # ADDED for HUNT max HR
+    max_hr_hunt: Optional[int] = None
     sleep_score: Optional[int] = None
     sleep_length: Optional[float] = None
     sleep_start_time: Optional[str] = None
@@ -35,7 +35,6 @@ class GarminMetrics:
     body_water: Optional[float] = None
     visceral_fat: Optional[float] = None
     average_stress: Optional[Any] = None
-    # REMOVED 4 stress duration variables here
     blood_pressure_systolic: Optional[int] = None
     blood_pressure_diastolic: Optional[int] = None
     active_calories: Optional[int] = None
@@ -51,12 +50,12 @@ class GarminMetrics:
     lactate_threshold_bpm: Optional[int] = None
     lactate_threshold_pace: Optional[str] = None
     training_status: Optional[str] = None
-    training_load_focus: Optional[str] = None   # ADDED
-    training_readiness: Optional[int] = None    # ADDED
+    training_load_focus: Optional[str] = None
+    training_readiness: Optional[int] = None
     body_battery_max: Optional[int] = None
-    body_battery_min: Optional[int] = None
-    body_battery_charged: Optional[int] = None  # ADDED
-    body_battery_drained: Optional[int] = None  # ADDED
+    body_battery_min: Optional[Any] = None
+    body_battery_charged: Optional[int] = None
+    body_battery_drained: Optional[int] = None
     activities: List[Any] = field(default_factory=list)
 
 # =========================================================
@@ -68,10 +67,10 @@ GENERAL_SUMMARY_HEADERS = [
     "User Name",
     "User Age",
     "User Gender",
-    "Physiological Maximum Heart Rate (bpm)",   # ADDED
+    "Physiological Maximum Heart Rate (bpm)",
     "VO2 Max (ml/kg/min)",
     "Lactate Threshold Pace (min/km)",
-    "Lactate Threshold Heart Rate (bpm)",       # ADDED
+    "Lactate Threshold Heart Rate (bpm)",
     "Sleep Score",
     "Sleep Start Time",
     "Sleep End Time",
@@ -81,13 +80,12 @@ GENERAL_SUMMARY_HEADERS = [
     "Awake Time (min)",
     "Sleep Length (min)",
     "Sleep Need (min)",
-    "Overnight SPO2%",                          # ADDED
+    "Overnight SPO2%",
     "Avg Stress Score",
-    # REMOVED 4 stress duration headers
     "Daily Min Body Battery (0-100)",
     "Daily Max Body Battery (0-100)",
-    "Body Battery Charged (0-100)",             # ADDED
-    "Body Battery Drained (0-100)",             # ADDED
+    "Body Battery Charged (0-100)",
+    "Body Battery Drained (0-100)",
     "Daily Steps",
     "Daily Floors Climbed",
     "Daily Intensity Minutes",
@@ -95,8 +93,8 @@ GENERAL_SUMMARY_HEADERS = [
     "Systolic Blood Pressure (mmHg)",
     "Diastolic Blood Pressure (mmHg)",
     "Garmin Training Load (7 Day Sum)",
-    "Garmin Training Load Focus",               # ADDED
-    "Morning Garmin Training Readiness (0-100)",# ADDED
+    "Garmin Training Load Focus",
+    "Morning Garmin Training Readiness (0-100)",
     "Overnight Resting HR (bpm)",
     "Overnight HRV (ms)",
     "Garmin HRV Status",
@@ -112,7 +110,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "User Name": "user_name",
     "User Age": "user_age",
     "User Gender": "user_gender",
-    "Physiological Maximum Heart Rate (bpm)": "max_hr_hunt",      # MAP
+    "Physiological Maximum Heart Rate (bpm)": "max_hr_hunt",
     "Sleep Score": "sleep_score",
     "Sleep Length (min)": "sleep_length",
     "Sleep Need (min)": "sleep_need",
@@ -122,15 +120,15 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Light Sleep (min)": "sleep_light",
     "REM Sleep (min)": "sleep_rem",
     "Awake Time (min)": "sleep_awake",
-    "Overnight SPO2%": "overnight_pulse_ox",                      # MAP
+    "Overnight SPO2%": "overnight_pulse_ox",
     "Overnight HRV (ms)": "overnight_hrv",
     "Garmin HRV Status": "hrv_status",
     "Overnight Resting HR (bpm)": "resting_heart_rate",
     "Avg Stress Score": "average_stress",
     "Daily Min Body Battery (0-100)": "body_battery_min",
     "Daily Max Body Battery (0-100)": "body_battery_max",
-    "Body Battery Charged (0-100)": "body_battery_charged",       # MAP
-    "Body Battery Drained (0-100)": "body_battery_drained",       # MAP
+    "Body Battery Charged (0-100)": "body_battery_charged",
+    "Body Battery Drained (0-100)": "body_battery_drained",
     "Systolic Blood Pressure (mmHg)": "blood_pressure_systolic",
     "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic",
     "Total Calories (kcal)": "total_calories",
@@ -139,9 +137,9 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Daily Floors Climbed": "floors_climbed",
     "VO2 Max (ml/kg/min)": "vo2max_running",
     "Lactate Threshold Pace (min/km)": "lactate_threshold_pace",
-    "Lactate Threshold Heart Rate (bpm)": "lactate_threshold_bpm", # MAP
+    "Lactate Threshold Heart Rate (bpm)": "lactate_threshold_bpm",
     "Garmin Training Load (7 Day Sum)": "seven_day_load",
-    "Garmin Training Load Focus": "training_load_focus",          # MAP
-    "Morning Garmin Training Readiness (0-100)": "training_readiness", # MAP
+    "Garmin Training Load Focus": "training_load_focus",
+    "Morning Garmin Training Readiness (0-100)": "training_readiness",
     "Garmin Training Status": "training_status"
 }
