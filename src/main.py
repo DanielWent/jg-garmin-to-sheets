@@ -97,7 +97,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
 
     fields_to_validate = [
         'average_stress', 'steps', 'floors_climbed', 'total_calories', 'intensity_minutes',
-        'body_battery_min'
+        'body_battery_min', 'body_battery_max', 'body_battery_charged', 'body_battery_drained'
     ]
 
     while current_date <= end_date:
