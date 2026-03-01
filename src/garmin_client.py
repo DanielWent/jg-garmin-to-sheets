@@ -516,8 +516,8 @@ class GarminClient:
                             "Total Ascent (m)": int(elev_gain) if elev_gain else "",
                             "Total Descent (m)": int(elev_loss) if elev_loss else "",
                             "Average Grade Adjusted Pace (min/km)": gap_str,
-                            "Aerobic TE (0-5.0)": aerobic_te,
-                            "Anaerobic TE (0-5.0)": anaerobic_te,
+                            "Aerobic Training Effect (0.0-5.0)": aerobic_te,
+                            "Anaerobic Training Effect (0.0-5.0)": anaerobic_te,
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
                             "Garmin Training Effect Label": training_effect if training_effect else "",
                         }
