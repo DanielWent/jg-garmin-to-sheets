@@ -305,6 +305,16 @@ class GarminClient:
              lactate_data, lactate_range_hr, lactate_range_speed,
              readiness_data) = results
 
+            # =========================================================
+            # NEW: DUMP PAYLOADS TO DEBUG LOG
+            # =========================================================
+            if readiness_data:
+                logger.debug(f"[{target_iso}] RAW READINESS PAYLOAD: {json.dumps(readiness_data)}")
+            if training_status_std:
+                logger.debug(f"[{target_iso}] RAW TRAINING STATUS STD: {json.dumps(training_status_std)}")
+            if training_status_modern:
+                logger.debug(f"[{target_iso}] RAW TRAINING STATUS MODERN: {json.dumps(training_status_modern)}")
+
             summary = summary or {}
             if isinstance(summary, list): summary = summary[0] if summary else {}
 
