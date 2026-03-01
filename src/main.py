@@ -109,10 +109,9 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
 
     # Fields that should use NA/PENDING logic
     fields_to_validate = [
-        'average_stress', 'rest_stress_duration', 'low_stress_duration', 
-        'medium_stress_duration', 'high_stress_duration',
-        'steps', 'floors_climbed', 'total_calories', 'intensity_minutes',
-        'body_battery_min', 'active_calories'
+        'average_stress', 'steps', 'floors_climbed', 'total_calories', 'intensity_minutes',
+        'body_battery_min', 'active_calories', 'body_battery_charged', 'body_battery_drain',
+        'training_readiness'
     ]
 
     while current_date <= end_date:
