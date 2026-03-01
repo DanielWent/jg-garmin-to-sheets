@@ -17,6 +17,7 @@ from src.drive_client import GoogleDriveClient
 from src.exceptions import MFARequiredException
 from src.config import (
     GENERAL_SUMMARY_HEADERS,
+    ACTIVITY_HEADERS,
     HEADER_TO_ATTRIBUTE_MAP, 
     GarminMetrics
 )
@@ -71,7 +72,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
     manual_age = calculate_age(manual_dob)
 
     try:
-        # Properly pass the manual config to the GarminClient instantiation
         garmin_client = GarminClient(
             email, 
             password, 
@@ -133,6 +133,12 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         logger.warning(f"[{profile_name}] No metrics fetched. Nothing to write.")
         return
 
+    # Extract activities list
+    activities_to_write = []
+    for metric in metrics_to_write:
+        if metric.activities:
+            activities_to_write.extend(metric.activities)
+
     # === GOOGLE DRIVE (CSV) SYNC ===
     if output_type == 'drive':
         folder_id = profile_data.get('drive_folder_id')
@@ -145,6 +151,8 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         try:
             drive_client = GoogleDriveClient('credentials/client_secret.json', folder_id)
             drive_client.update_csv(f"{file_prefix}garmin_data.csv", metrics_to_write, GENERAL_SUMMARY_HEADERS)
+            if activities_to_write:
+                drive_client.update_activities_csv(f"{file_prefix}garmin_activities_list.csv", activities_to_write, ACTIVITY_HEADERS)
             logger.info(f"[{profile_name}] Google Drive CSV sync completed successfully!")
         except Exception as e:
             logger.error(f"[{profile_name}] Drive Sync Failed: {e}", exc_info=True)
@@ -154,8 +162,9 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
     elif output_type == 'csv':
         output_dir = Path("./output")
         output_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = output_dir / f"{file_prefix}garmin_data.csv"
         
+        # 1. Save Summary CSV
+        csv_path = output_dir / f"{file_prefix}garmin_data.csv"
         logger.info(f"Writing metrics to local CSV: {csv_path}")
         file_exists = csv_path.exists()
         with open(csv_path, 'a', newline='') as f:
@@ -164,6 +173,18 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 writer.writerow(GENERAL_SUMMARY_HEADERS)
             for metric in metrics_to_write:
                 writer.writerow([getattr(metric, HEADER_TO_ATTRIBUTE_MAP.get(h, ""), "") for h in GENERAL_SUMMARY_HEADERS])
+                
+        # 2. Save Activities CSV
+        if activities_to_write:
+            activities_csv_path = output_dir / f"{file_prefix}garmin_activities_list.csv"
+            logger.info(f"Writing activities to local CSV: {activities_csv_path}")
+            a_file_exists = activities_csv_path.exists()
+            with open(activities_csv_path, 'a', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=ACTIVITY_HEADERS, extrasaction='ignore')
+                if not a_file_exists or f.tell() == 0:
+                    writer.writeheader()
+                writer.writerows(activities_to_write)
+                
         logger.info(f"[{profile_name}] Local CSV sync completed.")
 
 def load_user_profiles():
