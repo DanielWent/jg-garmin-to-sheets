@@ -48,8 +48,8 @@ class GarminMetrics:
     blood_pressure_systolic: Optional[int] = None
     blood_pressure_diastolic: Optional[int] = None
     # Activity Summary (Typed as Any to allow "NA" or "PENDING")
-    active_calories: Optional[int] = None
-    resting_calories: Optional[int] = None
+    active_calories: Optional[Any] = None
+    resting_calories: Optional[Any] = None
     total_calories: Optional[Any] = None
     intensity_minutes: Optional[Any] = None
     steps: Optional[Any] = None
@@ -118,6 +118,8 @@ GENERAL_SUMMARY_HEADERS = [
     "Daily Steps",
     "Daily Floors Climbed",
     "Daily Intensity Minutes",
+    "Resting Calories (kcal)",
+    "Active Calories (kcal)",
     "Total Calories (kcal)",
     "Systolic Blood Pressure (mmHg)",
     "Diastolic Blood Pressure (mmHg)",
@@ -268,7 +270,9 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Diastolic Blood Pressure (mmHg)": "blood_pressure_diastolic",
 
     "Active Calories": "active_calories",
+    "Active Calories (kcal)": "active_calories",
     "Resting Calories": "resting_calories",
+    "Resting Calories (kcal)": "resting_calories",
     "Total Calories (kcal)": "total_calories",
     "Intensity Minutes": "intensity_minutes",
     "Daily Intensity Minutes": "intensity_minutes",
