@@ -483,8 +483,6 @@ class GarminClient:
                         gap_str = self._calculate_pace(gap_speed)
 
                         # --- GET FULL ACTIVITY DETAILS FOR ADVANCED METRICS ---
-                        # The daily summary doesn't always contain stride length or temperature. 
-                        # We must fetch the unabridged dictionary for this specific activity ID.
                         full_act = activity
                         try:
                             if hasattr(self.client, 'get_activity'):
@@ -498,9 +496,7 @@ class GarminClient:
                         
                         avg_cadence = full_act.get('averageRunningCadenceInStepsPerMinute') or full_act.get('averageBikingCadenceInRevPerMinute') or activity.get('averageRunningCadenceInStepsPerMinute')
                         
-                        # We now look for Stride length in the unabridged `full_act` dictionary
                         stride_length = full_act.get('avgStrideLength') or full_act.get('averageStrideLength') or full_act.get('strideLength') or activity.get('avgStrideLength') or activity.get('strideLength')
-                        # If stride length is reported in centimeters (e.g., 105 instead of 1.05), convert to meters
                         if stride_length and stride_length > 10:
                             stride_length = stride_length / 100
                             
@@ -529,14 +525,37 @@ class GarminClient:
                         except Exception as e_zone:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
 
-                        # Fetch Historical Weather Forecast from Garmin Connect
+                        # --- AUTO-CONVERTING HISTORICAL WEATHER FORECAST ---
                         weather_temp = ""
                         weather_condition = ""
                         try:
                             weather_data = await loop.run_in_executor(None, self.client.get_activity_weather, act_id)
                             if weather_data and isinstance(weather_data, dict):
-                                # Broaden the search keys just in case the API format changed
-                                weather_temp = weather_data.get('issueTemp') or weather_data.get('temp') or weather_data.get('temperature') or ""
+                                raw_temp = weather_data.get('issueTemp') or weather_data.get('temp') or weather_data.get('temperature')
+                                
+                                if raw_temp is not None:
+                                    try:
+                                        w_temp = float(raw_temp)
+                                        # Watch's internal sensor is ALWAYS natively in Celsius.
+                                        watch_temp_c = full_act.get('averageTemperature') or activity.get('averageTemperature')
+                                        
+                                        needs_conversion = False
+                                        if watch_temp_c is not None:
+                                            # If there's more than a 15-degree difference between the API and the watch, 
+                                            # it is mathematically impossible for them to both be Celsius. Ergo, API is Fahrenheit.
+                                            if abs(w_temp - float(watch_temp_c)) > 15:
+                                                needs_conversion = True
+                                        elif w_temp > 35 or w_temp < -15:
+                                            # Fallback: if we have no watch temp to compare against, use basic thresholds 
+                                            # (35C in Scotland in March is impossible)
+                                            needs_conversion = True
+                                            
+                                        if needs_conversion:
+                                            w_temp = (w_temp - 32) * 5.0 / 9.0
+                                            
+                                        weather_temp = round(w_temp, 1)
+                                    except (ValueError, TypeError):
+                                        weather_temp = raw_temp
                                 
                                 weather_type = weather_data.get('issueWeatherType') or weather_data.get('weatherTypeDTO') or {}
                                 if isinstance(weather_type, dict):
@@ -544,7 +563,7 @@ class GarminClient:
                         except Exception as e_weather:
                             logger.debug(f"Failed to fetch weather for {act_id}: {e_weather}")
                             
-                        # FALLBACK: If weather API failed or is missing temperature, pull the watch's internal sensor temp from the unabridged dictionary
+                        # FALLBACK: If weather API failed or is missing temperature entirely, pull the watch's internal sensor temp
                         if weather_temp == "" or weather_temp is None:
                             weather_temp = full_act.get('averageTemperature') or activity.get('averageTemperature') or ""
 
