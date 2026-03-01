@@ -63,7 +63,7 @@ class GarminMetrics:
 # =========================================================
 
 GENERAL_SUMMARY_HEADERS = [
-    "Date",
+    "Date (YYYY-MM-DD)",
     "User Name",
     "User Age",
     "User Gender",
@@ -80,8 +80,8 @@ GENERAL_SUMMARY_HEADERS = [
     "Awake Time (min)",
     "Sleep Length (min)",
     "Sleep Need (min)",
-    "Overnight SPO2%",
-    "Avg Stress Score",
+    "Overnight Average Pulse Ox / SpO2 (%)",
+    "Garmin Average Stress Score (0-100)",
     "Daily Min Body Battery (0-100)",
     "Daily Max Body Battery (0-100)",
     "Body Battery Charged (0-100)",
@@ -97,8 +97,8 @@ GENERAL_SUMMARY_HEADERS = [
     "Morning Garmin Training Readiness (0-100)",
     "Overnight Resting HR (bpm)",
     "Overnight HRV (ms)",
-    "Garmin HRV Status",
-    "Garmin Training Status"
+    "Garmin HRV Status (Text Label)",
+    "Garmin Training Status (Text Label)"
 ]
 
 ACTIVITY_HEADERS = [
@@ -114,8 +114,8 @@ ACTIVITY_HEADERS = [
     "Max HR (bpm)",
     "Total Ascent (m)",
     "Total Descent (m)",
-    "Aerobic TE (0-5.0)",
-    "Anaerobic TE (0-5.0)",
+    "Aerobic Training Effect (0.0-5.0)",
+    "Anaerobic Training Effect (0.0-5.0)",
     "Avg Power (Watts)",
     "Garmin Training Effect Label",
     "HR Zone 1 (min)",
@@ -130,7 +130,7 @@ ACTIVITY_HEADERS = [
 # =========================================================
 
 HEADER_TO_ATTRIBUTE_MAP = {
-    "Date": "date",
+    "Date (YYYY-MM-DD)": "date",
     "User Name": "user_name",
     "User Age": "user_age",
     "User Gender": "user_gender",
@@ -144,11 +144,11 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Light Sleep (min)": "sleep_light",
     "REM Sleep (min)": "sleep_rem",
     "Awake Time (min)": "sleep_awake",
-    "Overnight SPO2%": "overnight_pulse_ox",
+    "Overnight Average Pulse Ox / SpO2 (%)": "overnight_pulse_ox",
     "Overnight HRV (ms)": "overnight_hrv",
-    "Garmin HRV Status": "hrv_status",
+    "Garmin HRV Status (Text Label)": "hrv_status",
     "Overnight Resting HR (bpm)": "resting_heart_rate",
-    "Avg Stress Score": "average_stress",
+    "Garmin Average Stress Score (0-100)": "average_stress",
     "Daily Min Body Battery (0-100)": "body_battery_min",
     "Daily Max Body Battery (0-100)": "body_battery_max",
     "Body Battery Charged (0-100)": "body_battery_charged",
@@ -165,5 +165,5 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Garmin Training Load (7 Day Sum)": "seven_day_load",
     "Garmin Training Load Focus": "training_load_focus",
     "Morning Garmin Training Readiness (0-100)": "training_readiness",
-    "Garmin Training Status": "training_status"
+    "Garmin Training Status (Text Label)": "training_status"
 }
