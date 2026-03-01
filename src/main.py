@@ -87,9 +87,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         file_prefix = "aflw_"
 
     fields_to_validate = [
-        'average_stress', 'rest_stress_duration', 'low_stress_duration', 
-        'medium_stress_duration', 'high_stress_duration',
-        'steps', 'floors_climbed', 'total_calories', 'intensity_minutes',
+        'average_stress', 'steps', 'floors_climbed', 'total_calories', 'intensity_minutes',
         'body_battery_min'
     ]
 
