@@ -111,7 +111,6 @@ ACTIVITY_HEADERS = [
     "Duration (min)",
     "Avg Pace (min/km)",
     "Average Grade Adjusted Pace (min/km)",
-    "Starting Elevation (m)",
     "Total Ascent (m)",
     "Total Descent (m)",
     "Average Temperature (Celsius)",
