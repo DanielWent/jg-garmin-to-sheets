@@ -80,19 +80,39 @@ class GoogleDriveClient:
         else:
             combined_df = new_df
 
-        # === 5-YEAR RETENTION POLICY ===
+        # === DATE PARSING, RETENTION POLICY & SORTING ===
         try:
             if sort_date_col in combined_df.columns:
-                combined_df[sort_date_col] = pd.to_datetime(combined_df[sort_date_col])
+                # 1. Convert safely using a temporary date column, handling DD/MM/YYYY vs ISO mixed gracefully
+                combined_df['_temp_date'] = pd.to_datetime(
+                    combined_df[sort_date_col], 
+                    dayfirst=True, 
+                    errors='coerce'
+                )
+                
+                # 2. Apply 5-Year Retention
                 cutoff_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=1826)
-                combined_df = combined_df[combined_df[sort_date_col] >= cutoff_date]
-                combined_df[sort_date_col] = combined_df[sort_date_col].dt.strftime('%Y-%m-%d')
-        except Exception as e:
-            logger.warning(f"Could not apply 1826-day retention policy to {filename}: {e}")
+                valid_mask = combined_df['_temp_date'].isna() | (combined_df['_temp_date'] >= cutoff_date)
+                combined_df = combined_df[valid_mask]
 
-        # === SORTING ===
-        if sort_date_desc and sort_date_col in combined_df.columns:
-            combined_df = combined_df.sort_values(by=sort_date_col, ascending=False)
+                # 3. Sort chronologically using the actual mathematical datetime
+                if sort_date_desc:
+                    combined_df = combined_df.sort_values(by='_temp_date', ascending=False)
+                else:
+                    combined_df = combined_df.sort_values(by='_temp_date', ascending=True)
+
+                # 4. Standardize strings back to YYYY-MM-DD format universally to repair old data
+                valid_dates = combined_df['_temp_date'].notna()
+                combined_df.loc[valid_dates, sort_date_col] = combined_df.loc[valid_dates, '_temp_date'].dt.strftime('%Y-%m-%d')
+                
+                # 5. Clean up temporary mathematical column
+                combined_df = combined_df.drop(columns=['_temp_date'])
+                
+        except Exception as e:
+            logger.warning(f"Could not apply date processing to {filename}: {e}")
+            # Absolute fallback to string sort if completely unparseable
+            if sort_date_desc and sort_date_col in combined_df.columns:
+                combined_df = combined_df.sort_values(by=sort_date_col, ascending=False)
 
         # Upload
         csv_buffer = io.StringIO()
