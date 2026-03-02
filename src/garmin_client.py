@@ -529,12 +529,13 @@ class GarminClient:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
 
                         # --- AUTO-CONVERTING HISTORICAL WEATHER FORECAST ---
-                        weather_temp = ""
+                        feels_like_temp = ""
                         weather_condition = ""
                         try:
                             weather_data = await loop.run_in_executor(None, self.client.get_activity_weather, act_id)
                             if weather_data and isinstance(weather_data, dict):
-                                raw_temp = weather_data.get('issueTemp') or weather_data.get('temp') or weather_data.get('temperature')
+                                # Prioritize apparent/feels like temperature
+                                raw_temp = weather_data.get('issueApparentTemp') or weather_data.get('apparentTemp') or weather_data.get('feelsLikeTemp') or weather_data.get('issueTemp') or weather_data.get('temp') or weather_data.get('temperature')
                                 
                                 if raw_temp is not None:
                                     try:
@@ -558,19 +559,15 @@ class GarminClient:
                                         if needs_conversion:
                                             w_temp = (w_temp - 32) * 5.0 / 9.0
                                             
-                                        weather_temp = round(w_temp, 1)
+                                        feels_like_temp = round(w_temp, 1)
                                     except (ValueError, TypeError):
-                                        weather_temp = raw_temp
+                                        feels_like_temp = raw_temp
                                 
                                 weather_type = weather_data.get('issueWeatherType') or weather_data.get('weatherTypeDTO') or {}
                                 if isinstance(weather_type, dict):
                                     weather_condition = weather_type.get('desc', weather_condition)
                         except Exception as e_weather:
                             logger.debug(f"Failed to fetch weather for {act_id}: {e_weather}")
-                            
-                        # FALLBACK: If weather API failed or is missing temperature entirely, pull the watch's internal sensor temp
-                        if weather_temp == "" or weather_temp is None:
-                            weather_temp = full_act.get('averageTemperature') or activity.get('averageTemperature') or ""
 
                         activity_entry = {
                             "Activity ID": act_id,
@@ -584,7 +581,7 @@ class GarminClient:
                             "Average Grade Adjusted Pace (min/km)": gap_str,
                             "Total Ascent (m)": int(elev_gain) if elev_gain else "",
                             "Total Descent (m)": int(elev_loss) if elev_loss else "",
-                            "Average Temperature (Celsius)": weather_temp,
+                            "Feels Like Temperature (Celsius)": feels_like_temp,
                             "Weather Condition": weather_condition,
                             "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
                             "Max HR (bpm)": int(max_hr) if max_hr else "",
