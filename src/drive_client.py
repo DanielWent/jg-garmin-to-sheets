@@ -30,6 +30,11 @@ class GoogleDriveClient:
             row = {}
             for h in headers:
                 attr = HEADER_TO_ATTRIBUTE_MAP.get(h)
+                
+                # FALLBACK: If 'Date (YYYY-MM-DD)' is missing from the map, use the key for 'Date'
+                if not attr and h == 'Date (YYYY-MM-DD)':
+                    attr = HEADER_TO_ATTRIBUTE_MAP.get('Date')
+                    
                 val = getattr(m, attr, None) if attr else None
                 
                 if isinstance(val, date):
@@ -69,48 +74,50 @@ class GoogleDriveClient:
                 existing_df = pd.read_csv(io.BytesIO(content))
                 existing_df = existing_df.loc[:, ~existing_df.columns.str.contains('^Unnamed')]
                 
-                combined_df = pd.concat([existing_df, new_df])
-                
-                if dedup_col in combined_df.columns:
-                    combined_df = combined_df.drop_duplicates(subset=[dedup_col], keep='last')
-                    
+                # ignore_index=True ensures clean numbering when appending
+                combined_df = pd.concat([existing_df, new_df], ignore_index=True)
             except Exception as e:
                 logger.warning(f"Error merging {filename}, overwriting: {e}")
                 combined_df = new_df
         else:
             combined_df = new_df
 
-        # === DATE PARSING, RETENTION POLICY & SORTING ===
+        # === DATE PARSING, DEDUPLICATION & SORTING ===
         try:
             if sort_date_col in combined_df.columns:
-                # 1. Convert safely using a temporary date column, handling DD/MM/YYYY vs ISO mixed gracefully
+                # 1. Convert safely using a temporary date column
                 combined_df['_temp_date'] = pd.to_datetime(
                     combined_df[sort_date_col], 
                     dayfirst=True, 
                     errors='coerce'
                 )
                 
-                # 2. Apply 5-Year Retention
+                # 2. Standardize strings universally BEFORE deduplication to ensure perfect matching
+                valid_dates = combined_df['_temp_date'].notna()
+                combined_df.loc[valid_dates, sort_date_col] = combined_df.loc[valid_dates, '_temp_date'].dt.strftime('%Y-%m-%d')
+                
+                # 3. Drop Duplicates (The exact strings will now match)
+                if dedup_col in combined_df.columns:
+                    combined_df = combined_df.drop_duplicates(subset=[dedup_col], keep='last')
+                
+                # 4. Apply 5-Year Retention Policy
                 cutoff_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=1826)
                 valid_mask = combined_df['_temp_date'].isna() | (combined_df['_temp_date'] >= cutoff_date)
                 combined_df = combined_df[valid_mask]
 
-                # 3. Sort chronologically using the actual mathematical datetime
+                # 5. Sort chronologically using the mathematical datetime
                 if sort_date_desc:
-                    combined_df = combined_df.sort_values(by='_temp_date', ascending=False)
+                    combined_df = combined_df.sort_values(by='_temp_date', ascending=False, na_position='last')
                 else:
-                    combined_df = combined_df.sort_values(by='_temp_date', ascending=True)
+                    combined_df = combined_df.sort_values(by='_temp_date', ascending=True, na_position='last')
 
-                # 4. Standardize strings back to YYYY-MM-DD format universally to repair old data
-                valid_dates = combined_df['_temp_date'].notna()
-                combined_df.loc[valid_dates, sort_date_col] = combined_df.loc[valid_dates, '_temp_date'].dt.strftime('%Y-%m-%d')
-                
-                # 5. Clean up temporary mathematical column
+                # 6. Clean up temporary mathematical column
                 combined_df = combined_df.drop(columns=['_temp_date'])
                 
         except Exception as e:
             logger.warning(f"Could not apply date processing to {filename}: {e}")
-            # Absolute fallback to string sort if completely unparseable
+            if dedup_col in combined_df.columns:
+                combined_df = combined_df.drop_duplicates(subset=[dedup_col], keep='last')
             if sort_date_desc and sort_date_col in combined_df.columns:
                 combined_df = combined_df.sort_values(by=sort_date_col, ascending=False)
 
