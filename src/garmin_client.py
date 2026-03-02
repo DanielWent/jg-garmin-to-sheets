@@ -531,6 +531,9 @@ class GarminClient:
                         # --- AUTO-CONVERTING HISTORICAL WEATHER FORECAST ---
                         feels_like_temp = ""
                         weather_condition = ""
+                        wind_speed_kmh = ""
+                        wind_gust_kmh = ""
+                        
                         try:
                             weather_data = await loop.run_in_executor(None, self.client.get_activity_weather, act_id)
                             if weather_data and isinstance(weather_data, dict):
@@ -561,11 +564,24 @@ class GarminClient:
                                             
                                         feels_like_temp = round(w_temp, 1)
                                     except (ValueError, TypeError):
-                                        feels_like_temp = raw_temp
+                                        pass
                                 
                                 weather_type = weather_data.get('issueWeatherType') or weather_data.get('weatherTypeDTO') or {}
                                 if isinstance(weather_type, dict):
                                     weather_condition = weather_type.get('desc', weather_condition)
+                                    
+                                # Wind speeds
+                                raw_wind = weather_data.get('issueWindSpeed') or weather_data.get('windSpeed')
+                                raw_gust = weather_data.get('issueWindGust') or weather_data.get('windGust')
+                                
+                                if raw_wind is not None:
+                                    try: wind_speed_kmh = round(float(raw_wind), 1)
+                                    except (ValueError, TypeError): pass
+                                    
+                                if raw_gust is not None:
+                                    try: wind_gust_kmh = round(float(raw_gust), 1)
+                                    except (ValueError, TypeError): pass
+
                         except Exception as e_weather:
                             logger.debug(f"Failed to fetch weather for {act_id}: {e_weather}")
 
@@ -583,6 +599,8 @@ class GarminClient:
                             "Total Descent (m)": int(elev_loss) if elev_loss else "",
                             "Feels Like Temperature (Celsius)": feels_like_temp,
                             "Weather Condition": weather_condition,
+                            "Sustained Wind Speed (km/h)": wind_speed_kmh,
+                            "Wind Gust Speed (km/h)": wind_gust_kmh,
                             "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
                             "Max HR (bpm)": int(max_hr) if max_hr else "",
                             "Average Cadence (spm)": int(avg_cadence) if avg_cadence else "",
