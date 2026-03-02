@@ -116,7 +116,6 @@ ACTIVITY_HEADERS = [
     "Feels Like Temperature (Celsius)",
     "Weather Condition",
     "Sustained Wind Speed (km/h)",
-    "Wind Gust Speed (km/h)",
     "Avg HR (bpm)",
     "Max HR (bpm)",
     "Average Cadence (spm)",
