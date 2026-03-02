@@ -49,7 +49,7 @@ class GoogleDriveClient:
         if new_df.empty:
             return
             
-        self._upload_df(filename, new_df, dedup_col='Date', sort_date_col='Date', sort_date_desc=sort_date_desc)
+        self._upload_df(filename, new_df, dedup_col='Date (YYYY-MM-DD)', sort_date_col='Date (YYYY-MM-DD)', sort_date_desc=sort_date_desc)
 
     def update_activities_csv(self, filename: str, activities: List[dict], headers: List[str], sort_date_desc: bool = True):
         if not activities:
