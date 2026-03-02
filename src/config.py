@@ -113,7 +113,7 @@ ACTIVITY_HEADERS = [
     "Average Grade Adjusted Pace (min/km)",
     "Total Ascent (m)",
     "Total Descent (m)",
-    "Average Temperature (Celsius)",
+    "Feels Like Temperature (Celsius)",
     "Weather Condition",
     "Avg HR (bpm)",
     "Max HR (bpm)",
