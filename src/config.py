@@ -10,7 +10,7 @@ from datetime import date
 class GarminMetrics:
     date: Optional[date] = None
     user_name: Optional[str] = None
-    user_age: Optional[int] = None
+    user_age: Optional[float] = None
     user_gender: Optional[str] = None
     max_hr_hunt: Optional[int] = None
     sleep_score: Optional[int] = None
@@ -46,6 +46,7 @@ class GarminMetrics:
     resting_heart_rate: Optional[int] = None
     vo2max_running: Optional[float] = None
     vo2max_cycling: Optional[float] = None
+    vo2_max_percentile: Optional[float] = None
     seven_day_load: Optional[int] = None
     lactate_threshold_bpm: Optional[int] = None
     lactate_threshold_pace: Optional[str] = None
@@ -69,6 +70,7 @@ GENERAL_SUMMARY_HEADERS = [
     "User Gender",
     "Physiological Maximum Heart Rate (bpm)",
     "VO2 Max (ml/kg/min)",
+    "VO2 Max Percentile (Age-Gender Adjusted)",
     "Lactate Threshold Pace (min/km)",
     "Lactate Threshold Heart Rate (bpm)",
     "Garmin Sleep Score (0-100)",
@@ -168,6 +170,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Daily Steps": "steps",
     "Daily Floors Climbed": "floors_climbed",
     "VO2 Max (ml/kg/min)": "vo2max_running",
+    "VO2 Max Percentile (Age-Gender Adjusted)": "vo2_max_percentile",
     "Lactate Threshold Pace (min/km)": "lactate_threshold_pace",
     "Lactate Threshold Heart Rate (bpm)": "lactate_threshold_bpm",
     "Garmin Training Load (7 Day Sum)": "seven_day_load",
