@@ -2,8 +2,8 @@ name: Daily Garmin Sync
 
 on:
   schedule:
-    # Runs at 06:00, 07:00, 08:00, 09:00, and 10:00 UTC daily.
-    - cron: '0 6,8,10,12,14,16,18,19,20,22 * * *'
+    # Triggers on the UTC hours covering 7am, 9am, 2pm, 7pm for both GMT and BST
+    - cron: '0 6,7,8,9,13,14,18,19 * * *'
   
   workflow_dispatch:
     inputs:
@@ -35,19 +35,37 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    - name: Daylight Saving Time Filter
+      id: dst-filter
+      run: |
+        # Only run this check for scheduled cron jobs, allowing manual dispatches to run anytime
+        if [ "${{ github.event_name }}" == "schedule" ]; then
+          UK_HOUR=$(TZ='Europe/London' date +%H)
+          if [[ "$UK_HOUR" != "07" && "$UK_HOUR" != "09" && "$UK_HOUR" != "14" && "$UK_HOUR" != "19" ]]; then
+            echo "Current UK hour is $UK_HOUR. Exiting early to prevent redundant execution."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        fi
+        echo "should_run=true" >> $GITHUB_OUTPUT
+
     - name: Checkout code
+      if: steps.dst-filter.outputs.should_run == 'true'
       uses: actions/checkout@v3
 
     - name: Set up Python
+      if: steps.dst-filter.outputs.should_run == 'true'
       uses: actions/setup-python@v4
       with:
         python-version: '3.12'
 
     - name: Install dependencies
+      if: steps.dst-filter.outputs.should_run == 'true'
       run: |
         pip install -r requirements.txt
 
     - name: Run Sync Script with Logging
+      if: steps.dst-filter.outputs.should_run == 'true'
       env:
         # === USER 1 SECRETS ===
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
@@ -89,7 +107,7 @@ jobs:
         fi
 
     - name: Upload Debug Log
-      if: always()
+      if: always() && steps.dst-filter.outputs.should_run == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: garmin-debug-log
