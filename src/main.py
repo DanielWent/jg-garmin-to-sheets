@@ -278,7 +278,10 @@ async def run_automated_sync():
     
     logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday} to {today}) ---")
 
-    for profile_name, profile_data in user_profiles.items():
+    # Convert to a list so we can track our index and avoid sleeping after the final user
+    profiles_list = list(user_profiles.items())
+    
+    for index, (profile_name, profile_data) in enumerate(profiles_list):
         logger.info(f"Processing {profile_name}...")
         try:
             await sync(
@@ -292,6 +295,13 @@ async def run_automated_sync():
             )
         except Exception as e:
             logger.error(f"Failed to sync {profile_name}: {e}")
+            
+        # If this is NOT the last profile in the list, trigger the delay
+        if index < len(profiles_list) - 1:
+            # Generate a random delay between 45 and 90 seconds
+            delay = random.randint(45, 90)
+            logger.info(f"Sleeping for {delay} seconds before processing the next profile to avoid security triggers...")
+            await asyncio.sleep(delay)
 
 @app.command(name="cli-sync")
 def cli_sync(
