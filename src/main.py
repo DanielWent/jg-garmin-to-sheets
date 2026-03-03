@@ -54,13 +54,13 @@ def ensure_credentials_file_exists():
         logger.error(f"Failed to write credentials file: {e}")
         sys.exit(1)
 
-def calculate_age(dob_str: Optional[str]) -> Optional[int]:
+def calculate_age(dob_str: Optional[str], target_date: date) -> Optional[float]:
     if not dob_str:
         return None
     try:
         dob = datetime.strptime(dob_str, "%Y-%m-%d").date()
-        today = date.today()
-        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        delta = target_date - dob
+        return round(delta.days / 365.25, 1)
     except ValueError:
         logger.warning(f"Invalid DOB format: {dob_str}")
         return None
@@ -69,7 +69,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
     manual_name = profile_data.get('manual_name')
     manual_gender = profile_data.get('manual_gender')
     manual_dob = profile_data.get('manual_dob')
-    manual_age = calculate_age(manual_dob)
 
     try:
         garmin_client = GarminClient(
@@ -108,8 +107,10 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             daily_metrics.user_name = manual_name
         if manual_gender:
             daily_metrics.user_gender = manual_gender
-        if manual_age:
-            daily_metrics.user_age = manual_age
+            
+        current_age = calculate_age(manual_dob, current_date)
+        if current_age is not None:
+            daily_metrics.user_age = current_age
         
         if profile_name == "USER1" and current_date >= date(2026, 1, 25):
             if daily_metrics.body_fat is not None:
