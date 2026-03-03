@@ -13,6 +13,80 @@ from functools import partial
 
 logger = logging.getLogger(__name__)
 
+# Full 21-point percentile scale provided by the ACSM guidelines
+PERCENTILES = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 99]
+
+# Verifiable ACSM / Cooper Institute VO2 Max (mL/kg/min)
+# Anchored to the statistical center of each demographic bin
+NORMATIVE_DATA = {
+    'M': {
+        25: [26.5, 31.8, 34.7, 36.7, 38.0, 39.0, 39.9, 41.0, 41.7, 42.6, 43.9, 44.8, 45.6, 46.8, 47.5, 48.5, 51.1, 51.8, 54.0, 55.5, 60.5], 
+        35: [26.5, 31.2, 33.8, 35.2, 36.7, 37.8, 38.7, 39.5, 40.7, 41.2, 42.4, 43.9, 44.1, 45.3, 46.0, 47.0, 48.3, 50.0, 51.7, 54.1, 58.3], 
+        45: [25.1, 29.4, 32.3, 33.8, 34.8, 35.9, 36.7, 37.6, 38.4, 39.5, 40.1, 41.0, 42.4, 43.1, 43.9, 44.9, 46.4, 48.2, 49.6, 52.5, 56.1], 
+        55: [22.8, 26.9, 29.4, 30.9, 32.0, 32.8, 33.8, 34.8, 35.5, 36.7, 37.1, 38.1, 39.0, 39.7, 41.0, 41.8, 43.3, 44.6, 46.8, 49.0, 54.0], 
+        65: [19.7, 23.6, 25.6, 27.3, 28.7, 29.5, 30.8, 31.6, 32.3, 33.0, 33.8, 34.9, 35.6, 36.7, 37.4, 38.3, 39.6, 41.0, 42.7, 45.7, 51.1], 
+        75: [18.2, 20.8, 23.0, 24.6, 25.7, 26.9, 28.0, 28.4, 29.4, 30.1, 30.9, 31.6, 32.4, 33.1, 33.9, 35.2, 36.7, 38.1, 39.5, 43.9, 49.6]  
+    },
+    'F': {
+        25: [23.7, 27.6, 29.5, 30.9, 32.3, 33.0, 34.1, 35.2, 36.1, 36.7, 37.8, 38.5, 39.5, 41.0, 41.1, 42.4, 43.9, 45.3, 46.8, 49.6, 54.5], 
+        35: [22.9, 25.9, 28.0, 29.4, 30.9, 32.0, 32.4, 33.8, 34.2, 35.2, 36.7, 36.9, 37.7, 38.5, 39.6, 41.0, 42.4, 43.9, 45.3, 47.4, 52.0], 
+        45: [22.2, 25.1, 26.6, 28.2, 29.4, 30.2, 31.1, 32.3, 32.8, 33.8, 34.5, 35.2, 35.9, 36.7, 38.1, 38.6, 39.6, 41.0, 43.1, 45.3, 51.1], 
+        55: [20.1, 23.0, 24.6, 25.8, 26.8, 28.0, 28.7, 29.4, 29.9, 30.9, 31.4, 32.3, 32.6, 33.3, 34.2, 35.2, 36.7, 37.0, 38.8, 41.0, 46.1], 
+        65: [19.5, 21.8, 23.0, 23.9, 24.6, 25.1, 25.9, 26.6, 27.3, 28.2, 28.8, 29.4, 29.7, 30.9, 31.1, 32.3, 32.7, 34.2, 35.9, 37.8, 42.4], 
+        75: [16.8, 19.6, 21.5, 22.2, 23.5, 24.2, 24.7, 25.3, 25.9, 26.7, 27.6, 28.0, 28.1, 29.4, 29.4, 29.8, 30.6, 32.3, 32.5, 37.2, 42.4]  
+    }
+}
+
+def interp_python(x, xp, fp):
+    """Pure Python implementation of linear interpolation to avoid numpy dependency."""
+    if x <= xp[0]: return fp[0]
+    if x >= xp[-1]: return fp[-1]
+    for i in range(len(xp) - 1):
+        if xp[i] <= x <= xp[i+1]:
+            if xp[i] == xp[i+1]:
+                return fp[i]
+            weight = (x - xp[i]) / (xp[i+1] - xp[i])
+            return fp[i] + weight * (fp[i+1] - fp[i])
+    return fp[-1]
+
+def calculate_exact_percentile(age, gender, vo2_max):
+    """Calculates age/gender relative fitness via 2D continuous interpolation."""
+    if age is None or gender is None or vo2_max is None:
+        return None
+        
+    gender = gender.upper()
+    if gender not in ['M', 'F']:
+        if gender == "MALE": gender = "M"
+        elif gender == "FEMALE": gender = "F"
+        else: return None
+        
+    data = NORMATIVE_DATA.get(gender)
+    if not data: return None
+    
+    anchors = sorted(data.keys())
+    
+    # Cap values beyond the youngest (25) and oldest (75) distribution centers
+    if age <= anchors[0]:
+        interpolated_thresholds = data[anchors[0]]
+    elif age >= anchors[-1]:
+        interpolated_thresholds = data[anchors[-1]]
+    else:
+        for i in range(len(anchors) - 1):
+            if anchors[i] <= age < anchors[i+1]:
+                lower_anchor = anchors[i]
+                upper_anchor = anchors[i+1]
+                break
+        
+        weight = (age - lower_anchor) / (upper_anchor - lower_anchor)
+        lower_thresholds = data[lower_anchor]
+        upper_thresholds = data[upper_anchor]
+        
+        # Blend the thresholds based on fractional age
+        interpolated_thresholds = [l * (1 - weight) + u * weight for l, u in zip(lower_thresholds, upper_thresholds)]
+    
+    exact_percentile = interp_python(vo2_max, interpolated_thresholds, PERCENTILES)
+    return round(exact_percentile, 1)
+
 class GarminClient:
     def __init__(self, email: str, password: str, profile_name: str = "default", 
                  manual_name: str = None, manual_dob: str = None, manual_gender: str = None):
@@ -115,7 +189,7 @@ class GarminClient:
             try:
                 dob = datetime.strptime(self.manual_dob, "%Y-%m-%d").date()
                 today = date.today()
-                self.user_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                self.user_age = round((today - dob).days / 365.25, 1)
             except ValueError:
                 logger.warning(f"Invalid format for USER_DOB: {self.manual_dob}. Use YYYY-MM-DD.")
 
@@ -137,7 +211,7 @@ class GarminClient:
                     if dob_str:
                         dob = datetime.strptime(dob_str, "%Y-%m-%d").date()
                         today = date.today()
-                        self.user_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                        self.user_age = round((today - dob).days / 365.25, 1)
                     
         except Exception as e:
             logger.warning(f"Error in _fetch_user_profile_info (fallback): {e}")
@@ -722,14 +796,29 @@ class GarminClient:
             if seven_day_load is None and summary:
                 seven_day_load = self._find_training_load(summary)
                 
+            # --- Fractional Age & Physiologic Setup ---
+            user_age_at_date = self.user_age
+            if self.manual_dob:
+                try:
+                    dob = datetime.strptime(self.manual_dob, "%Y-%m-%d").date()
+                    delta = target_date - dob
+                    user_age_at_date = round(delta.days / 365.25, 1) # Fractional age for tracking
+                except ValueError:
+                    pass
+            elif self.user_age is not None:
+                user_age_at_date = float(self.user_age)
+
             max_hr_hunt = None
-            if self.user_age:
-                max_hr_hunt = int(round(211 - 0.64 * self.user_age))
+            if user_age_at_date:
+                max_hr_hunt = int(round(211 - 0.64 * user_age_at_date))
+
+            # --- New Relative Fitness Calculation ---
+            vo2_max_percentile = calculate_exact_percentile(user_age_at_date, self.user_gender, vo2_run)
 
             return GarminMetrics(
                 date=target_date,
                 user_name=self.user_full_name,
-                user_age=self.user_age,
+                user_age=user_age_at_date,
                 user_gender=self.user_gender, 
                 max_hr_hunt=max_hr_hunt,
                 sleep_score=sleep_score,
@@ -763,6 +852,7 @@ class GarminClient:
                 hrv_status=hrv_status_value,
                 vo2max_running=vo2_run,
                 vo2max_cycling=vo2_cycle,
+                vo2_max_percentile=vo2_max_percentile,
                 seven_day_load=seven_day_load,
                 lactate_threshold_bpm=lactate_bpm,
                 lactate_threshold_pace=lactate_pace,
