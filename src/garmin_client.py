@@ -583,8 +583,7 @@ class GarminClient:
                         power_zones_dict = {
                             "Power Zone 1 (min)": 0, "Power Zone 2 (min)": 0, 
                             "Power Zone 3 (min)": 0, "Power Zone 4 (min)": 0, 
-                            "Power Zone 5 (min)": 0, "Power Zone 6 (min)": 0, 
-                            "Power Zone 7 (min)": 0
+                            "Power Zone 5 (min)": 0
                         }
                         try:
                             power_zones = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}/powerTimeInZones")
@@ -593,7 +592,7 @@ class GarminClient:
                                     if not isinstance(z, dict): continue
                                     z_num = z.get('zoneNumber')
                                     z_secs = z.get('secsInZone', 0)
-                                    if z_num and 1 <= z_num <= 7:
+                                    if z_num and 1 <= z_num <= 5:
                                         power_zones_dict[f"Power Zone {z_num} (min)"] = round(z_secs / 60, 2)
                         except Exception as e_pwr_zone:
                             logger.debug(f"Failed to fetch Power zones for {act_id}: {e_pwr_zone}")
