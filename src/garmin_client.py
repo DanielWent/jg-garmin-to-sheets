@@ -560,16 +560,25 @@ class GarminClient:
                         norm_power = full_act.get('normPower') or activity.get('normPower')
                         sweat_loss = full_act.get('waterEstimated') or activity.get('waterEstimated')
 
+                        # --- FORMATTING TRAINING EFFECT ---
+                        aerobic_te_val = ""
+                        if aerobic_te is not None:
+                            try: aerobic_te_val = round(float(aerobic_te), 1)
+                            except (ValueError, TypeError): pass
+
+                        anaerobic_te_val = ""
+                        if anaerobic_te is not None:
+                            try: anaerobic_te_val = round(float(anaerobic_te), 1)
+                            except (ValueError, TypeError): pass
+
                         # --- HR ZONES ---
-                        zones_dict = {
-                            "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
-                            "HR Zone 3 (min)": 0, "HR Zone 4 (min)": 0, "HR Zone 5 (min)": 0
-                        }
+                        zones_dict = {f"HR Zone {i} (min)": "" for i in range(1, 6)}
                         try:
                             hr_zones = await loop.run_in_executor(None, self.client.get_activity_hr_in_timezones, act_id)
                             if hr_zones is None:
                                 hr_zones = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}/hrTimeInZones")
-                            if hr_zones and isinstance(hr_zones, list):
+                            if hr_zones and isinstance(hr_zones, list) and len(hr_zones) > 0:
+                                zones_dict = {f"HR Zone {i} (min)": 0 for i in range(1, 6)}
                                 for z in hr_zones:
                                     if not isinstance(z, dict): continue
                                     z_num = z.get('zoneNumber')
@@ -580,14 +589,11 @@ class GarminClient:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
 
                         # --- POWER ZONES ---
-                        power_zones_dict = {
-                            "Power Zone 1 (min)": 0, "Power Zone 2 (min)": 0, 
-                            "Power Zone 3 (min)": 0, "Power Zone 4 (min)": 0, 
-                            "Power Zone 5 (min)": 0
-                        }
+                        power_zones_dict = {f"Power Zone {i} (min)": "" for i in range(1, 6)}
                         try:
                             power_zones = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}/powerTimeInZones")
-                            if power_zones and isinstance(power_zones, list):
+                            if power_zones and isinstance(power_zones, list) and len(power_zones) > 0:
+                                power_zones_dict = {f"Power Zone {i} (min)": 0 for i in range(1, 6)}
                                 for z in power_zones:
                                     if not isinstance(z, dict): continue
                                     z_num = z.get('zoneNumber')
@@ -668,8 +674,8 @@ class GarminClient:
                             "Average Stride Length (m)": round(stride_length, 2) if stride_length else "",
                             "Average Ground Contact Time (ms)": int(gct) if gct else "",
                             "Vertical Oscillation (cm)": round(vertical_osc, 2) if vertical_osc else "",
-                            "Aerobic Training Effect (0.0-5.0)": aerobic_te,
-                            "Anaerobic Training Effect (0.0-5.0)": anaerobic_te,
+                            "Aerobic Training Effect (0.0-5.0)": aerobic_te_val,
+                            "Anaerobic Training Effect (0.0-5.0)": anaerobic_te_val,
                             "Activity Training Load": round(training_load, 1) if training_load else "",
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
                             "Max Power (Watts)": int(max_power) if max_power else "",
