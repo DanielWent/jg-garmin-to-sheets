@@ -126,13 +126,24 @@ ACTIVITY_HEADERS = [
     "Vertical Oscillation (cm)",
     "Aerobic Training Effect (0.0-5.0)",
     "Anaerobic Training Effect (0.0-5.0)",
+    "Activity Training Load",
     "Avg Power (Watts)",
+    "Max Power (Watts)",
+    "Normalized Power (Watts)",
+    "Estimated Sweat Loss (ml)",
     "Garmin Training Effect Label",
     "HR Zone 1 (min)",
     "HR Zone 2 (min)",
     "HR Zone 3 (min)",
     "HR Zone 4 (min)",
-    "HR Zone 5 (min)"
+    "HR Zone 5 (min)",
+    "Power Zone 1 (min)",
+    "Power Zone 2 (min)",
+    "Power Zone 3 (min)",
+    "Power Zone 4 (min)",
+    "Power Zone 5 (min)",
+    "Power Zone 6 (min)",
+    "Power Zone 7 (min)"
 ]
 
 # =========================================================
