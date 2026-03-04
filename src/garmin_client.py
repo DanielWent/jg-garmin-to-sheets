@@ -16,8 +16,6 @@ logger = logging.getLogger(__name__)
 # Full 21-point percentile scale provided by the ACSM guidelines
 PERCENTILES = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 99]
 
-# Verifiable ACSM / Cooper Institute VO2 Max (mL/kg/min)
-# Anchored to the statistical center of each demographic bin
 NORMATIVE_DATA = {
     'M': {
         25: [26.5, 31.8, 34.7, 36.7, 38.0, 39.0, 39.9, 41.0, 41.7, 42.6, 43.9, 44.8, 45.6, 46.8, 47.5, 48.5, 51.1, 51.8, 54.0, 55.5, 60.5], 
@@ -38,7 +36,6 @@ NORMATIVE_DATA = {
 }
 
 def interp_python(x, xp, fp):
-    """Pure Python implementation of linear interpolation to avoid numpy dependency."""
     if x <= xp[0]: return fp[0]
     if x >= xp[-1]: return fp[-1]
     for i in range(len(xp) - 1):
@@ -50,7 +47,6 @@ def interp_python(x, xp, fp):
     return fp[-1]
 
 def calculate_exact_percentile(age, gender, vo2_max):
-    """Calculates age/gender relative fitness via 2D continuous interpolation."""
     if age is None or gender is None or vo2_max is None:
         return None
         
@@ -65,7 +61,6 @@ def calculate_exact_percentile(age, gender, vo2_max):
     
     anchors = sorted(data.keys())
     
-    # Cap values beyond the youngest (25) and oldest (75) distribution centers
     if age <= anchors[0]:
         interpolated_thresholds = data[anchors[0]]
     elif age >= anchors[-1]:
@@ -81,7 +76,6 @@ def calculate_exact_percentile(age, gender, vo2_max):
         lower_thresholds = data[lower_anchor]
         upper_thresholds = data[upper_anchor]
         
-        # Blend the thresholds based on fractional age
         interpolated_thresholds = [l * (1 - weight) + u * weight for l, u in zip(lower_thresholds, upper_thresholds)]
     
     exact_percentile = interp_python(vo2_max, interpolated_thresholds, PERCENTILES)
@@ -97,7 +91,6 @@ class GarminClient:
         self.manual_dob = manual_dob
         self.manual_gender = manual_gender
         
-        # Create an isolated directory for this user's session tokens
         self.session_dir = Path(f"~/.garth/{self.profile_name}").expanduser()
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.token_file = self.session_dir / "tokens.json"
@@ -112,15 +105,9 @@ class GarminClient:
         self.user_gender = None
 
     async def authenticate(self):
-        """
-        Authenticate using isolated token storage.
-        """
         loop = asyncio.get_event_loop()
-        
-        # Configure global garth domain
         garth.configure(domain="garmin.com")
 
-        # 1. Try to resume from isolated token file
         if self.token_file.exists():
             try:
                 logger.info(f"Attempting to resume session for {self.profile_name}...")
@@ -135,7 +122,6 @@ class GarminClient:
             except Exception as e:
                 logger.warning(f"Failed to resume session for {self.profile_name}: {e}")
 
-        # 2. Fresh Login
         try:
             def login_wrapper():
                 return self.client.login()
@@ -146,7 +132,6 @@ class GarminClient:
             logger.info(f"Authenticated successfully as {self.email} (Fresh Login)")
             await self._fetch_user_profile_info()
 
-            # 3. Save tokens to isolated file
             try:
                 with open(self.token_file, "w") as f:
                     json.dump(self.client.garth.dump(), f)
@@ -173,18 +158,13 @@ class GarminClient:
             raise garminconnect.GarminConnectAuthenticationError(f"Authentication error: {str(e)}") from e
 
     async def _fetch_user_profile_info(self):
-        """Fetches User Name and Age, preferring manual overrides."""
         loop = asyncio.get_event_loop()
         
-        # 1. Set Name
         if self.manual_name:
             self.user_full_name = self.manual_name
-        
-        # 2. Set Gender
         if self.manual_gender:
             self.user_gender = self.manual_gender
 
-        # 3. Set Age (from DOB)
         if self.manual_dob:
             try:
                 dob = datetime.strptime(self.manual_dob, "%Y-%m-%d").date()
@@ -193,7 +173,6 @@ class GarminClient:
             except ValueError:
                 logger.warning(f"Invalid format for USER_DOB: {self.manual_dob}. Use YYYY-MM-DD.")
 
-        # Fallback to API if not manually set
         try:
             if not self.user_full_name:
                 display_name = self.client.display_name
@@ -268,9 +247,6 @@ class GarminClient:
 
     def _find_training_readiness(self, data: Any) -> Optional[int]:
         if not data: return None
-        
-        # Garmin API often returns readiness as a list of dicts, sorted latest first
-        # We want the MORNING (earliest) value, which is at the end of the list
         if isinstance(data, list) and len(data) > 0:
             for item in reversed(data):
                 if isinstance(item, dict) and 'score' in item and item['score'] is not None:
@@ -523,11 +499,6 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # =========================================================================
-            # TOGGLE: Force Garmin Connect Weather API to Celsius
-            # Set to True if your Garmin Connect distance units are in Miles,
-            # as this forces the Garmin backend to send weather data in Fahrenheit.
-            # =========================================================================
             FORCE_API_WEATHER_TO_CELSIUS = True
 
             processed_activities = []
@@ -563,7 +534,6 @@ class GarminClient:
                         gap_speed = activity.get('avgGradeAdjustedSpeed')
                         gap_str = self._calculate_pace(gap_speed)
 
-                        # --- GET FULL ACTIVITY DETAILS FOR ADVANCED METRICS ---
                         full_act = activity
                         try:
                             if hasattr(self.client, 'get_activity'):
@@ -583,7 +553,14 @@ class GarminClient:
                             
                         gct = full_act.get('avgGroundContactTime') or full_act.get('averageGroundContactTime') or full_act.get('groundContactTime') or activity.get('avgGroundContactTime')
                         vertical_osc = full_act.get('avgVerticalOscillation') or full_act.get('averageVerticalOscillation') or full_act.get('verticalOscillation') or activity.get('avgVerticalOscillation')
+                        
+                        # --- EXTRACTING NEW METRICS ---
+                        training_load = full_act.get('activityTrainingLoad') or activity.get('activityTrainingLoad')
+                        max_power = full_act.get('maxPower') or activity.get('maxPower')
+                        norm_power = full_act.get('normPower') or activity.get('normPower')
+                        sweat_loss = full_act.get('waterEstimated') or activity.get('waterEstimated')
 
+                        # --- HR ZONES ---
                         zones_dict = {
                             "HR Zone 1 (min)": 0, "HR Zone 2 (min)": 0, 
                             "HR Zone 3 (min)": 0, "HR Zone 4 (min)": 0, "HR Zone 5 (min)": 0
@@ -602,7 +579,25 @@ class GarminClient:
                         except Exception as e_zone:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
 
-                        # --- AUTO-CONVERTING HISTORICAL WEATHER FORECAST ---
+                        # --- POWER ZONES ---
+                        power_zones_dict = {
+                            "Power Zone 1 (min)": 0, "Power Zone 2 (min)": 0, 
+                            "Power Zone 3 (min)": 0, "Power Zone 4 (min)": 0, 
+                            "Power Zone 5 (min)": 0, "Power Zone 6 (min)": 0, 
+                            "Power Zone 7 (min)": 0
+                        }
+                        try:
+                            power_zones = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}/powerTimeInZones")
+                            if power_zones and isinstance(power_zones, list):
+                                for z in power_zones:
+                                    if not isinstance(z, dict): continue
+                                    z_num = z.get('zoneNumber')
+                                    z_secs = z.get('secsInZone', 0)
+                                    if z_num and 1 <= z_num <= 7:
+                                        power_zones_dict[f"Power Zone {z_num} (min)"] = round(z_secs / 60, 2)
+                        except Exception as e_pwr_zone:
+                            logger.debug(f"Failed to fetch Power zones for {act_id}: {e_pwr_zone}")
+
                         feels_like_temp = ""
                         weather_condition = ""
                         wind_speed_kmh = ""
@@ -611,26 +606,21 @@ class GarminClient:
                         try:
                             weather_data = await loop.run_in_executor(None, self.client.get_activity_weather, act_id)
                             if weather_data and isinstance(weather_data, dict):
-                                # Prioritize apparent/feels like temperature
                                 raw_temp = weather_data.get('issueApparentTemp') or weather_data.get('apparentTemp') or weather_data.get('feelsLikeTemp') or weather_data.get('issueTemp') or weather_data.get('temp') or weather_data.get('temperature')
                                 
                                 if raw_temp is not None:
                                     try:
                                         w_temp = float(raw_temp)
                                         watch_temp_c = full_act.get('averageTemperature') or activity.get('averageTemperature')
-                                        
                                         needs_conversion = False
                                         
                                         if watch_temp_c is not None:
-                                            # Watch sensor exists: mathematically prove it's Fahrenheit
                                             if abs(w_temp - float(watch_temp_c)) > 8:
                                                 needs_conversion = True
                                         else:
-                                            # Watch sensor is missing: rely on the override toggle
                                             if FORCE_API_WEATHER_TO_CELSIUS:
                                                 needs_conversion = True
                                             elif w_temp > 45 or w_temp < -15:
-                                                # Extreme safety net just in case toggle is off
                                                 needs_conversion = True
                                                 
                                         if needs_conversion:
@@ -644,7 +634,6 @@ class GarminClient:
                                 if isinstance(weather_type, dict):
                                     weather_condition = weather_type.get('desc', weather_condition)
                                     
-                                # Wind speeds
                                 raw_wind = weather_data.get('issueWindSpeed') or weather_data.get('windSpeed')
                                 raw_gust = weather_data.get('issueWindGust') or weather_data.get('windGust')
                                 
@@ -674,7 +663,6 @@ class GarminClient:
                             "Feels Like Temperature (Celsius)": feels_like_temp,
                             "Weather Condition": weather_condition,
                             "Sustained Wind Speed (km/h)": wind_speed_kmh,
-                            "Wind Gust Speed (km/h)": wind_gust_kmh,
                             "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
                             "Max HR (bpm)": int(max_hr) if max_hr else "",
                             "Average Cadence (spm)": int(avg_cadence) if avg_cadence else "",
@@ -683,10 +671,15 @@ class GarminClient:
                             "Vertical Oscillation (cm)": round(vertical_osc, 2) if vertical_osc else "",
                             "Aerobic Training Effect (0.0-5.0)": aerobic_te,
                             "Anaerobic Training Effect (0.0-5.0)": anaerobic_te,
+                            "Activity Training Load": round(training_load, 1) if training_load else "",
                             "Avg Power (Watts)": int(avg_power) if avg_power else "",
+                            "Max Power (Watts)": int(max_power) if max_power else "",
+                            "Normalized Power (Watts)": int(norm_power) if norm_power else "",
+                            "Estimated Sweat Loss (ml)": int(sweat_loss) if sweat_loss else "",
                             "Garmin Training Effect Label": training_effect if training_effect else "",
                         }
                         activity_entry.update(zones_dict)
+                        activity_entry.update(power_zones_dict)
                         processed_activities.append(activity_entry)
 
                     except Exception as e_act:
@@ -796,13 +789,12 @@ class GarminClient:
             if seven_day_load is None and summary:
                 seven_day_load = self._find_training_load(summary)
                 
-            # --- Fractional Age & Physiologic Setup ---
             user_age_at_date = self.user_age
             if self.manual_dob:
                 try:
                     dob = datetime.strptime(self.manual_dob, "%Y-%m-%d").date()
                     delta = target_date - dob
-                    user_age_at_date = round(delta.days / 365.25, 1) # Fractional age for tracking
+                    user_age_at_date = round(delta.days / 365.25, 1)
                 except ValueError:
                     pass
             elif self.user_age is not None:
@@ -812,7 +804,6 @@ class GarminClient:
             if user_age_at_date:
                 max_hr_hunt = int(round(211 - 0.64 * user_age_at_date))
 
-            # --- New Relative Fitness Calculation ---
             vo2_max_percentile = calculate_exact_percentile(user_age_at_date, self.user_gender, vo2_run)
 
             return GarminMetrics(
