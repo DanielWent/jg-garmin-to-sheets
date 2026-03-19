@@ -88,6 +88,31 @@ jobs:
           echo "No session key or encrypted cache found. Will authenticate normally."
         fi
 
+    - name: Seed Garmin Sessions (Fallback)
+      if: steps.dst-filter.outputs.should_run == 'true'
+      env:
+        USER1_SESSION: ${{ secrets.USER1_GARMIN_SESSION }}
+        USER2_SESSION: ${{ secrets.USER2_GARMIN_SESSION }}
+      run: |
+        # Seed USER 1
+        if [ -n "$USER1_SESSION" ]; then
+          mkdir -p ~/.garth/USER1
+          # Only write if it doesn't exist (i.e., cache wasn't restored)
+          if [ ! -f ~/.garth/USER1/tokens.json ]; then
+            echo "$USER1_SESSION" > ~/.garth/USER1/tokens.json
+            echo "Seeded USER1 session from secret."
+          fi
+        fi
+        
+        # Seed USER 2
+        if [ -n "$USER2_SESSION" ]; then
+          mkdir -p ~/.garth/USER2
+          if [ ! -f ~/.garth/USER2/tokens.json ]; then
+            echo "$USER2_SESSION" > ~/.garth/USER2/tokens.json
+            echo "Seeded USER2 session from secret."
+          fi
+        fi
+
     - name: Run Sync Script with Logging
       if: steps.dst-filter.outputs.should_run == 'true'
       env:
