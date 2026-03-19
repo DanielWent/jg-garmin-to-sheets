@@ -3,7 +3,7 @@ name: Daily Garmin Sync
 on:
   schedule:
     # Triggers on the UTC hours covering 7am, 9am, 2pm, 7pm for both GMT and BST
-    - cron: '0 6,7,8,9,13,14,18,19 * * *'
+    - cron: '0 6,19 * * *'
   
   workflow_dispatch:
     inputs:
