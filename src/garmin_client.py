@@ -104,6 +104,15 @@ class GarminClient:
         self.user_age = None
         self.user_gender = None
 
+    def save_session(self):
+        """Saves current Garth OAuth tokens to disk."""
+        try:
+            with open(self.token_file, "w") as f:
+                json.dump(self.client.garth.dump(), f)
+            logger.debug(f"Saved session tokens to {self.token_file}")
+        except Exception as e:
+            logger.error(f"Failed to save session tokens: {e}")
+
     async def authenticate(self):
         loop = asyncio.get_event_loop()
         garth.configure(domain="garmin.com")
@@ -131,13 +140,8 @@ class GarminClient:
             self.mfa_ticket_dict = None
             logger.info(f"Authenticated successfully as {self.email} (Fresh Login)")
             await self._fetch_user_profile_info()
-
-            try:
-                with open(self.token_file, "w") as f:
-                    json.dump(self.client.garth.dump(), f)
-                logger.debug(f"Saved session tokens to {self.token_file}")
-            except Exception as e:
-                logger.error(f"Failed to save session tokens: {e}")
+            
+            self.save_session()
 
         except AttributeError as e:
             if "'dict' object has no attribute 'expired'" in str(e):
@@ -285,13 +289,6 @@ class GarminClient:
         if not self._authenticated:
             if self._auth_failed: raise Exception("Authentication previously failed.")
             await self.authenticate()
-        else:
-            try:
-                 if self.token_file.exists():
-                     with open(self.token_file, "r") as f:
-                         self.client.garth.load(json.load(f))
-            except Exception:
-                pass
 
         async def safe_fetch(name, coro):
             try: return await coro
@@ -554,13 +551,11 @@ class GarminClient:
                         gct = full_act.get('avgGroundContactTime') or full_act.get('averageGroundContactTime') or full_act.get('groundContactTime') or activity.get('avgGroundContactTime')
                         vertical_osc = full_act.get('avgVerticalOscillation') or full_act.get('averageVerticalOscillation') or full_act.get('verticalOscillation') or activity.get('avgVerticalOscillation')
                         
-                        # --- EXTRACTING NEW METRICS ---
                         training_load = full_act.get('activityTrainingLoad') or activity.get('activityTrainingLoad')
                         max_power = full_act.get('maxPower') or activity.get('maxPower')
                         norm_power = full_act.get('normPower') or activity.get('normPower')
                         sweat_loss = full_act.get('waterEstimated') or activity.get('waterEstimated')
 
-                        # --- FORMATTING TRAINING EFFECT ---
                         aerobic_te_val = ""
                         if aerobic_te is not None:
                             try: aerobic_te_val = round(float(aerobic_te), 1)
@@ -571,7 +566,6 @@ class GarminClient:
                             try: anaerobic_te_val = round(float(anaerobic_te), 1)
                             except (ValueError, TypeError): pass
 
-                        # --- HR ZONES ---
                         zones_dict = {f"HR Zone {i} (min)": "" for i in range(1, 6)}
                         try:
                             hr_zones = await loop.run_in_executor(None, self.client.get_activity_hr_in_timezones, act_id)
@@ -588,7 +582,6 @@ class GarminClient:
                         except Exception as e_zone:
                             logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
 
-                        # --- POWER ZONES ---
                         power_zones_dict = {f"Power Zone {i} (min)": "" for i in range(1, 6)}
                         try:
                             power_zones = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}/powerTimeInZones")
@@ -811,7 +804,7 @@ class GarminClient:
 
             vo2_max_percentile = calculate_exact_percentile(user_age_at_date, self.user_gender, vo2_run)
 
-            return GarminMetrics(
+            metrics = GarminMetrics(
                 date=target_date,
                 user_name=self.user_full_name,
                 user_age=user_age_at_date,
@@ -863,6 +856,11 @@ class GarminClient:
                 floors_climbed=floors,
                 activities=processed_activities
             )
+            
+            # Save token to ensure auto-refreshed tokens are written back to disk securely
+            self.save_session()
+            
+            return metrics
 
         except Exception as e:
             logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
