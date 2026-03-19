@@ -108,7 +108,7 @@ class GarminClient:
         """Saves current Garth OAuth tokens to disk."""
         try:
             with open(self.token_file, "w") as f:
-                json.dump(self.client.garth.dump(), f)
+                f.write(self.client.garth.dumps())
             logger.debug(f"Saved session tokens to {self.token_file}")
         except Exception as e:
             logger.error(f"Failed to save session tokens: {e}")
@@ -121,9 +121,9 @@ class GarminClient:
             try:
                 logger.info(f"Attempting to resume session for {self.profile_name}...")
                 with open(self.token_file, "r") as f:
-                    saved_tokens = json.load(f)
+                    saved_tokens = f.read().strip()
                 
-                self.client.garth.load(saved_tokens)
+                self.client.garth.loads(saved_tokens)
                 self._authenticated = True
                 logger.info(f"Resumed session successfully for {self.email}")
                 await self._fetch_user_profile_info()
