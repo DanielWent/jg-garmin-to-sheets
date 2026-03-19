@@ -2,8 +2,8 @@ name: Daily Garmin Sync
 
 on:
   schedule:
-    # Triggers on the UTC hours covering 7am, 9am, 2pm, 7pm for both GMT and BST
-    - cron: '0 6,19 * * *'
+    # Triggers on the UTC hours covering 5am and 7pm for both GMT and BST
+    - cron: '0 4,5,18,19 * * *'
   
   workflow_dispatch:
     inputs:
@@ -41,7 +41,7 @@ jobs:
         # Only run this check for scheduled cron jobs, allowing manual dispatches to run anytime
         if [ "${{ github.event_name }}" == "schedule" ]; then
           UK_HOUR=$(TZ='Europe/London' date +%H)
-          if [[ "$UK_HOUR" != "07" && "$UK_HOUR" != "09" && "$UK_HOUR" != "14" && "$UK_HOUR" != "19" ]]; then
+          if [[ "$UK_HOUR" != "05" && "$UK_HOUR" != "19" ]]; then
             echo "Current UK hour is $UK_HOUR. Exiting early to prevent redundant execution."
             echo "should_run=false" >> $GITHUB_OUTPUT
             exit 0
