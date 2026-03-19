@@ -64,6 +64,30 @@ jobs:
       run: |
         pip install -r requirements.txt
 
+    - name: Restore Garmin Sessions Cache
+      if: steps.dst-filter.outputs.should_run == 'true'
+      id: cache-sessions
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.garth_encrypted
+        key: garmin-sessions-${{ github.run_id }}
+        restore-keys: |
+          garmin-sessions-
+
+    - name: Decrypt Garmin Sessions
+      if: steps.dst-filter.outputs.should_run == 'true'
+      env:
+        GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
+      run: |
+        if [ -n "$GARMIN_SESSION_KEY" ] && [ -f ~/.garth_encrypted/sessions.tar.enc ]; then
+          openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in ~/.garth_encrypted/sessions.tar.enc -out sessions.tar -k "$GARMIN_SESSION_KEY"
+          mkdir -p ~/.garth
+          tar -xf sessions.tar -C ~/.garth
+          echo "Session cache securely restored and decrypted."
+        else
+          echo "No session key or encrypted cache found. Will authenticate normally."
+        fi
+
     - name: Run Sync Script with Logging
       if: steps.dst-filter.outputs.should_run == 'true'
       env:
@@ -72,7 +96,6 @@ jobs:
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
-        # New Hardcoded Values for User 1
         USER1_NAME: ${{ secrets.USER1_NAME }}
         USER1_DOB: ${{ secrets.USER1_DOB }}
         USER1_GENDER: ${{ secrets.USER1_GENDER }}
@@ -82,7 +105,6 @@ jobs:
         USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
         USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
         USER2_SHEET_ID: ${{ secrets.USER2_SHEET_ID }}
-        # New Hardcoded Values for User 2
         USER2_NAME: ${{ secrets.USER2_NAME }}
         USER2_DOB: ${{ secrets.USER2_DOB }}
         USER2_GENDER: ${{ secrets.USER2_GENDER }}
@@ -105,6 +127,25 @@ jobs:
           echo "🔄 AUTOMATED MODE: Running standard daily sync for ALL configured users..."
           python -m src.main 2>&1 | tee sync_debug.log
         fi
+
+    - name: Encrypt Garmin Sessions
+      if: always() && steps.dst-filter.outputs.should_run == 'true'
+      env:
+        GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
+      run: |
+        if [ -n "$GARMIN_SESSION_KEY" ] && [ -d ~/.garth ]; then
+          tar -cf sessions.tar -C ~/.garth .
+          mkdir -p ~/.garth_encrypted
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out ~/.garth_encrypted/sessions.tar.enc -k "$GARMIN_SESSION_KEY"
+          echo "Session cache successfully encrypted for saving."
+        fi
+
+    - name: Save Garmin Sessions Cache
+      if: always() && steps.dst-filter.outputs.should_run == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.garth_encrypted
+        key: garmin-sessions-${{ github.run_id }}
 
     - name: Upload Debug Log
       if: always() && steps.dst-filter.outputs.should_run == 'true'
