@@ -254,8 +254,10 @@ class GarminClient:
         if isinstance(data, list) and len(data) > 0:
             for item in reversed(data):
                 if isinstance(item, dict) and 'score' in item and item['score'] is not None:
-                    try: return int(item['score'])
-                    except (ValueError, TypeError): pass
+                    try: 
+                        return int(item['score'])
+                    except (ValueError, TypeError): 
+                        pass
 
         stack = [data]
         while stack:
@@ -263,8 +265,10 @@ class GarminClient:
             if isinstance(current, dict):
                 for k in ['trainingReadinessScore', 'readinessScore', 'score']:
                     if k in current and current[k] is not None:
-                        try: return int(current[k])
-                        except (ValueError, TypeError): pass
+                        try: 
+                            return int(current[k])
+                        except (ValueError, TypeError): 
+                            pass
 
                 for v in current.values():
                     if isinstance(v, (dict, list)):
@@ -314,7 +318,7 @@ class GarminClient:
             task_lactate_speed_url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
             lactate_params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
 
-            # The requests are now spaced out sequentially instead of gathering simultaneously
+            # The requests are spaced out sequentially to bypass Cloudflare
             summary = await safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
             stats = await safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
             sleep_data = await safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
@@ -416,4 +420,457 @@ class GarminClient:
                         if dia_values: bp_diastolic = int(round(mean(dia_values)))
 
                 except Exception as e_bp:
-    
+                    logger.error(f"[{target_date}] Error parsing Blood Pressure: {e_bp}")
+
+            steps = None
+            if summary:
+                steps = summary.get('totalSteps')
+            
+            if steps is None:
+                try:
+                    daily_steps_data = await safe_fetch("Fallback Steps", loop.run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
+                    if daily_steps_data and isinstance(daily_steps_data, list) and len(daily_steps_data) > 0:
+                        steps = daily_steps_data[0].get('totalSteps')
+                except Exception:
+                    pass
+
+            sleep_score = None
+            sleep_length = None
+            sleep_need = None
+            sleep_efficiency = None
+            sleep_start_time = None
+            sleep_end_time = None
+            sleep_deep = None
+            sleep_light = None
+            sleep_rem = None
+            sleep_awake = None
+            overnight_respiration = None
+            overnight_pulse_ox = None
+
+            if sleep_data:
+                sleep_dto = sleep_data.get('dailySleepDTO')
+                if not sleep_dto and isinstance(sleep_data, dict):
+                    sleep_dto = sleep_data
+
+                if sleep_dto:
+                    sleep_scores = sleep_dto.get('sleepScores') or {}
+                    sleep_score = sleep_scores.get('overall', {}).get('value')
+                    
+                    sleep_need_obj = sleep_dto.get('sleepNeed')
+                    if isinstance(sleep_need_obj, dict):
+                        sleep_need = sleep_need_obj.get('actual')
+                    else:
+                        sleep_need = sleep_need_obj
+
+                    overnight_respiration = sleep_dto.get('averageRespirationValue')
+                    overnight_pulse_ox = sleep_dto.get('averageSpO2Value')
+
+                    sleep_time_seconds = sleep_dto.get('sleepTimeSeconds')
+                    if sleep_time_seconds:
+                        sleep_length = round(sleep_time_seconds / 60)
+                    
+                    start_ts_local = sleep_dto.get('sleepStartTimestampLocal')
+                    end_ts_local = sleep_dto.get('sleepEndTimestampLocal')
+                    
+                    if start_ts_local:
+                        sleep_start_time = datetime.fromtimestamp(start_ts_local/1000).strftime('%H:%M')
+                    if end_ts_local:
+                        sleep_end_time = datetime.fromtimestamp(end_ts_local/1000).strftime('%H:%M')
+                    
+                    sleep_deep = (sleep_dto.get('deepSleepSeconds') or 0) / 60
+                    sleep_light = (sleep_dto.get('lightSleepSeconds') or 0) / 60
+                    sleep_rem = (sleep_dto.get('remSleepSeconds') or 0) / 60
+                    sleep_awake = (sleep_dto.get('awakeSleepSeconds') or 0) / 60
+
+                    if sleep_time_seconds and sleep_time_seconds > 0:
+                        awake_sec = sleep_dto.get('awakeSleepSeconds') or 0
+                        sleep_efficiency = round(((sleep_time_seconds - awake_sec) / sleep_time_seconds) * 100)
+
+            overnight_hrv_value = None
+            hrv_status_value = None
+            if hrv_payload and hrv_payload.get('hrvSummary'):
+                hrv_summary = hrv_payload['hrvSummary']
+                overnight_hrv_value = hrv_summary.get('lastNightAvg')
+                hrv_status_value = hrv_summary.get('status')
+
+            FORCE_API_WEATHER_TO_CELSIUS = True
+
+            processed_activities = []
+            if activities:
+                for activity in activities:
+                    if not isinstance(activity, dict): continue
+                    atype = activity.get('activityType') or {}
+                    try:
+                        act_id = activity.get('activityId')
+                        act_name = activity.get('activityName')
+                        act_start_local = activity.get('startTimeLocal')
+                        act_time_str = ""
+                        if act_start_local:
+                             act_time_str = act_start_local.split(' ')[1][:5] if ' ' in act_start_local else ""
+                        dist_km = (activity.get('distance') or 0) / 1000
+                        dur_min = (activity.get('duration') or 0) / 60
+                        pace_str = ""
+                        if dist_km > 0 and dur_min > 0:
+                             pace_decimal = dur_min / dist_km
+                             p_min = int(pace_decimal)
+                             p_sec = int((pace_decimal - p_min) * 60)
+                             pace_str = f"{p_min}:{p_sec:02d}"
+
+                        avg_hr = activity.get('averageHR')
+                        max_hr = activity.get('maxHR')
+                        cal = activity.get('calories')
+                        elev_gain = activity.get('elevationGain') 
+                        elev_loss = activity.get('elevationLoss') 
+                        aerobic_te = activity.get('aerobicTrainingEffect')
+                        anaerobic_te = activity.get('anaerobicTrainingEffect')
+                        avg_power = activity.get('avgPower') or activity.get('averageRunningPower')
+                        training_effect = activity.get('trainingEffectLabel')
+                        gap_speed = activity.get('avgGradeAdjustedSpeed')
+                        gap_str = self._calculate_pace(gap_speed)
+
+                        full_act = activity
+                        try:
+                            if hasattr(self.client, 'get_activity'):
+                                fetched_act = await loop.run_in_executor(None, self.client.get_activity, act_id)
+                                if fetched_act: full_act = fetched_act
+                            else:
+                                fetched_act = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}")
+                                if fetched_act: full_act = fetched_act
+                        except Exception as e_full:
+                            logger.debug(f"Failed to fetch full activity {act_id}: {e_full}")
+                        
+                        avg_cadence = full_act.get('averageRunningCadenceInStepsPerMinute') or full_act.get('averageBikingCadenceInRevPerMinute') or activity.get('averageRunningCadenceInStepsPerMinute')
+                        
+                        stride_length = full_act.get('avgStrideLength') or full_act.get('averageStrideLength') or full_act.get('strideLength') or activity.get('avgStrideLength') or activity.get('strideLength')
+                        if stride_length and stride_length > 10:
+                            stride_length = stride_length / 100
+                            
+                        gct = full_act.get('avgGroundContactTime') or full_act.get('averageGroundContactTime') or full_act.get('groundContactTime') or activity.get('avgGroundContactTime')
+                        vertical_osc = full_act.get('avgVerticalOscillation') or full_act.get('averageVerticalOscillation') or full_act.get('verticalOscillation') or activity.get('avgVerticalOscillation')
+                        
+                        training_load = full_act.get('activityTrainingLoad') or activity.get('activityTrainingLoad')
+                        max_power = full_act.get('maxPower') or activity.get('maxPower')
+                        norm_power = full_act.get('normPower') or activity.get('normPower')
+                        sweat_loss = full_act.get('waterEstimated') or activity.get('waterEstimated')
+
+                        aerobic_te_val = ""
+                        if aerobic_te is not None:
+                            try: 
+                                aerobic_te_val = round(float(aerobic_te), 1)
+                            except (ValueError, TypeError): 
+                                pass
+
+                        anaerobic_te_val = ""
+                        if anaerobic_te is not None:
+                            try: 
+                                anaerobic_te_val = round(float(anaerobic_te), 1)
+                            except (ValueError, TypeError): 
+                                pass
+
+                        zones_dict = {f"HR Zone {i} (min)": "" for i in range(1, 6)}
+                        try:
+                            hr_zones = await loop.run_in_executor(None, self.client.get_activity_hr_in_timezones, act_id)
+                            if hr_zones is None:
+                                hr_zones = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}/hrTimeInZones")
+                            if hr_zones and isinstance(hr_zones, list) and len(hr_zones) > 0:
+                                zones_dict = {f"HR Zone {i} (min)": 0 for i in range(1, 6)}
+                                for z in hr_zones:
+                                    if not isinstance(z, dict): continue
+                                    z_num = z.get('zoneNumber')
+                                    z_secs = z.get('secsInZone', 0)
+                                    if z_num and 1 <= z_num <= 5:
+                                        zones_dict[f"HR Zone {z_num} (min)"] = round(z_secs / 60, 2)
+                        except Exception as e_zone:
+                            logger.warning(f"Failed to fetch HR zones for {act_id}: {e_zone}")
+
+                        power_zones_dict = {f"Power Zone {i} (min)": "" for i in range(1, 6)}
+                        try:
+                            power_zones = await loop.run_in_executor(None, self.client.connectapi, f"activity-service/activity/{act_id}/powerTimeInZones")
+                            if power_zones and isinstance(power_zones, list) and len(power_zones) > 0:
+                                power_zones_dict = {f"Power Zone {i} (min)": 0 for i in range(1, 6)}
+                                for z in power_zones:
+                                    if not isinstance(z, dict): continue
+                                    z_num = z.get('zoneNumber')
+                                    z_secs = z.get('secsInZone', 0)
+                                    if z_num and 1 <= z_num <= 5:
+                                        power_zones_dict[f"Power Zone {z_num} (min)"] = round(z_secs / 60, 2)
+                        except Exception as e_pwr_zone:
+                            logger.debug(f"Failed to fetch Power zones for {act_id}: {e_pwr_zone}")
+
+                        feels_like_temp = ""
+                        weather_condition = ""
+                        wind_speed_kmh = ""
+                        wind_gust_kmh = ""
+                        
+                        try:
+                            weather_data = await loop.run_in_executor(None, self.client.get_activity_weather, act_id)
+                            if weather_data and isinstance(weather_data, dict):
+                                raw_temp = weather_data.get('issueApparentTemp') or weather_data.get('apparentTemp') or weather_data.get('feelsLikeTemp') or weather_data.get('issueTemp') or weather_data.get('temp') or weather_data.get('temperature')
+                                
+                                if raw_temp is not None:
+                                    try:
+                                        w_temp = float(raw_temp)
+                                        watch_temp_c = full_act.get('averageTemperature') or activity.get('averageTemperature')
+                                        needs_conversion = False
+                                        
+                                        if watch_temp_c is not None:
+                                            if abs(w_temp - float(watch_temp_c)) > 8:
+                                                needs_conversion = True
+                                        else:
+                                            if FORCE_API_WEATHER_TO_CELSIUS:
+                                                needs_conversion = True
+                                            elif w_temp > 45 or w_temp < -15:
+                                                needs_conversion = True
+                                                
+                                        if needs_conversion:
+                                            w_temp = (w_temp - 32) * 5.0 / 9.0
+                                            
+                                        feels_like_temp = round(w_temp, 1)
+                                    except (ValueError, TypeError):
+                                        pass
+                                
+                                weather_type = weather_data.get('issueWeatherType') or weather_data.get('weatherTypeDTO') or {}
+                                if isinstance(weather_type, dict):
+                                    weather_condition = weather_type.get('desc', weather_condition)
+                                    
+                                raw_wind = weather_data.get('issueWindSpeed') or weather_data.get('windSpeed')
+                                raw_gust = weather_data.get('issueWindGust') or weather_data.get('windGust')
+                                
+                                if raw_wind is not None:
+                                    try: 
+                                        wind_speed_kmh = round(float(raw_wind), 1)
+                                    except (ValueError, TypeError): 
+                                        pass
+                                    
+                                if raw_gust is not None:
+                                    try: 
+                                        wind_gust_kmh = round(float(raw_gust), 1)
+                                    except (ValueError, TypeError): 
+                                        pass
+
+                        except Exception as e_weather:
+                            logger.debug(f"Failed to fetch weather for {act_id}: {e_weather}")
+
+                        activity_entry = {
+                            "Activity ID": act_id,
+                            "Date (YYYY-MM-DD)": target_date.isoformat(),
+                            "Start Time (HH:MM)": act_time_str,
+                            "Activity Type": atype.get('typeKey', 'Unknown'),
+                            "Activity Name": act_name,
+                            "Distance (km)": round(dist_km, 2) if dist_km else 0,
+                            "Duration (min)": round(dur_min, 1) if dur_min else 0,
+                            "Avg Pace (min/km)": pace_str,
+                            "Average Grade Adjusted Pace (min/km)": gap_str,
+                            "Total Ascent (m)": int(elev_gain) if elev_gain else "",
+                            "Total Descent (m)": int(elev_loss) if elev_loss else "",
+                            "Feels Like Temperature (Celsius)": feels_like_temp,
+                            "Weather Condition": weather_condition,
+                            "Sustained Wind Speed (km/h)": wind_speed_kmh,
+                            "Avg HR (bpm)": int(avg_hr) if avg_hr else "",
+                            "Max HR (bpm)": int(max_hr) if max_hr else "",
+                            "Average Cadence (spm)": int(avg_cadence) if avg_cadence else "",
+                            "Average Stride Length (m)": round(stride_length, 2) if stride_length else "",
+                            "Average Ground Contact Time (ms)": int(gct) if gct else "",
+                            "Vertical Oscillation (cm)": round(vertical_osc, 2) if vertical_osc else "",
+                            "Aerobic Training Effect (0.0-5.0)": aerobic_te_val,
+                            "Anaerobic Training Effect (0.0-5.0)": anaerobic_te_val,
+                            "Activity Training Load": round(training_load, 1) if training_load else "",
+                            "Avg Power (Watts)": int(avg_power) if avg_power else "",
+                            "Max Power (Watts)": int(max_power) if max_power else "",
+                            "Normalized Power (Watts)": int(norm_power) if norm_power else "",
+                            "Estimated Sweat Loss (ml)": int(sweat_loss) if sweat_loss else "",
+                            "Garmin Training Effect Label": training_effect if training_effect else "",
+                        }
+                        activity_entry.update(zones_dict)
+                        activity_entry.update(power_zones_dict)
+                        processed_activities.append(activity_entry)
+
+                    except Exception as e_act:
+                        logger.error(f"Error parsing activity detail: {e_act}")
+                        continue
+
+            active_cal = None
+            resting_cal = None
+            total_cal = None
+            intensity_min = None
+            resting_hr = None
+            avg_stress = None
+            floors = None
+            bb_charged = None
+            bb_drained = None
+            
+            if summary:
+                active_cal = summary.get('activeKilocalories')
+                resting_cal = summary.get('bmrKilocalories')
+                if active_cal is not None or resting_cal is not None:
+                    total_cal = (active_cal or 0) + (resting_cal or 0)
+
+                intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
+                resting_hr = summary.get('restingHeartRate')
+                avg_stress = summary.get('averageStressLevel')
+                
+                bb_charged = summary.get('bodyBatteryChargedValue')
+                bb_drained = summary.get('bodyBatteryDrainedValue')
+
+                raw_floors = summary.get('floorsAscended') or summary.get('floorsClimbed')
+                if raw_floors is not None:
+                    try:
+                        floors = round(float(raw_floors))
+                    except (ValueError, TypeError):
+                        floors = raw_floors
+
+            vo2_run = None
+            vo2_cycle = None
+            train_phrase = None
+            lactate_bpm = None
+            lactate_pace = None
+            train_load_focus = None
+
+            if lactate_data:
+                if 'heartRate' in lactate_data:
+                    lactate_bpm = lactate_data['heartRate']
+                if 'speed' in lactate_data:
+                    speed_ms = lactate_data['speed']
+                    lactate_pace = self._calculate_pace(speed_ms)
+            
+            if not lactate_bpm and lactate_range_hr and isinstance(lactate_range_hr, list):
+                try:
+                    last_entry = lactate_range_hr[-1] 
+                    if isinstance(last_entry, dict) and 'value' in last_entry:
+                             lactate_bpm = int(last_entry['value'])
+                except Exception:
+                    pass
+
+            if not lactate_pace and lactate_range_speed and isinstance(lactate_range_speed, list):
+                try:
+                    last_entry = lactate_range_speed[-1]
+                    if isinstance(last_entry, dict) and 'value' in last_entry:
+                        speed_ms = last_entry['value']
+                        if speed_ms and speed_ms > 0:
+                            if speed_ms < 1.0: speed_ms *= 10  
+                            lactate_pace = self._calculate_pace(speed_ms)
+                except Exception:
+                     pass
+
+            if training_status_std:
+                mr_vo2 = training_status_std.get('mostRecentVO2Max')
+                if mr_vo2:
+                    if mr_vo2.get('generic'): 
+                        vo2_run = mr_vo2['generic'].get('vo2MaxPreciseValue', mr_vo2['generic'].get('vo2MaxValue'))
+                        if vo2_run is not None:
+                            try: 
+                                vo2_run = round(float(vo2_run), 1)
+                            except ValueError: 
+                                pass
+                    if mr_vo2.get('cycling'): 
+                        vo2_cycle = mr_vo2['cycling'].get('vo2MaxPreciseValue', mr_vo2['cycling'].get('vo2MaxValue'))
+                        if vo2_cycle is not None:
+                            try: 
+                                vo2_cycle = round(float(vo2_cycle), 1)
+                            except ValueError: 
+                                pass
+                
+                mr_ts = training_status_std.get('mostRecentTrainingStatus')
+                if mr_ts:
+                    ts_data = mr_ts.get('latestTrainingStatusData')
+                    if ts_data:
+                        for dev_data in ts_data.values():
+                            if isinstance(dev_data, dict):
+                                train_phrase = dev_data.get('trainingStatusFeedbackPhrase')
+                                if train_phrase: break
+                    
+                    if not lactate_bpm and 'lactateThresholdHeartRate' in mr_ts:
+                        lactate_bpm = mr_ts['lactateThresholdHeartRate']
+
+            train_load_focus = self._find_training_load_focus(training_status_modern)
+            if not train_load_focus:
+                train_load_focus = self._find_training_load_focus(training_status_std)
+
+            training_readiness = self._find_training_readiness(readiness_data)
+
+            seven_day_load = None
+            if training_status_modern:
+                seven_day_load = self._find_training_load(training_status_modern)
+            if seven_day_load is None and training_status_std:
+                seven_day_load = self._find_training_load(training_status_std)
+            if seven_day_load is None and summary:
+                seven_day_load = self._find_training_load(summary)
+                
+            user_age_at_date = self.user_age
+            if self.manual_dob:
+                try:
+                    dob = datetime.strptime(self.manual_dob, "%Y-%m-%d").date()
+                    delta = target_date - dob
+                    user_age_at_date = round(delta.days / 365.25, 1)
+                except ValueError:
+                    pass
+            elif self.user_age is not None:
+                user_age_at_date = float(self.user_age)
+
+            max_hr_hunt = None
+            if user_age_at_date:
+                max_hr_hunt = int(round(211 - 0.64 * user_age_at_date))
+
+            vo2_max_percentile = calculate_exact_percentile(user_age_at_date, self.user_gender, vo2_run)
+
+            metrics = GarminMetrics(
+                date=target_date,
+                user_name=self.user_full_name,
+                user_age=user_age_at_date,
+                user_gender=self.user_gender, 
+                max_hr_hunt=max_hr_hunt,
+                sleep_score=sleep_score,
+                sleep_need=sleep_need,
+                sleep_efficiency=sleep_efficiency,
+                sleep_length=sleep_length,
+                sleep_start_time=sleep_start_time, 
+                sleep_end_time=sleep_end_time,     
+                sleep_deep=sleep_deep,             
+                sleep_light=sleep_light,           
+                sleep_rem=sleep_rem,               
+                sleep_awake=sleep_awake,
+                overnight_respiration=overnight_respiration, 
+                overnight_pulse_ox=overnight_pulse_ox,
+                weight=weight,
+                bmi=bmi,
+                body_fat=body_fat,
+                skeletal_muscle=skeletal_muscle,
+                bone_mass=bone_mass,
+                body_water=body_water,
+                visceral_fat=visceral_fat,
+                blood_pressure_systolic=bp_systolic,
+                blood_pressure_diastolic=bp_diastolic,
+                resting_heart_rate=resting_hr,
+                average_stress=avg_stress,
+                body_battery_max=bb_max,
+                body_battery_min=bb_min,
+                body_battery_charged=bb_charged,
+                body_battery_drained=bb_drained,
+                overnight_hrv=overnight_hrv_value,
+                hrv_status=hrv_status_value,
+                vo2max_running=vo2_run,
+                vo2max_cycling=vo2_cycle,
+                vo2_max_percentile=vo2_max_percentile,
+                seven_day_load=seven_day_load,
+                lactate_threshold_bpm=lactate_bpm,
+                lactate_threshold_pace=lactate_pace,
+                training_status=train_phrase,
+                training_load_focus=train_load_focus,
+                training_readiness=training_readiness,
+                active_calories=active_cal,
+                resting_calories=resting_cal,
+                total_calories=total_cal,
+                intensity_minutes=intensity_min,
+                steps=steps,
+                floors_climbed=floors,
+                activities=processed_activities
+            )
+            
+            # Save token to ensure auto-refreshed tokens are written back to disk securely
+            self.save_session()
+            
+            return metrics
+
+        except Exception as e:
+            logger.error(f"Error fetching metrics for {target_date}: {str(e)}")
+            return GarminMetrics(date=target_date)
