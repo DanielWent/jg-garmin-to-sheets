@@ -291,13 +291,17 @@ class GarminClient:
             await self.authenticate()
 
         async def safe_fetch(name, coro):
-            try: return await coro
+            try: 
+                await asyncio.sleep(0.5)
+                return await coro
             except Exception as e:
                 logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
                 return None
 
         async def direct_fetch(name, endpoint):
-            try: return await asyncio.get_event_loop().run_in_executor(None, self.client.connectapi, endpoint)
+            try: 
+                await asyncio.sleep(0.5)
+                return await asyncio.get_event_loop().run_in_executor(None, self.client.connectapi, endpoint)
             except Exception as e:
                 logger.debug(f"Direct fetch for {name} failed: {e}")
                 return None
@@ -310,40 +314,28 @@ class GarminClient:
             task_lactate_speed_url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
             lactate_params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
 
-            c_summary = safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
-            c_stats = safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
-            c_sleep = safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
-            c_hrv = self._fetch_hrv_data(target_iso)
-            c_bp = safe_fetch("Blood Pressure", loop.run_in_executor(None, self.client.get_blood_pressure, target_iso))
-            c_activities = safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
-            c_training_std = safe_fetch("Training Status (Std)", loop.run_in_executor(None, self.client.get_training_status, target_iso))
+            summary = await safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
+            stats = await safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
+            sleep_data = await safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
+            hrv_payload = await safe_fetch("HRV", self._fetch_hrv_data(target_iso))
+            bp_payload = await safe_fetch("Blood Pressure", loop.run_in_executor(None, self.client.get_blood_pressure, target_iso))
+            activities = await safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
+            training_status_std = await safe_fetch("Training Status (Std)", loop.run_in_executor(None, self.client.get_training_status, target_iso))
             
             modern_url = f"metrics-service/metrics/trainingstatus/aggregated/{target_iso}"
-            c_training_modern = direct_fetch("Training Status (Modern)", modern_url)
+            training_status_modern = await direct_fetch("Training Status (Modern)", modern_url)
             
-            c_lactate_direct = safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
+            lactate_data = await safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
             
-            c_lactate_range_hr = safe_fetch("Lactate Range HR", loop.run_in_executor(
+            lactate_range_hr = await safe_fetch("Lactate Range HR", loop.run_in_executor(
                 None, partial(self.client.connectapi, task_lactate_hr_url, params=lactate_params)
             ))
             
-            c_lactate_range_speed = safe_fetch("Lactate Range Speed", loop.run_in_executor(
+            lactate_range_speed = await safe_fetch("Lactate Range Speed", loop.run_in_executor(
                 None, partial(self.client.connectapi, task_lactate_speed_url, params=lactate_params)
             ))
             
-            c_readiness = safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
-
-            results = await asyncio.gather(
-                c_summary, c_stats, c_sleep, c_hrv, c_bp, c_activities, 
-                c_training_std, c_training_modern, 
-                c_lactate_direct, c_lactate_range_hr, c_lactate_range_speed,
-                c_readiness
-            )
-
-            (summary, stats, sleep_data, hrv_payload, bp_payload, activities, 
-             training_status_std, training_status_modern, 
-             lactate_data, lactate_range_hr, lactate_range_speed,
-             readiness_data) = results
+            readiness_data = await safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
 
             summary = summary or {}
             if isinstance(summary, list): summary = summary[0] if summary else {}
