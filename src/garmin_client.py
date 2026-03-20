@@ -164,6 +164,14 @@ class GarminClient:
     async def _fetch_user_profile_info(self):
         loop = asyncio.get_event_loop()
         
+        # FIX: Force the garminconnect library to fetch and lock in your display_name
+        # If this is missing when resuming a session, the usersummary endpoints return a 403 Forbidden.
+        if not self.client.display_name:
+            try:
+                await loop.run_in_executor(None, self.client.get_full_name)
+            except Exception as e:
+                logger.debug(f"Could not force-fetch display name: {e}")
+        
         if self.manual_name:
             self.user_full_name = self.manual_name
         if self.manual_gender:
