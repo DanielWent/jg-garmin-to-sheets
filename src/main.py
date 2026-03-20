@@ -6,6 +6,7 @@ import re
 import asyncio
 import json
 import random
+import time
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, Dict
@@ -23,6 +24,11 @@ from src.config import (
     GarminMetrics
 )
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
+
 logging.getLogger("hpack").setLevel(logging.WARNING)
 
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -31,6 +37,16 @@ logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(mes
 logger = logging.getLogger(__name__)
 
 app = typer.Typer()
+
+def get_uk_date() -> date:
+    """Safely retrieves the current date in the UK timezone, independent of the runner's UTC setting."""
+    if ZoneInfo:
+        return datetime.now(ZoneInfo("Europe/London")).date()
+    else:
+        if hasattr(time, 'tzset'):
+            os.environ['TZ'] = 'Europe/London'
+            time.tzset()
+        return date.today()
 
 def ensure_credentials_file_exists():
     creds_path = Path('credentials/client_secret.json')
@@ -119,7 +135,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 daily_metrics.body_fat = original_bf + 3.0
                 logger.info(f"[{current_date}] Adjusted Body Fat for {profile_name}: {original_bf}% -> {daily_metrics.body_fat}%")
         
-        if current_date >= date.today():
+        if current_date >= get_uk_date():
             for f in fields_to_validate:
                 setattr(daily_metrics, f, "PENDING")
         else:
@@ -273,7 +289,7 @@ async def run_automated_sync():
         logger.error("No user profiles found in environment variables.")
         return
 
-    today = date.today()
+    today = get_uk_date()
     yesterday = today - timedelta(days=1)
     
     logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday} to {today}) ---")
