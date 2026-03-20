@@ -1,6 +1,7 @@
 import logging
 import io
 import pandas as pd
+import numpy as np
 from typing import List, Optional
 from datetime import date
 from google.oauth2.service_account import Credentials
@@ -77,7 +78,25 @@ class GoogleDriveClient:
                 existing_df = pd.read_csv(io.BytesIO(content))
                 existing_df = existing_df.loc[:, ~existing_df.columns.str.contains('^Unnamed')]
                 
-                combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+                # === SMART MERGE: PREVENT NA OVERWRITES ===
+                # Convert explicit "NA" and empty strings in the newly fetched data to actual NaN (null) values
+                new_df_cleaned = new_df.replace(["NA", "", "NaN"], np.nan)
+                
+                # Align both dataframes by their unique identifier (e.g., the Date)
+                existing_idx = existing_df.set_index(dedup_col)
+                new_idx = new_df_cleaned.set_index(dedup_col)
+                
+                # combine_first prioritizes the new data. If the new data is NaN (because of a rate limit), 
+                # it safely falls back to preserving the numerical value from the existing spreadsheet.
+                combined_idx = new_idx.combine_first(existing_idx)
+                
+                # Reset the index to turn the Date back into a normal column
+                combined_df = combined_idx.reset_index()
+                
+                # Ensure the final column order strictly matches your expected headers
+                valid_cols = [col for col in new_df.columns if col in combined_df.columns]
+                combined_df = combined_df[valid_cols]
+                
             except Exception as e:
                 logger.warning(f"Error merging {filename}, overwriting: {e}")
                 combined_df = new_df
@@ -110,6 +129,7 @@ class GoogleDriveClient:
                 combined_df.loc[valid_dates, sort_date_col] = combined_df.loc[valid_dates, '_temp_date'].dt.strftime('%Y-%m-%d')
                 
                 # 4. Deduplicate using the newly standardized exact strings
+                # (Safety net: combine_first already merges exact index matches, but this catches rogue duplicates)
                 if dedup_col in combined_df.columns:
                     combined_df = combined_df.drop_duplicates(subset=[dedup_col], keep='last')
                 
