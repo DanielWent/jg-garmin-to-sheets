@@ -1,0 +1,100 @@
+name: Manual Garmin Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Select User Profile'
+        required: true
+        default: 'ALL'
+        type: choice
+        options:
+        - ALL
+        - USER1
+        - USER2
+      start_date:
+        description: 'Start Date (YYYY-MM-DD)'
+        required: false
+      end_date:
+        description: 'End Date (YYYY-MM-DD)'
+        required: false
+      output_type:
+        description: 'Output Destination'
+        required: true
+        default: 'drive'
+        type: choice
+        options:
+        - drive
+        - sheets
+
+jobs:
+  sync:
+    runs-on: self-hosted
+    
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Seed Garmin Sessions (Fallback)
+      env:
+        USER1_SESSION: ${{ secrets.USER1_GARMIN_SESSION }}
+        USER2_SESSION: ${{ secrets.USER2_GARMIN_SESSION }}
+      run: |
+        $base = Join-Path $HOME ".garth"
+        if ($env:USER1_SESSION) {
+            $u1 = Join-Path $base "USER1"
+            if (-not (Test-Path $u1)) { New-Item -ItemType Directory -Path $u1 -Force }
+            $tokenFile = Join-Path $u1 "tokens.json"
+            if (-not (Test-Path $tokenFile)) { [System.IO.File]::WriteAllText($tokenFile, $env:USER1_SESSION) }
+        }
+        if ($env:USER2_SESSION) {
+            $u2 = Join-Path $base "USER2"
+            if (-not (Test-Path $u2)) { New-Item -ItemType Directory -Path $u2 -Force }
+            $tokenFile = Join-Path $u2 "tokens.json"
+            if (-not (Test-Path $tokenFile)) { [System.IO.File]::WriteAllText($tokenFile, $env:USER2_SESSION) }
+        }
+
+    - name: Run Sync Script
+      env:
+        USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+        USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+        USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        USER1_NAME: ${{ secrets.USER1_NAME }}
+        USER1_DOB: ${{ secrets.USER1_DOB }}
+        USER1_GENDER: ${{ secrets.USER1_GENDER }}
+        USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
+        USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
+        USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
+        USER2_NAME: ${{ secrets.USER2_NAME }}
+        USER2_DOB: ${{ secrets.USER2_DOB }}
+        USER2_GENDER: ${{ secrets.USER2_GENDER }}
+        GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
+        PYTHONUNBUFFERED: "1"
+        LOG_LEVEL: "DEBUG"
+      run: |
+        $startDate = "${{ inputs.start_date }}"
+        $endDate = "${{ inputs.end_date }}"
+        
+        # Default to the last 3 days if left blank
+        if ([string]::IsNullOrWhiteSpace($startDate)) {
+            $startDate = (Get-Date).AddDays(-3).ToString("yyyy-MM-dd")
+        }
+        if ([string]::IsNullOrWhiteSpace($endDate)) {
+            $endDate = (Get-Date).ToString("yyyy-MM-dd")
+        }
+        
+        python -m src.main cli-sync --start-date "$startDate" --end-date "$endDate" --profile "${{ inputs.profile }}" --output-type "${{ inputs.output_type }}"
