@@ -290,7 +290,7 @@ async def run_automated_sync():
         return
 
     today = get_uk_date()
-    yesterday = today - timedelta(days=2)
+    yesterday = today - timedelta(days=7)
     
     logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday} to {today}) ---")
 
