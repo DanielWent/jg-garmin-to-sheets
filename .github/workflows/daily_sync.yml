@@ -2,9 +2,16 @@ name: Daily Garmin Sync
 
 on:
   schedule:
+    # Weekdays: 7:30 AM UK time (06:30 UTC in BST, 07:30 UTC in GMT)
     - cron: '30 6,7 * * 1-5'
+    
+    # Weekdays: 7:00 PM UK time (18:00 UTC in BST, 19:00 UTC in GMT)
     - cron: '0 18,19 * * 1-5'
+    
+    # Weekends: 8:30 AM UK time (07:30 UTC in BST, 08:30 UTC in GMT)
     - cron: '30 7,8 * * 0,6'
+
+    # Weekends: 6:00 PM UK time (17:00 UTC in BST, 18:00 UTC in GMT)
     - cron: '0 17,18 * * 0,6'
   
   workflow_dispatch:
@@ -34,14 +41,12 @@ on:
 
 jobs:
   sync:
-    # UPDATED: Conditional logic for the runner
-    # If it's a schedule (automated), use GitHub's servers. 
-    # Otherwise (manual dispatch), use your laptop.
+    # Use GitHub servers for automated runs, and your laptop for manual triggers
     runs-on: ${{ github.event_name == 'schedule' && 'ubuntu-latest' || 'self-hosted' }}
     
     defaults:
       run:
-        # Ensures Windows uses Bash for Linux commands like openssl/tar
+        # Forces the use of Git Bash on Windows to bypass broken WSL/Ubuntu setups
         shell: bash
 
     steps:
@@ -49,20 +54,16 @@ jobs:
       id: dst-filter
       run: |
         if [ "${{ github.event_name }}" == "schedule" ]; then
-          UK_HOUR=$(TZ='Europe/London' date +%H)
-          UK_DAY=$(TZ='Europe/London' date +%u)
-          SHOULD_RUN=false
-          if [[ "$UK_DAY" -le 5 ]]; then
-            if [[ "$UK_HOUR" == "07" || "$UK_HOUR" == "19" ]]; then SHOULD_RUN=true; fi
-          else
-            if [[ "$UK_HOUR" == "08" || "$UK_HOUR" == "18" ]]; then SHOULD_RUN=true; fi
-          fi
-          if [ "$SHOULD_RUN" == "false" ]; then
-            echo "should_run=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          # On Windows runners, TZ handling can vary; we log the hour for debugging
+          UK_HOUR=$(date +%H)
+          echo "Triggered at UTC hour: $UK_HOUR"
+          
+          # In automated mode, we proceed; the Python script also handles logic
+          echo "should_run=true" >> $GITHUB_OUTPUT
+        else
+          echo "Manual trigger detected. Skipping DST filter."
+          echo "should_run=true" >> $GITHUB_OUTPUT
         fi
-        echo "should_run=true" >> $GITHUB_OUTPUT
 
     - name: Checkout code
       if: steps.dst-filter.outputs.should_run == 'true'
@@ -98,9 +99,9 @@ jobs:
           openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in ~/.garth_encrypted/sessions.tar.enc -out sessions.tar -k "$GARMIN_SESSION_KEY"
           mkdir -p ~/.garth
           tar -xf sessions.tar -C ~/.garth
-          echo "Session cache restored."
+          echo "Session cache securely restored and decrypted."
         else
-          echo "No cache found."
+          echo "No session key or encrypted cache found. Authenticating normally."
         fi
 
     - name: Seed Garmin Sessions (Fallback)
@@ -109,34 +110,44 @@ jobs:
         USER1_SESSION: ${{ secrets.USER1_GARMIN_SESSION }}
         USER2_SESSION: ${{ secrets.USER2_GARMIN_SESSION }}
       run: |
+        # Seed USER 1
         if [ -n "$USER1_SESSION" ]; then
           mkdir -p ~/.garth/USER1
           if [ ! -f ~/.garth/USER1/tokens.json ]; then
             echo "$USER1_SESSION" > ~/.garth/USER1/tokens.json
+            echo "Seeded USER1 session from secret."
           fi
         fi
+        
+        # Seed USER 2
         if [ -n "$USER2_SESSION" ]; then
           mkdir -p ~/.garth/USER2
           if [ ! -f ~/.garth/USER2/tokens.json ]; then
             echo "$USER2_SESSION" > ~/.garth/USER2/tokens.json
+            echo "Seeded USER2 session from secret."
           fi
         fi
 
     - name: Run Sync Script
       if: steps.dst-filter.outputs.should_run == 'true'
       env:
+        # === USER 1 SECRETS ===
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         USER1_NAME: ${{ secrets.USER1_NAME }}
         USER1_DOB: ${{ secrets.USER1_DOB }}
         USER1_GENDER: ${{ secrets.USER1_GENDER }}
+        
+        # === USER 2 SECRETS ===
         USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
         USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
         USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
         USER2_NAME: ${{ secrets.USER2_NAME }}
         USER2_DOB: ${{ secrets.USER2_DOB }}
         USER2_GENDER: ${{ secrets.USER2_GENDER }}
+        
+        # === SHARED CONFIG ===
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
         PYTHONUNBUFFERED: "1"
@@ -157,6 +168,7 @@ jobs:
           tar -cf sessions.tar -C ~/.garth .
           mkdir -p ~/.garth_encrypted
           openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out ~/.garth_encrypted/sessions.tar.enc -k "$GARMIN_SESSION_KEY"
+          echo "Session cache encrypted."
         fi
 
     - name: Save Garmin Sessions Cache
