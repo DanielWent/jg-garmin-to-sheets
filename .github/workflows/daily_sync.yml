@@ -39,8 +39,9 @@ jobs:
     
     defaults:
       run:
-        # Uses 'powershell' on your laptop and 'pwsh' on GitHub
-        shell: ${{ runner.os == 'Windows' && 'powershell' || 'pwsh' }}
+        # THE FIX: Uses 'pwsh' for scheduled runs in the cloud, 
+        # and 'powershell' for manual runs on your laptop.
+        shell: ${{ github.event_name == 'schedule' && 'pwsh' || 'powershell' }}
 
     steps:
     - name: Daylight Saving Time Filter
@@ -49,7 +50,7 @@ jobs:
         if ($env:GITHUB_EVENT_NAME -eq 'schedule') {
             $now = [DateTime]::UtcNow
             
-            # THE FIX: Linux and Windows use different names for the UK Timezone
+            # Linux and Windows use different names for the UK Timezone
             $tzId = if ($env:RUNNER_OS -eq 'Windows') { "GMT Standard Time" } else { "Europe/London" }
             
             try {
@@ -120,23 +121,17 @@ jobs:
         USER2_SESSION: ${{ secrets.USER2_GARMIN_SESSION }}
       run: |
         $base = Join-Path $HOME ".garth"
-        # Seed USER 1
         if ($env:USER1_SESSION) {
             $u1 = Join-Path $base "USER1"
             if (-not (Test-Path $u1)) { New-Item -ItemType Directory -Path $u1 -Force }
             $tokenFile = Join-Path $u1 "tokens.json"
-            if (-not (Test-Path $tokenFile)) {
-                [System.IO.File]::WriteAllText($tokenFile, $env:USER1_SESSION)
-            }
+            if (-not (Test-Path $tokenFile)) { [System.IO.File]::WriteAllText($tokenFile, $env:USER1_SESSION) }
         }
-        # Seed USER 2
         if ($env:USER2_SESSION) {
             $u2 = Join-Path $base "USER2"
             if (-not (Test-Path $u2)) { New-Item -ItemType Directory -Path $u2 -Force }
             $tokenFile = Join-Path $u2 "tokens.json"
-            if (-not (Test-Path $tokenFile)) {
-                [System.IO.File]::WriteAllText($tokenFile, $env:USER2_SESSION)
-            }
+            if (-not (Test-Path $tokenFile)) { [System.IO.File]::WriteAllText($tokenFile, $env:USER2_SESSION) }
         }
 
     - name: Run Sync Script
