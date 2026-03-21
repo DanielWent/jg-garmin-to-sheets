@@ -34,12 +34,12 @@ on:
 
 jobs:
   sync:
-    # Schedule runs on GitHub, manual runs on your laptop
+    # Schedule = GitHub Cloud (Ubuntu); Manual = Your Laptop
     runs-on: ${{ github.event_name == 'schedule' && 'ubuntu-latest' || 'self-hosted' }}
     
     defaults:
       run:
-        # THE DYNAMIC FIX: Uses 'powershell' on your laptop and 'pwsh' on GitHub
+        # Uses 'powershell' on your laptop and 'pwsh' on GitHub
         shell: ${{ runner.os == 'Windows' && 'powershell' || 'pwsh' }}
 
     steps:
@@ -48,22 +48,29 @@ jobs:
       run: |
         if ($env:GITHUB_EVENT_NAME -eq 'schedule') {
             $now = [DateTime]::UtcNow
-            # This works in both versions of PowerShell
-            $ukTime = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId($now, "GMT Standard Time")
-            $hour = $ukTime.Hour
-            $day = [int]$ukTime.DayOfWeek 
             
-            $shouldRun = $false
-            if ($day -ge 1 -and $day -le 5) {
-                if ($hour -eq 7 -or $hour -eq 19) { $shouldRun = $true }
-            } else {
-                if ($hour -eq 8 -or $hour -eq 18) { $shouldRun = $true }
-            }
+            # THE FIX: Linux and Windows use different names for the UK Timezone
+            $tzId = if ($env:RUNNER_OS -eq 'Windows') { "GMT Standard Time" } else { "Europe/London" }
             
-            if (-not $shouldRun) {
-                Write-Host "Current UK Hour: $hour. Skipping scheduled run."
-                Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=false"
-                exit 0
+            try {
+                $ukTime = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId($now, $tzId)
+                $hour = $ukTime.Hour
+                $day = [int]$ukTime.DayOfWeek 
+                
+                $shouldRun = $false
+                if ($day -ge 1 -and $day -le 5) {
+                    if ($hour -eq 7 -or $hour -eq 19) { $shouldRun = $true }
+                } else {
+                    if ($hour -eq 8 -or $hour -eq 18) { $shouldRun = $true }
+                }
+                
+                if (-not $shouldRun) {
+                    Write-Host "Current UK Hour: $hour. Skipping scheduled run."
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=false"
+                    exit 0
+                }
+            } catch {
+                Write-Host "TZ Conversion failed, proceeding anyway as fallback."
             }
         }
         Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=true"
