@@ -98,6 +98,10 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         )
         await garmin_client.authenticate()
     except Exception as e:
+        error_str = str(e).lower()
+        if "429" in error_str or "too many requests" in error_str:
+             print("\n🚨 429 RATE LIMIT DETECTED DURING LOGIN! Stopping immediately. 🚨\n")
+             sys.exit(1)
         logger.error(f"Authentication failed for {profile_name}: {e}")
         return
 
