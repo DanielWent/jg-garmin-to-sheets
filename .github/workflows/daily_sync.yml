@@ -2,16 +2,9 @@ name: Daily Garmin Sync
 
 on:
   schedule:
-    # Weekdays: 7:30 AM UK time (06:30 UTC in BST, 07:30 UTC in GMT)
     - cron: '30 6,7 * * 1-5'
-    
-    # Weekdays: 7:00 PM UK time (18:00 UTC in BST, 19:00 UTC in GMT)
     - cron: '0 18,19 * * 1-5'
-    
-    # Weekends: 8:30 AM UK time (07:30 UTC in BST, 08:30 UTC in GMT)
     - cron: '30 7,8 * * 0,6'
-
-    # Weekends: 6:00 PM UK time (17:00 UTC in BST, 18:00 UTC in GMT)
     - cron: '0 17,18 * * 0,6'
   
   workflow_dispatch:
@@ -41,35 +34,30 @@ on:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    # UPDATED: Conditional logic for the runner
+    # If it's a schedule (automated), use GitHub's servers. 
+    # Otherwise (manual dispatch), use your laptop.
+    runs-on: ${{ github.event_name == 'schedule' && 'ubuntu-latest' || 'self-hosted' }}
     
+    defaults:
+      run:
+        # Ensures Windows uses Bash for Linux commands like openssl/tar
+        shell: bash
+
     steps:
     - name: Daylight Saving Time Filter
       id: dst-filter
       run: |
-        # Only run this check for scheduled cron jobs, allowing manual dispatches to run anytime
         if [ "${{ github.event_name }}" == "schedule" ]; then
           UK_HOUR=$(TZ='Europe/London' date +%H)
-          UK_DAY=$(TZ='Europe/London' date +%u) # 1-7, where 1 is Monday
-          
+          UK_DAY=$(TZ='Europe/London' date +%u)
           SHOULD_RUN=false
-          
-          # Weekdays (Monday to Friday)
           if [[ "$UK_DAY" -le 5 ]]; then
-            # Target times: 07:30 and 19:00
-            if [[ "$UK_HOUR" == "07" || "$UK_HOUR" == "19" ]]; then
-              SHOULD_RUN=true
-            fi
-          # Weekends (Saturday and Sunday)
+            if [[ "$UK_HOUR" == "07" || "$UK_HOUR" == "19" ]]; then SHOULD_RUN=true; fi
           else
-            # Target times: 08:30 and 18:00
-            if [[ "$UK_HOUR" == "08" || "$UK_HOUR" == "18" ]]; then
-              SHOULD_RUN=true
-            fi
+            if [[ "$UK_HOUR" == "08" || "$UK_HOUR" == "18" ]]; then SHOULD_RUN=true; fi
           fi
-          
           if [ "$SHOULD_RUN" == "false" ]; then
-            echo "Current UK time is $UK_HOUR:$(TZ='Europe/London' date +%M) on day $UK_DAY. Exiting early to prevent redundant execution."
             echo "should_run=false" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -110,9 +98,9 @@ jobs:
           openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in ~/.garth_encrypted/sessions.tar.enc -out sessions.tar -k "$GARMIN_SESSION_KEY"
           mkdir -p ~/.garth
           tar -xf sessions.tar -C ~/.garth
-          echo "Session cache securely restored and decrypted."
+          echo "Session cache restored."
         else
-          echo "No session key or encrypted cache found. Will authenticate normally."
+          echo "No cache found."
         fi
 
     - name: Seed Garmin Sessions (Fallback)
@@ -121,62 +109,42 @@ jobs:
         USER1_SESSION: ${{ secrets.USER1_GARMIN_SESSION }}
         USER2_SESSION: ${{ secrets.USER2_GARMIN_SESSION }}
       run: |
-        # Seed USER 1
         if [ -n "$USER1_SESSION" ]; then
           mkdir -p ~/.garth/USER1
-          # Only write if it doesn't exist (i.e., cache wasn't restored)
           if [ ! -f ~/.garth/USER1/tokens.json ]; then
             echo "$USER1_SESSION" > ~/.garth/USER1/tokens.json
-            echo "Seeded USER1 session from secret."
           fi
         fi
-        
-        # Seed USER 2
         if [ -n "$USER2_SESSION" ]; then
           mkdir -p ~/.garth/USER2
           if [ ! -f ~/.garth/USER2/tokens.json ]; then
             echo "$USER2_SESSION" > ~/.garth/USER2/tokens.json
-            echo "Seeded USER2 session from secret."
           fi
         fi
 
-    - name: Run Sync Script with Logging
+    - name: Run Sync Script
       if: steps.dst-filter.outputs.should_run == 'true'
       env:
-        # === USER 1 SECRETS ===
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
-        USER1_SHEET_ID: ${{ secrets.SHEET_ID }}
         USER1_NAME: ${{ secrets.USER1_NAME }}
         USER1_DOB: ${{ secrets.USER1_DOB }}
         USER1_GENDER: ${{ secrets.USER1_GENDER }}
-        
-        # === USER 2 SECRETS ===
         USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
         USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
         USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
-        USER2_SHEET_ID: ${{ secrets.USER2_SHEET_ID }}
         USER2_NAME: ${{ secrets.USER2_NAME }}
         USER2_DOB: ${{ secrets.USER2_DOB }}
         USER2_GENDER: ${{ secrets.USER2_GENDER }}
-        
-        # === SHARED CONFIG ===
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "DEBUG"
       run: |
-        # Check if manual inputs were provided
         if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
-          echo "🛠️ DEBUG MODE: Running manual sync for ${{ inputs.profile }} from ${{ inputs.start_date }} to ${{ inputs.end_date }}..."
-          
-          OUTPUT_TYPE="${{ inputs.output_type }}"
-          if [ -z "$OUTPUT_TYPE" ]; then OUTPUT_TYPE="drive"; fi
-          
-          python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile ${{ inputs.profile }} --output-type $OUTPUT_TYPE 2>&1 | tee sync_debug.log
+          python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile ${{ inputs.profile }} --output-type ${{ inputs.output_type }} 2>&1 | tee sync_debug.log
         else
-          echo "🔄 AUTOMATED MODE: Running standard daily sync for ALL configured users..."
           python -m src.main 2>&1 | tee sync_debug.log
         fi
 
@@ -189,7 +157,6 @@ jobs:
           tar -cf sessions.tar -C ~/.garth .
           mkdir -p ~/.garth_encrypted
           openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out ~/.garth_encrypted/sessions.tar.enc -k "$GARMIN_SESSION_KEY"
-          echo "Session cache successfully encrypted for saving."
         fi
 
     - name: Save Garmin Sessions Cache
