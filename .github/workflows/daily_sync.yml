@@ -34,24 +34,24 @@ on:
 
 jobs:
   sync:
-    # Use GitHub servers for automated runs, and your laptop for manual triggers
+    # Schedule runs on GitHub, manual runs on your laptop
     runs-on: ${{ github.event_name == 'schedule' && 'ubuntu-latest' || 'self-hosted' }}
     
     defaults:
       run:
-        # THE FIX: This tells both Windows and Linux to use PowerShell, bypassing WSL entirely
-        shell: pwsh
+        # THE DYNAMIC FIX: Uses 'powershell' on your laptop and 'pwsh' on GitHub
+        shell: ${{ runner.os == 'Windows' && 'powershell' || 'pwsh' }}
 
     steps:
     - name: Daylight Saving Time Filter
       id: dst-filter
       run: |
         if ($env:GITHUB_EVENT_NAME -eq 'schedule') {
-            # Robust UK Time check for PowerShell
             $now = [DateTime]::UtcNow
+            # This works in both versions of PowerShell
             $ukTime = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId($now, "GMT Standard Time")
             $hour = $ukTime.Hour
-            $day = [int]$ukTime.DayOfWeek # 1=Mon, 5=Fri, 6=Sat, 0=Sun
+            $day = [int]$ukTime.DayOfWeek 
             
             $shouldRun = $false
             if ($day -ge 1 -and $day -le 5) {
@@ -62,11 +62,11 @@ jobs:
             
             if (-not $shouldRun) {
                 Write-Host "Current UK Hour: $hour. Skipping scheduled run."
-                "should_run=false" >> $env:GITHUB_OUTPUT
+                Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=false"
                 exit 0
             }
         }
-        "should_run=true" >> $env:GITHUB_OUTPUT
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=true"
 
     - name: Checkout code
       if: steps.dst-filter.outputs.should_run == 'true'
@@ -103,9 +103,7 @@ jobs:
             $garthDir = Join-Path $HOME ".garth"
             if (-not (Test-Path $garthDir)) { New-Item -ItemType Directory -Path $garthDir -Force }
             tar -xf sessions.tar -C $garthDir
-            Write-Host "Session cache restored and decrypted."
-        } else {
-            Write-Host "No session key or encrypted cache found."
+            Write-Host "Session cache restored."
         }
 
     - name: Seed Garmin Sessions (Fallback)
@@ -121,8 +119,7 @@ jobs:
             if (-not (Test-Path $u1)) { New-Item -ItemType Directory -Path $u1 -Force }
             $tokenFile = Join-Path $u1 "tokens.json"
             if (-not (Test-Path $tokenFile)) {
-                $env:USER1_SESSION | Out-File -FilePath $tokenFile -NoNewline
-                Write-Host "Seeded USER1."
+                [System.IO.File]::WriteAllText($tokenFile, $env:USER1_SESSION)
             }
         }
         # Seed USER 2
@@ -131,8 +128,7 @@ jobs:
             if (-not (Test-Path $u2)) { New-Item -ItemType Directory -Path $u2 -Force }
             $tokenFile = Join-Path $u2 "tokens.json"
             if (-not (Test-Path $tokenFile)) {
-                $env:USER2_SESSION | Out-File -FilePath $tokenFile -NoNewline
-                Write-Host "Seeded USER2."
+                [System.IO.File]::WriteAllText($tokenFile, $env:USER2_SESSION)
             }
         }
 
@@ -174,7 +170,6 @@ jobs:
             if (-not (Test-Path $encDir)) { New-Item -ItemType Directory -Path $encDir -Force }
             $encFile = Join-Path $encDir "sessions.tar.enc"
             openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out $encFile -k $env:GARMIN_SESSION_KEY
-            Write-Host "Session cache encrypted."
         }
 
     - name: Save Garmin Sessions Cache
