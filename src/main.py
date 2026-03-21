@@ -327,25 +327,55 @@ async def run_automated_sync():
 def cli_sync(
     start_date: datetime = typer.Option(..., help="Start date YYYY-MM-DD."),
     end_date: datetime = typer.Option(..., help="End date YYYY-MM-DD."),
-    profile: str = typer.Option("USER1", help="Profile from .env."),
+    profile: str = typer.Option("ALL", help="Profile from .env (e.g., USER1, USER2, ALL)."),
     output_type: str = typer.Option("drive", help="'drive' or 'csv'.")
 ):
     user_profiles = load_user_profiles()
-    selected_profile_data = user_profiles.get(profile)
 
-    if not selected_profile_data:
-        logger.error(f"Profile '{profile}' not found.")
-        sys.exit(1)
+    if profile.upper() == "ALL":
+        logger.info(f"--- Starting CLI Sync for ALL Profiles ({start_date.date()} to {end_date.date()}) ---")
+        
+        async def run_all():
+            profiles_list = list(user_profiles.items())
+            for index, (p_name, p_data) in enumerate(profiles_list):
+                logger.info(f"Processing {p_name}...")
+                try:
+                    await sync(
+                        email=p_data.get('email'),
+                        password=p_data.get('password'),
+                        start_date=start_date.date(),
+                        end_date=end_date.date(),
+                        output_type=output_type,
+                        profile_data=p_data,
+                        profile_name=p_name
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to sync {p_name}: {e}")
+                    
+                # If this is NOT the last profile in the list, trigger the delay
+                if index < len(profiles_list) - 1:
+                    delay = random.randint(45, 90)
+                    logger.info(f"Sleeping for {delay} seconds before processing the next profile to avoid security triggers...")
+                    await asyncio.sleep(delay)
+                    
+        asyncio.run(run_all())
 
-    asyncio.run(sync(
-        email=selected_profile_data.get('email'),
-        password=selected_profile_data.get('password'),
-        start_date=start_date.date(),
-        end_date=end_date.date(),
-        output_type=output_type,
-        profile_data=selected_profile_data,
-        profile_name=profile
-    ))
+    else:
+        selected_profile_data = user_profiles.get(profile)
+
+        if not selected_profile_data:
+            logger.error(f"Profile '{profile}' not found.")
+            sys.exit(1)
+
+        asyncio.run(sync(
+            email=selected_profile_data.get('email'),
+            password=selected_profile_data.get('password'),
+            start_date=start_date.date(),
+            end_date=end_date.date(),
+            output_type=output_type,
+            profile_data=selected_profile_data,
+            profile_name=profile
+        ))
 
 @app.command(name="automated")
 def automated_sync_cmd():
