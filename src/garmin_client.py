@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional, List
 import asyncio
 import logging
 import json
+import sys  # <-- ADDED for the kill switch
 import garminconnect
 import garth
 from pathlib import Path
@@ -12,6 +13,30 @@ from statistics import mean
 from functools import partial
 
 logger = logging.getLogger(__name__)
+
+# --- NEW: Kill Switch Helper ---
+def _check_for_429(e):
+    """Helper to instantly kill the script if a 429 Too Many Requests is detected."""
+    error_str = str(e).lower()
+    if "429" in error_str or "too many requests" in error_str:
+        print("\n" + "="*60)
+        print("🚨 RATE LIMIT (429) DETECTED! 🚨")
+        print("Stopping script immediately to prevent extending the ban.")
+        
+        # Attempt to extract response headers if garminconnect exposes them
+        response = getattr(e, 'response', getattr(getattr(e, '__cause__', None), 'response', None))
+        
+        if response is not None:
+            print("\n=== RATE LIMIT HEADERS ===")
+            print(f"Retry-After: {response.headers.get('Retry-After', 'Not provided')}")
+            print(f"X-RateLimit-Reset: {response.headers.get('X-RateLimit-Reset', 'Not provided')}")
+            print(f"All Headers: {dict(response.headers)}")
+        else:
+            print("\n(Could not automatically extract headers from the error object.)")
+            print("Default to waiting 24 hours to be safe.")
+        print("="*60 + "\n")
+        sys.exit(1)
+# -------------------------------
 
 # Full 21-point percentile scale provided by the ACSM guidelines
 PERCENTILES = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 99]
@@ -129,6 +154,7 @@ class GarminClient:
                 await self._fetch_user_profile_info()
                 return
             except Exception as e:
+                _check_for_429(e) # Kill switch check
                 logger.warning(f"Failed to resume session for {self.profile_name}: {e}")
 
         try:
@@ -158,14 +184,13 @@ class GarminClient:
                     raise MFARequiredException(message="MFA code is required.", mfa_data=self.mfa_ticket_dict)
             raise
         except Exception as e:
+            _check_for_429(e) # Kill switch check
             logger.error(f"Authentication error: {str(e)}")
             raise garminconnect.GarminConnectAuthenticationError(f"Authentication error: {str(e)}") from e
 
     async def _fetch_user_profile_info(self):
         loop = asyncio.get_event_loop()
         
-        # FIX: Explicitly fetch and force-inject the Garmin display_name if missing.
-        # This completely bypasses the garminconnect library bug and parses the raw JSON.
         if not getattr(self.client, "display_name", None):
             try:
                 logger.info(f"[{self.profile_name}] Display name missing from session. Manually fetching from Garmin API...")
@@ -174,6 +199,7 @@ class GarminClient:
                     self.client.display_name = sp["displayName"]
                     logger.info(f"[{self.profile_name}] Successfully locked in display name: {self.client.display_name}")
             except Exception as e:
+                _check_for_429(e) # Kill switch check
                 logger.debug(f"[{self.profile_name}] Could not force-fetch display name: {e}")
 
         if self.manual_name:
@@ -209,6 +235,7 @@ class GarminClient:
                         self.user_age = round((today - dob).days / 365.25, 1)
                     
         except Exception as e:
+            _check_for_429(e) # Kill switch check
             logger.warning(f"Error in _fetch_user_profile_info (fallback): {e}")
 
     async def _fetch_hrv_data(self, target_date_iso: str) -> Optional[Dict[str, Any]]:
@@ -217,6 +244,7 @@ class GarminClient:
                 None, self.client.get_hrv_data, target_date_iso
             )
         except Exception as e:
+            _check_for_429(e) # Kill switch check
             logger.debug(f"Error fetching HRV data: {str(e)}")
             return None
 
@@ -311,6 +339,7 @@ class GarminClient:
                 await asyncio.sleep(0.5)
                 return await coro
             except Exception as e:
+                _check_for_429(e) # Kill switch check
                 logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
                 return None
 
@@ -319,6 +348,7 @@ class GarminClient:
                 await asyncio.sleep(0.5)
                 return await asyncio.get_event_loop().run_in_executor(None, self.client.connectapi, endpoint)
             except Exception as e:
+                _check_for_429(e) # Kill switch check
                 logger.debug(f"Direct fetch for {name} failed: {e}")
                 return None
 
