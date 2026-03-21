@@ -34,13 +34,10 @@ on:
 
 jobs:
   sync:
-    # Schedule = GitHub Cloud (Ubuntu); Manual = Your Laptop
     runs-on: ${{ github.event_name == 'schedule' && 'ubuntu-latest' || 'self-hosted' }}
     
     defaults:
       run:
-        # THE FIX: Uses 'pwsh' for scheduled runs in the cloud, 
-        # and 'powershell' for manual runs on your laptop.
         shell: ${{ github.event_name == 'schedule' && 'pwsh' || 'powershell' }}
 
     steps:
@@ -49,8 +46,6 @@ jobs:
       run: |
         if ($env:GITHUB_EVENT_NAME -eq 'schedule') {
             $now = [DateTime]::UtcNow
-            
-            # Linux and Windows use different names for the UK Timezone
             $tzId = if ($env:RUNNER_OS -eq 'Windows') { "GMT Standard Time" } else { "Europe/London" }
             
             try {
@@ -91,8 +86,9 @@ jobs:
       run: |
         pip install -r requirements.txt
 
+    # THE FIX: Only run cache/crypto steps on GitHub's scheduled cloud runs
     - name: Restore Garmin Sessions Cache
-      if: steps.dst-filter.outputs.should_run == 'true'
+      if: steps.dst-filter.outputs.should_run == 'true' && github.event_name == 'schedule'
       uses: actions/cache/restore@v4
       with:
         path: ~/.garth_encrypted
@@ -101,7 +97,7 @@ jobs:
           garmin-sessions-
 
     - name: Decrypt Garmin Sessions
-      if: steps.dst-filter.outputs.should_run == 'true'
+      if: steps.dst-filter.outputs.should_run == 'true' && github.event_name == 'schedule'
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
@@ -161,7 +157,7 @@ jobs:
         }
 
     - name: Encrypt Garmin Sessions
-      if: always() && steps.dst-filter.outputs.should_run == 'true'
+      if: always() && steps.dst-filter.outputs.should_run == 'true' && github.event_name == 'schedule'
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
@@ -175,7 +171,7 @@ jobs:
         }
 
     - name: Save Garmin Sessions Cache
-      if: always() && steps.dst-filter.outputs.should_run == 'true'
+      if: always() && steps.dst-filter.outputs.should_run == 'true' && github.event_name == 'schedule'
       uses: actions/cache/save@v4
       with:
         path: ~/.garth_encrypted
