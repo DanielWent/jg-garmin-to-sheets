@@ -2,16 +2,9 @@ name: Daily Garmin Sync
 
 on:
   schedule:
-    # Weekdays: 7:30 AM UK time (06:30 UTC in BST, 07:30 UTC in GMT)
     - cron: '30 6,7 * * 1-5'
-    
-    # Weekdays: 7:00 PM UK time (18:00 UTC in BST, 19:00 UTC in GMT)
     - cron: '0 18,19 * * 1-5'
-    
-    # Weekends: 8:30 AM UK time (07:30 UTC in BST, 08:30 UTC in GMT)
     - cron: '30 7,8 * * 0,6'
-
-    # Weekends: 6:00 PM UK time (17:00 UTC in BST, 18:00 UTC in GMT)
     - cron: '0 17,18 * * 0,6'
   
   workflow_dispatch:
@@ -46,24 +39,34 @@ jobs:
     
     defaults:
       run:
-        # Forces the use of Git Bash on Windows to bypass broken WSL/Ubuntu setups
-        shell: bash
+        # THE FIX: This tells both Windows and Linux to use PowerShell, bypassing WSL entirely
+        shell: pwsh
 
     steps:
     - name: Daylight Saving Time Filter
       id: dst-filter
       run: |
-        if [ "${{ github.event_name }}" == "schedule" ]; then
-          # On Windows runners, TZ handling can vary; we log the hour for debugging
-          UK_HOUR=$(date +%H)
-          echo "Triggered at UTC hour: $UK_HOUR"
-          
-          # In automated mode, we proceed; the Python script also handles logic
-          echo "should_run=true" >> $GITHUB_OUTPUT
-        else
-          echo "Manual trigger detected. Skipping DST filter."
-          echo "should_run=true" >> $GITHUB_OUTPUT
-        fi
+        if ($env:GITHUB_EVENT_NAME -eq 'schedule') {
+            # Robust UK Time check for PowerShell
+            $now = [DateTime]::UtcNow
+            $ukTime = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId($now, "GMT Standard Time")
+            $hour = $ukTime.Hour
+            $day = [int]$ukTime.DayOfWeek # 1=Mon, 5=Fri, 6=Sat, 0=Sun
+            
+            $shouldRun = $false
+            if ($day -ge 1 -and $day -le 5) {
+                if ($hour -eq 7 -or $hour -eq 19) { $shouldRun = $true }
+            } else {
+                if ($hour -eq 8 -or $hour -eq 18) { $shouldRun = $true }
+            }
+            
+            if (-not $shouldRun) {
+                Write-Host "Current UK Hour: $hour. Skipping scheduled run."
+                "should_run=false" >> $env:GITHUB_OUTPUT
+                exit 0
+            }
+        }
+        "should_run=true" >> $env:GITHUB_OUTPUT
 
     - name: Checkout code
       if: steps.dst-filter.outputs.should_run == 'true'
@@ -82,7 +85,6 @@ jobs:
 
     - name: Restore Garmin Sessions Cache
       if: steps.dst-filter.outputs.should_run == 'true'
-      id: cache-sessions
       uses: actions/cache/restore@v4
       with:
         path: ~/.garth_encrypted
@@ -95,14 +97,16 @@ jobs:
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
-        if [ -n "$GARMIN_SESSION_KEY" ] && [ -f ~/.garth_encrypted/sessions.tar.enc ]; then
-          openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in ~/.garth_encrypted/sessions.tar.enc -out sessions.tar -k "$GARMIN_SESSION_KEY"
-          mkdir -p ~/.garth
-          tar -xf sessions.tar -C ~/.garth
-          echo "Session cache securely restored and decrypted."
-        else
-          echo "No session key or encrypted cache found. Authenticating normally."
-        fi
+        $encPath = Join-Path $HOME ".garth_encrypted/sessions.tar.enc"
+        if ($env:GARMIN_SESSION_KEY -and (Test-Path $encPath)) {
+            openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in $encPath -out sessions.tar -k $env:GARMIN_SESSION_KEY
+            $garthDir = Join-Path $HOME ".garth"
+            if (-not (Test-Path $garthDir)) { New-Item -ItemType Directory -Path $garthDir -Force }
+            tar -xf sessions.tar -C $garthDir
+            Write-Host "Session cache restored and decrypted."
+        } else {
+            Write-Host "No session key or encrypted cache found."
+        }
 
     - name: Seed Garmin Sessions (Fallback)
       if: steps.dst-filter.outputs.should_run == 'true'
@@ -110,66 +114,68 @@ jobs:
         USER1_SESSION: ${{ secrets.USER1_GARMIN_SESSION }}
         USER2_SESSION: ${{ secrets.USER2_GARMIN_SESSION }}
       run: |
+        $base = Join-Path $HOME ".garth"
         # Seed USER 1
-        if [ -n "$USER1_SESSION" ]; then
-          mkdir -p ~/.garth/USER1
-          if [ ! -f ~/.garth/USER1/tokens.json ]; then
-            echo "$USER1_SESSION" > ~/.garth/USER1/tokens.json
-            echo "Seeded USER1 session from secret."
-          fi
-        fi
-        
+        if ($env:USER1_SESSION) {
+            $u1 = Join-Path $base "USER1"
+            if (-not (Test-Path $u1)) { New-Item -ItemType Directory -Path $u1 -Force }
+            $tokenFile = Join-Path $u1 "tokens.json"
+            if (-not (Test-Path $tokenFile)) {
+                $env:USER1_SESSION | Out-File -FilePath $tokenFile -NoNewline
+                Write-Host "Seeded USER1."
+            }
+        }
         # Seed USER 2
-        if [ -n "$USER2_SESSION" ]; then
-          mkdir -p ~/.garth/USER2
-          if [ ! -f ~/.garth/USER2/tokens.json ]; then
-            echo "$USER2_SESSION" > ~/.garth/USER2/tokens.json
-            echo "Seeded USER2 session from secret."
-          fi
-        fi
+        if ($env:USER2_SESSION) {
+            $u2 = Join-Path $base "USER2"
+            if (-not (Test-Path $u2)) { New-Item -ItemType Directory -Path $u2 -Force }
+            $tokenFile = Join-Path $u2 "tokens.json"
+            if (-not (Test-Path $tokenFile)) {
+                $env:USER2_SESSION | Out-File -FilePath $tokenFile -NoNewline
+                Write-Host "Seeded USER2."
+            }
+        }
 
     - name: Run Sync Script
       if: steps.dst-filter.outputs.should_run == 'true'
       env:
-        # === USER 1 SECRETS ===
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
         USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         USER1_NAME: ${{ secrets.USER1_NAME }}
         USER1_DOB: ${{ secrets.USER1_DOB }}
         USER1_GENDER: ${{ secrets.USER1_GENDER }}
-        
-        # === USER 2 SECRETS ===
         USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
         USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
         USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
         USER2_NAME: ${{ secrets.USER2_NAME }}
         USER2_DOB: ${{ secrets.USER2_DOB }}
         USER2_GENDER: ${{ secrets.USER2_GENDER }}
-        
-        # === SHARED CONFIG ===
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "DEBUG"
       run: |
-        if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
-          python -m src.main cli-sync --start-date ${{ inputs.start_date }} --end-date ${{ inputs.end_date }} --profile ${{ inputs.profile }} --output-type ${{ inputs.output_type }} 2>&1 | tee sync_debug.log
-        else
-          python -m src.main 2>&1 | tee sync_debug.log
-        fi
+        if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            python -m src.main cli-sync --start-date "${{ inputs.start_date }}" --end-date "${{ inputs.end_date }}" --profile "${{ inputs.profile }}" --output-type "${{ inputs.output_type }}"
+        } else {
+            python -m src.main
+        }
 
     - name: Encrypt Garmin Sessions
       if: always() && steps.dst-filter.outputs.should_run == 'true'
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
-        if [ -n "$GARMIN_SESSION_KEY" ] && [ -d ~/.garth ]; then
-          tar -cf sessions.tar -C ~/.garth .
-          mkdir -p ~/.garth_encrypted
-          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out ~/.garth_encrypted/sessions.tar.enc -k "$GARMIN_SESSION_KEY"
-          echo "Session cache encrypted."
-        fi
+        $garthDir = Join-Path $HOME ".garth"
+        if ($env:GARMIN_SESSION_KEY -and (Test-Path $garthDir)) {
+            tar -cf sessions.tar -C $garthDir .
+            $encDir = Join-Path $HOME ".garth_encrypted"
+            if (-not (Test-Path $encDir)) { New-Item -ItemType Directory -Path $encDir -Force }
+            $encFile = Join-Path $encDir "sessions.tar.enc"
+            openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out $encFile -k $env:GARMIN_SESSION_KEY
+            Write-Host "Session cache encrypted."
+        }
 
     - name: Save Garmin Sessions Cache
       if: always() && steps.dst-filter.outputs.should_run == 'true'
@@ -177,11 +183,3 @@ jobs:
       with:
         path: ~/.garth_encrypted
         key: garmin-sessions-${{ github.run_id }}
-
-    - name: Upload Debug Log
-      if: always() && steps.dst-filter.outputs.should_run == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: garmin-debug-log
-        path: sync_debug.log
-        retention-days: 5
