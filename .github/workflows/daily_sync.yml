@@ -12,9 +12,10 @@ on:
       profile:
         description: 'Select User Profile'
         required: true
-        default: 'USER1'
+        default: 'ALL'
         type: choice
         options:
+        - ALL
         - USER1
         - USER2
       start_date:
