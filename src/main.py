@@ -107,7 +107,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
              print("\n🚨 429 RATE LIMIT DETECTED DURING LOGIN! Stopping immediately. 🚨\n")
              sys.exit(1)
         logger.error(f"Authentication failed for {profile_name}: {e}")
-        return
+        raise Exception(f"Authentication failed for {profile_name}") from e
 
     logger.info(f"[{profile_name}] Fetching metrics from {start_date.isoformat()} to {end_date.isoformat()} (Mode: {data_type})...")
     metrics_to_write = []
@@ -171,7 +171,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         folder_id = profile_data.get('drive_folder_id')
         if not folder_id:
             logger.error(f"DRIVE_FOLDER_ID not set for {profile_name}.")
-            return
+            raise ValueError(f"DRIVE_FOLDER_ID not set for {profile_name}.")
 
         ensure_credentials_file_exists()
         
@@ -184,7 +184,8 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             logger.info(f"[{profile_name}] Google Drive CSV sync completed successfully!")
         except Exception as e:
             logger.error(f"[{profile_name}] Drive Sync Failed: {e}", exc_info=True)
-            return
+            # UPDATE 2: Explicitly raise the error instead of returning silently
+            raise Exception(f"Google Drive sync failed for {profile_name}") from e
 
     # === LOCAL CSV SYNC ===
     elif output_type == 'csv':
@@ -306,7 +307,7 @@ async def run_automated_sync():
     user_profiles = load_user_profiles()
     if not user_profiles:
         logger.error("No user profiles found in environment variables.")
-        return
+        sys.exit(1) # Fail loudly if missing env vars
 
     data_type = os.getenv("SYNC_DATA_TYPE", "both")
     
@@ -325,8 +326,10 @@ async def run_automated_sync():
     
     logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {start_target} to {end_target} | Mode: {data_type}) ---")
 
-    # Convert to a list so we can track our index and avoid sleeping after the final user
     profiles_list = list(user_profiles.items())
+    
+    # UPDATE 1: Track if any single profile fails during the loop
+    has_errors = False
     
     for index, (profile_name, profile_data) in enumerate(profiles_list):
         logger.info(f"Processing {profile_name}...")
@@ -343,13 +346,18 @@ async def run_automated_sync():
             )
         except Exception as e:
             logger.error(f"Failed to sync {profile_name}: {e}")
+            has_errors = True # Flag the error but allow the loop to continue for the next user
             
         # If this is NOT the last profile in the list, trigger the delay
         if index < len(profiles_list) - 1:
-            # Generate a random delay between 45 and 90 seconds
             delay = random.randint(45, 90)
             logger.info(f"Sleeping for {delay} seconds before processing the next profile to avoid security triggers...")
             await asyncio.sleep(delay)
+
+    # UPDATE 1 (continued): Exit with an error code if ANY profile failed
+    if has_errors:
+        logger.error("One or more profiles failed to sync successfully. Exiting with error code 1.")
+        sys.exit(1)
 
 @app.command(name="cli-sync")
 def cli_sync(
@@ -366,6 +374,7 @@ def cli_sync(
         
         async def run_all():
             profiles_list = list(user_profiles.items())
+            has_errors = False # Added tracking here as well for consistency
             for index, (p_name, p_data) in enumerate(profiles_list):
                 logger.info(f"Processing {p_name}...")
                 try:
@@ -381,12 +390,16 @@ def cli_sync(
                     )
                 except Exception as e:
                     logger.error(f"Failed to sync {p_name}: {e}")
+                    has_errors = True
                     
-                # If this is NOT the last profile in the list, trigger the delay
                 if index < len(profiles_list) - 1:
                     delay = random.randint(45, 90)
                     logger.info(f"Sleeping for {delay} seconds before processing the next profile to avoid security triggers...")
                     await asyncio.sleep(delay)
+                    
+            if has_errors:
+                logger.error("One or more profiles failed during CLI sync. Exiting with error code 1.")
+                sys.exit(1)
                     
         asyncio.run(run_all())
 
