@@ -90,7 +90,10 @@ jobs:
     - name: Route Traffic through Raspberry Pi
       if: steps.dst-filter.outputs.should_run == 'true'
       continue-on-error: true
-      run: sudo tailscale up --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes
+      run: |
+        echo "Waiting for Tailscale network map to synchronize..."
+        sleep 5
+        sudo tailscale set --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes
 
     - name: Restore Garmin Sessions Cache
       if: steps.dst-filter.outputs.should_run == 'true'
