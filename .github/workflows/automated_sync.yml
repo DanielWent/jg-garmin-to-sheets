@@ -2,10 +2,11 @@ name: Automated Garmin Sync
 
 on:
   schedule:
-    - cron: '30 6,7 * * 1-5'
-    - cron: '0 18,19 * * 1-5'
-    - cron: '30 7,8 * * 0,6'
-    - cron: '0 17,18 * * 0,6'
+    # Top of the hour triggers (UTC). Covers 03:00, 10:00, 13:00, 16:00, 19:00 UK time across both GMT and BST.
+    - cron: '0 2,3,9,10,12,13,15,16,18,19 * * *'
+    # Half-past the hour triggers (UTC). Covers 08:30 UK time across both GMT and BST.
+    - cron: '30 7,8 * * *'
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -16,7 +17,7 @@ jobs:
         shell: pwsh
 
     steps:
-    - name: Daylight Saving Time Filter
+    - name: UK Time & Data Type Filter
       id: dst-filter
       run: |
         $now = [DateTime]::UtcNow
@@ -24,25 +25,47 @@ jobs:
         
         try {
             $ukTime = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId($now, $tzId)
-            $hour = $ukTime.Hour
-            $day = [int]$ukTime.DayOfWeek 
-            
-            $shouldRun = $false
-            if ($day -ge 1 -and $day -le 5) {
-                if ($hour -eq 7 -or $hour -eq 19) { $shouldRun = $true }
-            } else {
-                if ($hour -eq 8 -or $hour -eq 18) { $shouldRun = $true }
-            }
-            
-            if (-not $shouldRun) {
-                Write-Host "Current UK Hour: $hour. Skipping scheduled run."
-                Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=false"
-                exit 0
-            }
         } catch {
-            Write-Host "TZ Conversion failed, proceeding anyway as fallback."
+            Write-Host "TZ Conversion failed, falling back to UTC."
+            $ukTime = $now
         }
+        
+        $hour = $ukTime.Hour
+        $minute = $ukTime.Minute
+        
+        $shouldRun = $false
+        $dataType = "both"
+        
+        # Check times with a 15-minute grace period to account for GitHub Actions cron queue delays
+        if ($hour -eq 3 -and $minute -lt 15) {
+            $shouldRun = $true
+            $dataType = "both"
+        } elseif ($hour -eq 8 -and $minute -ge 30 -and $minute -lt 45) {
+            $shouldRun = $true
+            $dataType = "summary"
+        } elseif ($hour -eq 10 -and $minute -lt 15) {
+            $shouldRun = $true
+            $dataType = "activities"
+        } elseif ($hour -eq 13 -and $minute -lt 15) {
+            $shouldRun = $true
+            $dataType = "activities"
+        } elseif ($hour -eq 16 -and $minute -lt 15) {
+            $shouldRun = $true
+            $dataType = "activities"
+        } elseif ($hour -eq 19 -and $minute -lt 15) {
+            $shouldRun = $true
+            $dataType = "both"
+        }
+        
+        if (-not $shouldRun) {
+            Write-Host "Current UK Time ($($ukTime.ToString('HH:mm'))) is not a scheduled run time. Skipping execution."
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=false"
+            exit 0
+        }
+        
+        Write-Host "Current UK Time matches schedule ($($ukTime.ToString('HH:mm'))). Setting Mode: $dataType."
         Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=true"
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "sync_data_type=$dataType"
 
     - name: Checkout code
       if: steps.dst-filter.outputs.should_run == 'true'
@@ -119,7 +142,8 @@ jobs:
         USER2_GENDER: ${{ secrets.USER2_GENDER }}
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
-        SYNC_DATA_TYPE: "both"
+        # Pass the dynamically calculated data_type to the python script
+        SYNC_DATA_TYPE: ${{ steps.dst-filter.outputs.sync_data_type }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "INFO"
       run: |
