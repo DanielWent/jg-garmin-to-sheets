@@ -46,10 +46,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
@@ -68,7 +68,7 @@ jobs:
       run: |
         echo "Waiting for Tailscale network map to synchronize..."
         sleep 5
-        sudo tailscale set --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes
+        sudo tailscale set --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes --accept-dns=false
 
     - name: Seed Garmin Sessions (Fallback)
       env:
@@ -131,10 +131,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
