@@ -82,7 +82,7 @@ def calculate_age(dob_str: Optional[str], target_date: date) -> Optional[float]:
         logger.warning(f"Invalid DOB format: {dob_str}")
         return None
 
-async def sync(email: str, password: str, start_date: date, end_date: date, output_type: str, profile_data: dict, profile_name: str = ""):
+async def sync(email: str, password: str, start_date: date, end_date: date, output_type: str, profile_data: dict, profile_name: str = "", data_type: str = "both"):
     manual_name = profile_data.get('manual_name')
     manual_gender = profile_data.get('manual_gender')
     manual_dob = profile_data.get('manual_dob')
@@ -105,7 +105,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         logger.error(f"Authentication failed for {profile_name}: {e}")
         return
 
-    logger.info(f"[{profile_name}] Fetching metrics from {start_date.isoformat()} to {end_date.isoformat()}...")
+    logger.info(f"[{profile_name}] Fetching metrics from {start_date.isoformat()} to {end_date.isoformat()} (Mode: {data_type})...")
     metrics_to_write = []
     current_date = start_date
     
@@ -122,7 +122,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
 
     while current_date <= end_date:
         logger.info(f"[{profile_name}] Fetching metrics for {current_date.isoformat()}")
-        daily_metrics = await garmin_client.get_metrics(current_date)
+        daily_metrics = await garmin_client.get_metrics(current_date, data_type=data_type)
         
         if manual_name:
             daily_metrics.user_name = manual_name
@@ -139,14 +139,15 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 daily_metrics.body_fat = original_bf + 3.0
                 logger.info(f"[{current_date}] Adjusted Body Fat for {profile_name}: {original_bf}% -> {daily_metrics.body_fat}%")
         
-        if current_date >= get_uk_date():
-            for f in fields_to_validate:
-                setattr(daily_metrics, f, "PENDING")
-        else:
-            for f in fields_to_validate:
-                val = getattr(daily_metrics, f)
-                if val is None:
-                    setattr(daily_metrics, f, "NA")
+        if data_type in ['summary', 'both']:
+            if current_date >= get_uk_date():
+                for f in fields_to_validate:
+                    setattr(daily_metrics, f, "PENDING")
+            else:
+                for f in fields_to_validate:
+                    val = getattr(daily_metrics, f)
+                    if val is None:
+                        setattr(daily_metrics, f, "NA")
 
         metrics_to_write.append(daily_metrics)
         current_date += timedelta(days=1)
@@ -172,8 +173,9 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         
         try:
             drive_client = GoogleDriveClient('credentials/client_secret.json', folder_id)
-            drive_client.update_csv(f"{file_prefix}garmin_data.csv", metrics_to_write, GENERAL_SUMMARY_HEADERS)
-            if activities_to_write:
+            if data_type in ['summary', 'both']:
+                drive_client.update_csv(f"{file_prefix}garmin_data.csv", metrics_to_write, GENERAL_SUMMARY_HEADERS)
+            if data_type in ['activities', 'both'] and activities_to_write:
                 drive_client.update_activities_csv(f"{file_prefix}garmin_activities_list.csv", activities_to_write, ACTIVITY_HEADERS)
             logger.info(f"[{profile_name}] Google Drive CSV sync completed successfully!")
         except Exception as e:
@@ -186,18 +188,19 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # 1. Save Summary CSV
-        csv_path = output_dir / f"{file_prefix}garmin_data.csv"
-        logger.info(f"Writing metrics to local CSV: {csv_path}")
-        file_exists = csv_path.exists()
-        with open(csv_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            if not file_exists or f.tell() == 0: 
-                writer.writerow(GENERAL_SUMMARY_HEADERS)
-            for metric in metrics_to_write:
-                writer.writerow([getattr(metric, HEADER_TO_ATTRIBUTE_MAP.get(h, ""), "") for h in GENERAL_SUMMARY_HEADERS])
+        if data_type in ['summary', 'both']:
+            csv_path = output_dir / f"{file_prefix}garmin_data.csv"
+            logger.info(f"Writing metrics to local CSV: {csv_path}")
+            file_exists = csv_path.exists()
+            with open(csv_path, 'a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists or f.tell() == 0: 
+                    writer.writerow(GENERAL_SUMMARY_HEADERS)
+                for metric in metrics_to_write:
+                    writer.writerow([getattr(metric, HEADER_TO_ATTRIBUTE_MAP.get(h, ""), "") for h in GENERAL_SUMMARY_HEADERS])
                 
         # 2. Save Activities CSV
-        if activities_to_write:
+        if data_type in ['activities', 'both'] and activities_to_write:
             activities_csv_path = output_dir / f"{file_prefix}garmin_activities_list.csv"
             logger.info(f"Writing activities to local CSV: {activities_csv_path}")
             a_file_exists = activities_csv_path.exists()
@@ -247,6 +250,13 @@ async def interactive_mode():
     print("2. Google Drive")
     out_choice = input("Enter choice (1 or 2): ").strip()
     output_type = 'drive' if out_choice == '2' else 'csv'
+    
+    print("\nSelect Data to Sync:")
+    print("1. Both (Summary & Activities)")
+    print("2. Summary Data Only")
+    print("3. Activities Data Only")
+    dt_choice = input("Enter choice (1, 2, or 3): ").strip()
+    data_type = 'summary' if dt_choice == '2' else 'activities' if dt_choice == '3' else 'both'
 
     print("\nAvailable User Profiles:")
     profile_keys = sorted(user_profiles.keys())
@@ -284,7 +294,8 @@ async def interactive_mode():
         end_date=end_date,
         output_type=output_type,
         profile_data=selected_profile_data,
-        profile_name=selected_profile_name
+        profile_name=selected_profile_name,
+        data_type=data_type
     )
 
 async def run_automated_sync():
@@ -293,10 +304,11 @@ async def run_automated_sync():
         logger.error("No user profiles found in environment variables.")
         return
 
+    data_type = os.getenv("SYNC_DATA_TYPE", "both")
     today = get_uk_date()
     yesterday = today - timedelta(days=3)
     
-    logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday} to {today}) ---")
+    logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday} to {today} | Mode: {data_type}) ---")
 
     # Convert to a list so we can track our index and avoid sleeping after the final user
     profiles_list = list(user_profiles.items())
@@ -311,7 +323,8 @@ async def run_automated_sync():
                 end_date=today,
                 output_type='drive', 
                 profile_data=profile_data,
-                profile_name=profile_name
+                profile_name=profile_name,
+                data_type=data_type
             )
         except Exception as e:
             logger.error(f"Failed to sync {profile_name}: {e}")
@@ -328,12 +341,13 @@ def cli_sync(
     start_date: datetime = typer.Option(..., help="Start date YYYY-MM-DD."),
     end_date: datetime = typer.Option(..., help="End date YYYY-MM-DD."),
     profile: str = typer.Option("ALL", help="Profile from .env (e.g., USER1, USER2, ALL)."),
-    output_type: str = typer.Option("drive", help="'drive' or 'csv'.")
+    output_type: str = typer.Option("drive", help="'drive' or 'csv'."),
+    data_type: str = typer.Option("both", help="'summary', 'activities', or 'both'.")
 ):
     user_profiles = load_user_profiles()
 
     if profile.upper() == "ALL":
-        logger.info(f"--- Starting CLI Sync for ALL Profiles ({start_date.date()} to {end_date.date()}) ---")
+        logger.info(f"--- Starting CLI Sync for ALL Profiles ({start_date.date()} to {end_date.date()} | Mode: {data_type}) ---")
         
         async def run_all():
             profiles_list = list(user_profiles.items())
@@ -347,7 +361,8 @@ def cli_sync(
                         end_date=end_date.date(),
                         output_type=output_type,
                         profile_data=p_data,
-                        profile_name=p_name
+                        profile_name=p_name,
+                        data_type=data_type
                     )
                 except Exception as e:
                     logger.error(f"Failed to sync {p_name}: {e}")
@@ -374,7 +389,8 @@ def cli_sync(
             end_date=end_date.date(),
             output_type=output_type,
             profile_data=selected_profile_data,
-            profile_name=profile
+            profile_name=profile,
+            data_type=data_type
         ))
 
 @app.command(name="automated")
