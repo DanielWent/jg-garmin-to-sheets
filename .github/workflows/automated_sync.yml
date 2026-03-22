@@ -2,10 +2,12 @@ name: Automated Garmin Sync
 
 on:
   schedule:
-    # Top of the hour triggers (UTC). Covers 03:00, 10:00, 13:00, 16:00, 19:00 UK time across both GMT and BST.
-    - cron: '0 2,3,9,10,12,13,15,16,18,19 * * *'
-    # Half-past the hour triggers (UTC). Covers 08:30 UK time across both GMT and BST.
-    - cron: '30 7,8 * * *'
+    # 55 past the hour triggers (UTC). 
+    # Queues 5 minutes before the 03:00, 10:00, 13:00, 16:00, 19:00 UK target times.
+    - cron: '55 1,2,8,9,11,12,14,15,17,18 * * *'
+    # 25 past the hour triggers (UTC). 
+    # Queues 5 minutes before the 08:30 UK target time.
+    - cron: '25 7,8 * * *'
   workflow_dispatch:
 
 jobs:
@@ -36,23 +38,23 @@ jobs:
         $shouldRun = $false
         $dataType = "both"
         
-        # Check times with a wide grace period to account for GitHub Actions cron queue delays (often 20-45 mins late)
-        if ($hour -eq 3) {
+        # Windows accept runs starting up to 15 minutes early (e.g., 18:45) and extending through the target hour
+        if (($hour -eq 2 -and $minute -ge 45) -or ($hour -eq 3)) {
             $shouldRun = $true
             $dataType = "both"
-        } elseif (($hour -eq 8 -and $minute -ge 30) -or ($hour -eq 9 -and $minute -lt 30)) {
+        } elseif (($hour -eq 8 -and $minute -ge 15) -or ($hour -eq 9 -and $minute -lt 30)) {
             $shouldRun = $true
             $dataType = "summary"
-        } elseif ($hour -eq 10) {
+        } elseif (($hour -eq 9 -and $minute -ge 45) -or ($hour -eq 10)) {
             $shouldRun = $true
             $dataType = "activities"
-        } elseif ($hour -eq 13) {
+        } elseif (($hour -eq 12 -and $minute -ge 45) -or ($hour -eq 13)) {
             $shouldRun = $true
             $dataType = "activities"
-        } elseif ($hour -eq 16) {
+        } elseif (($hour -eq 15 -and $minute -ge 45) -or ($hour -eq 16)) {
             $shouldRun = $true
             $dataType = "activities"
-        } elseif ($hour -eq 19) {
+        } elseif (($hour -eq 18 -and $minute -ge 45) -or ($hour -eq 19)) {
             $shouldRun = $true
             $dataType = "both"
         }
