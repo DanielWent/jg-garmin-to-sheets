@@ -79,13 +79,18 @@ jobs:
       run: |
         pip install -r requirements.txt
 
-    - name: Connect to Tailscale (Pi Exit Node)
+    - name: Connect to Tailscale
+      if: steps.dst-filter.outputs.should_run == 'true'
+      uses: tailscale/github-action@v3
+      with:
+        oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+        oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+        tags: tag:github-actions
+
+    - name: Route Traffic through Raspberry Pi
       if: steps.dst-filter.outputs.should_run == 'true'
       continue-on-error: true
-      uses: tailscale/github-action@v2
-      with:
-        authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-        args: --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }}
+      run: sudo tailscale up --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes
 
     - name: Restore Garmin Sessions Cache
       if: steps.dst-filter.outputs.should_run == 'true'
