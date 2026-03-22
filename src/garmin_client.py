@@ -329,7 +329,7 @@ class GarminClient:
         except Exception:
             return ""
 
-    async def get_metrics(self, target_date: date) -> GarminMetrics:
+    async def get_metrics(self, target_date: date, data_type: str = "both") -> GarminMetrics:
         if not self._authenticated:
             if self._auth_failed: raise Exception("Authentication previously failed.")
             await self.authenticate()
@@ -352,37 +352,47 @@ class GarminClient:
                 logger.debug(f"Direct fetch for {name} failed: {e}")
                 return None
 
+        fetch_summary = data_type in ['summary', 'both']
+        fetch_activities = data_type in ['activities', 'both']
+
         try:
             target_iso = target_date.isoformat()
             loop = asyncio.get_event_loop()
             
-            task_lactate_hr_url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
-            task_lactate_speed_url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
-            lactate_params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
+            summary = stats = sleep_data = hrv_payload = bp_payload = activities = None
+            training_status_std = training_status_modern = lactate_data = None
+            lactate_range_hr = lactate_range_speed = readiness_data = None
 
-            # The requests are spaced out sequentially to bypass Cloudflare
-            summary = await safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
-            stats = await safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
-            sleep_data = await safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
-            hrv_payload = await safe_fetch("HRV", self._fetch_hrv_data(target_iso))
-            bp_payload = await safe_fetch("Blood Pressure", loop.run_in_executor(None, self.client.get_blood_pressure, target_iso))
-            activities = await safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
-            training_status_std = await safe_fetch("Training Status (Std)", loop.run_in_executor(None, self.client.get_training_status, target_iso))
-            
-            modern_url = f"metrics-service/metrics/trainingstatus/aggregated/{target_iso}"
-            training_status_modern = await direct_fetch("Training Status (Modern)", modern_url)
-            
-            lactate_data = await safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
-            
-            lactate_range_hr = await safe_fetch("Lactate Range HR", loop.run_in_executor(
-                None, partial(self.client.connectapi, task_lactate_hr_url, params=lactate_params)
-            ))
-            
-            lactate_range_speed = await safe_fetch("Lactate Range Speed", loop.run_in_executor(
-                None, partial(self.client.connectapi, task_lactate_speed_url, params=lactate_params)
-            ))
-            
-            readiness_data = await safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
+            if fetch_summary:
+                task_lactate_hr_url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
+                task_lactate_speed_url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
+                lactate_params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
+
+                # The requests are spaced out sequentially to bypass Cloudflare
+                summary = await safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
+                stats = await safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
+                sleep_data = await safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
+                hrv_payload = await safe_fetch("HRV", self._fetch_hrv_data(target_iso))
+                bp_payload = await safe_fetch("Blood Pressure", loop.run_in_executor(None, self.client.get_blood_pressure, target_iso))
+                training_status_std = await safe_fetch("Training Status (Std)", loop.run_in_executor(None, self.client.get_training_status, target_iso))
+                
+                modern_url = f"metrics-service/metrics/trainingstatus/aggregated/{target_iso}"
+                training_status_modern = await direct_fetch("Training Status (Modern)", modern_url)
+                
+                lactate_data = await safe_fetch("Lactate Direct", loop.run_in_executor(None, self.client.connectapi, "biometric-service/biometric/latestLactateThreshold"))
+                
+                lactate_range_hr = await safe_fetch("Lactate Range HR", loop.run_in_executor(
+                    None, partial(self.client.connectapi, task_lactate_hr_url, params=lactate_params)
+                ))
+                
+                lactate_range_speed = await safe_fetch("Lactate Range Speed", loop.run_in_executor(
+                    None, partial(self.client.connectapi, task_lactate_speed_url, params=lactate_params)
+                ))
+                
+                readiness_data = await safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
+
+            if fetch_activities:
+                activities = await safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
 
             summary = summary or {}
             if isinstance(summary, list): summary = summary[0] if summary else {}
@@ -468,7 +478,7 @@ class GarminClient:
             if summary:
                 steps = summary.get('totalSteps')
             
-            if steps is None:
+            if steps is None and fetch_summary:
                 try:
                     daily_steps_data = await safe_fetch("Fallback Steps", loop.run_in_executor(None, self.client.get_daily_steps, target_iso, target_iso))
                     if daily_steps_data and isinstance(daily_steps_data, list) and len(daily_steps_data) > 0:
