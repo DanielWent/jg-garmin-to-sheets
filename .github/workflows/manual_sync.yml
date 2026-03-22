@@ -26,6 +26,15 @@ on:
         options:
         - drive
         - sheets
+      data_type:
+        description: 'Data to Sync'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+        - both
+        - summary
+        - activities
 
 jobs:
   sync:
@@ -97,4 +106,4 @@ jobs:
             $endDate = (Get-Date).ToString("yyyy-MM-dd")
         }
         
-        python -m src.main cli-sync --start-date "$startDate" --end-date "$endDate" --profile "${{ inputs.profile }}" --output-type "${{ inputs.output_type }}"
+        python -m src.main cli-sync --start-date "$startDate" --end-date "$endDate" --profile "${{ inputs.profile }}" --output-type "${{ inputs.output_type }}" --data-type "${{ inputs.data_type }}"
