@@ -2,7 +2,9 @@ name: Automated Garmin Sync
 
 on:
   schedule:
+    # Top of the hour triggers (UTC). Covers 03:00, 10:00, 13:00, 16:00, 19:00 UK time across both GMT and BST.
     - cron: '0 2,3,9,10,12,13,15,16,18,19 * * *'
+    # Half-past the hour triggers (UTC). Covers 08:30 UK time across both GMT and BST.
     - cron: '30 7,8 * * *'
   workflow_dispatch:
 
@@ -34,28 +36,29 @@ jobs:
         $shouldRun = $false
         $dataType = "both"
         
-        if ($hour -eq 3 -and $minute -lt 15) {
+        # Check times with a wide grace period to account for GitHub Actions cron queue delays (often 20-45 mins late)
+        if ($hour -eq 3) {
             $shouldRun = $true
             $dataType = "both"
-        } elseif ($hour -eq 8 -and $minute -ge 30 -and $minute -lt 45) {
+        } elseif (($hour -eq 8 -and $minute -ge 30) -or ($hour -eq 9 -and $minute -lt 30)) {
             $shouldRun = $true
             $dataType = "summary"
-        } elseif ($hour -eq 10 -and $minute -lt 15) {
+        } elseif ($hour -eq 10) {
             $shouldRun = $true
             $dataType = "activities"
-        } elseif ($hour -eq 13 -and $minute -lt 15) {
+        } elseif ($hour -eq 13) {
             $shouldRun = $true
             $dataType = "activities"
-        } elseif ($hour -eq 16 -and $minute -lt 15) {
+        } elseif ($hour -eq 16) {
             $shouldRun = $true
             $dataType = "activities"
-        } elseif ($hour -eq 19 -and $minute -lt 15) {
+        } elseif ($hour -eq 19) {
             $shouldRun = $true
             $dataType = "both"
         }
         
         if (-not $shouldRun) {
-            Write-Host "Current UK Time ($($ukTime.ToString('HH:mm'))) is not a scheduled run time. Skipping execution."
+            Write-Host "Current UK Time ($($ukTime.ToString('HH:mm'))) is not within a scheduled run window. Skipping execution."
             Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=false"
             exit 0
         }
@@ -66,11 +69,11 @@ jobs:
 
     - name: Checkout code
       if: steps.dst-filter.outputs.should_run == 'true'
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
 
     - name: Set up Python
       if: steps.dst-filter.outputs.should_run == 'true'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: '3.12'
 
@@ -78,22 +81,6 @@ jobs:
       if: steps.dst-filter.outputs.should_run == 'true'
       run: |
         pip install -r requirements.txt
-
-    - name: Connect to Tailscale
-      if: steps.dst-filter.outputs.should_run == 'true'
-      uses: tailscale/github-action@v3
-      with:
-        oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
-        oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
-        tags: tag:github-actions
-
-    - name: Route Traffic through Raspberry Pi
-      if: steps.dst-filter.outputs.should_run == 'true'
-      continue-on-error: true
-      run: |
-        echo "Waiting for Tailscale network map to synchronize..."
-        sleep 5
-        sudo tailscale set --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes --accept-dns=false
 
     - name: Restore Garmin Sessions Cache
       if: steps.dst-filter.outputs.should_run == 'true'
