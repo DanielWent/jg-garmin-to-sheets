@@ -38,15 +38,19 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer()
 
-def get_uk_date() -> date:
-    """Safely retrieves the current date in the UK timezone, independent of the runner's UTC setting."""
+def get_uk_time() -> datetime:
+    """Safely retrieves the current datetime in the UK timezone, independent of the runner's UTC setting."""
     if ZoneInfo:
-        return datetime.now(ZoneInfo("Europe/London")).date()
+        return datetime.now(ZoneInfo("Europe/London"))
     else:
         if hasattr(time, 'tzset'):
             os.environ['TZ'] = 'Europe/London'
             time.tzset()
-        return date.today()
+        return datetime.now()
+
+def get_uk_date() -> date:
+    """Safely retrieves the current date in the UK timezone."""
+    return get_uk_time().date()
 
 def ensure_credentials_file_exists():
     creds_path = Path('credentials/client_secret.json')
@@ -305,10 +309,21 @@ async def run_automated_sync():
         return
 
     data_type = os.getenv("SYNC_DATA_TYPE", "both")
-    today = get_uk_date()
-    yesterday = today - timedelta(days=3)
     
-    logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {yesterday} to {today} | Mode: {data_type}) ---")
+    uk_time = get_uk_time()
+    today = uk_time.date()
+    
+    # Determine date range based on UK time
+    if uk_time.hour < 6 or (uk_time.hour == 6 and uk_time.minute < 30):
+        # Between 00:00 and 06:29 -> Yesterday and Day before yesterday
+        start_target = today - timedelta(days=2)
+        end_target = today - timedelta(days=1)
+    else:
+        # Between 06:30 and 23:59 -> Today only
+        start_target = today
+        end_target = today
+    
+    logger.info(f"--- Starting Daily Sync for {len(user_profiles)} Profiles (Target: {start_target} to {end_target} | Mode: {data_type}) ---")
 
     # Convert to a list so we can track our index and avoid sleeping after the final user
     profiles_list = list(user_profiles.items())
@@ -319,8 +334,8 @@ async def run_automated_sync():
             await sync(
                 email=profile_data['email'],
                 password=profile_data['password'],
-                start_date=yesterday,
-                end_date=today,
+                start_date=start_target,
+                end_date=end_target,
                 output_type='drive', 
                 profile_data=profile_data,
                 profile_name=profile_name,
