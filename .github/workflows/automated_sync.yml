@@ -119,6 +119,7 @@ jobs:
         USER2_GENDER: ${{ secrets.USER2_GENDER }}
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
+        SYNC_DATA_TYPE: "both"
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "INFO"
       run: |
