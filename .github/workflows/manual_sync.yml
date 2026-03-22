@@ -57,11 +57,15 @@ jobs:
       run: |
         pip install -r requirements.txt
 
-    - name: Connect to Tailscale (Pi Exit Node)
-      uses: tailscale/github-action@v2
+    - name: Connect to Tailscale
+      uses: tailscale/github-action@v3
       with:
-        authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-        args: --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }}
+        oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+        oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+        tags: tag:github-actions
+
+    - name: Route Traffic through Raspberry Pi
+      run: sudo tailscale up --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes
 
     - name: Seed Garmin Sessions (Fallback)
       env:
