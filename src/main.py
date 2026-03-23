@@ -7,7 +7,7 @@ import asyncio
 import json
 import random
 import time
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -24,11 +24,6 @@ from src.config import (
     GarminMetrics
 )
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    ZoneInfo = None
-
 logging.getLogger("hpack").setLevel(logging.WARNING)
 
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -38,19 +33,13 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer()
 
-def get_uk_time() -> datetime:
-    """Safely retrieves the current datetime in the UK timezone, independent of the runner's UTC setting."""
-    if ZoneInfo:
-        return datetime.now(ZoneInfo("Europe/London"))
-    else:
-        if hasattr(time, 'tzset'):
-            os.environ['TZ'] = 'Europe/London'
-            time.tzset()
-        return datetime.now()
+def get_utc_time() -> datetime:
+    """Safely retrieves the current datetime in UTC."""
+    return datetime.now(timezone.utc)
 
-def get_uk_date() -> date:
-    """Safely retrieves the current date in the UK timezone."""
-    return get_uk_time().date()
+def get_utc_date() -> date:
+    """Safely retrieves the current date in UTC."""
+    return get_utc_time().date()
 
 def ensure_credentials_file_exists():
     creds_path = Path('credentials/client_secret.json')
@@ -144,7 +133,7 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 logger.info(f"[{current_date}] Adjusted Body Fat for {profile_name}: {original_bf}% -> {daily_metrics.body_fat}%")
         
         if data_type in ['summary', 'both']:
-            if current_date >= get_uk_date():
+            if current_date >= get_utc_date():
                 for f in fields_to_validate:
                     setattr(daily_metrics, f, "PENDING")
             else:
@@ -184,7 +173,6 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
             logger.info(f"[{profile_name}] Google Drive CSV sync completed successfully!")
         except Exception as e:
             logger.error(f"[{profile_name}] Drive Sync Failed: {e}", exc_info=True)
-            # UPDATE 2: Explicitly raise the error instead of returning silently
             raise Exception(f"Google Drive sync failed for {profile_name}") from e
 
     # === LOCAL CSV SYNC ===
@@ -311,11 +299,11 @@ async def run_automated_sync():
 
     data_type = os.getenv("SYNC_DATA_TYPE", "both")
     
-    uk_time = get_uk_time()
-    today = uk_time.date()
+    utc_time = get_utc_time()
+    today = utc_time.date()
     
-    # Determine date range based on UK time
-    if uk_time.hour < 6 or (uk_time.hour == 6 and uk_time.minute < 30):
+    # Determine date range based on UTC time
+    if utc_time.hour < 6 or (utc_time.hour == 6 and utc_time.minute < 30):
         # Between 00:00 and 06:29 -> Yesterday and Day before yesterday
         start_target = today - timedelta(days=2)
         end_target = today - timedelta(days=1)
@@ -328,7 +316,6 @@ async def run_automated_sync():
 
     profiles_list = list(user_profiles.items())
     
-    # UPDATE 1: Track if any single profile fails during the loop
     has_errors = False
     
     for index, (profile_name, profile_data) in enumerate(profiles_list):
@@ -346,15 +333,13 @@ async def run_automated_sync():
             )
         except Exception as e:
             logger.error(f"Failed to sync {profile_name}: {e}")
-            has_errors = True # Flag the error but allow the loop to continue for the next user
+            has_errors = True 
             
-        # If this is NOT the last profile in the list, trigger the delay
         if index < len(profiles_list) - 1:
             delay = random.randint(45, 90)
             logger.info(f"Sleeping for {delay} seconds before processing the next profile to avoid security triggers...")
             await asyncio.sleep(delay)
 
-    # UPDATE 1 (continued): Exit with an error code if ANY profile failed
     if has_errors:
         logger.error("One or more profiles failed to sync successfully. Exiting with error code 1.")
         sys.exit(1)
@@ -374,7 +359,7 @@ def cli_sync(
         
         async def run_all():
             profiles_list = list(user_profiles.items())
-            has_errors = False # Added tracking here as well for consistency
+            has_errors = False 
             for index, (p_name, p_data) in enumerate(profiles_list):
                 logger.info(f"Processing {p_name}...")
                 try:
