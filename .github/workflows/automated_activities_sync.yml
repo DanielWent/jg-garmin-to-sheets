@@ -12,6 +12,10 @@ on:
       timezone: Europe/London
   workflow_dispatch:
 
+concurrency:
+  group: garmin-sync-lock
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
