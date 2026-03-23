@@ -2,12 +2,10 @@ name: Automated Garmin Sync
 
 on:
   schedule:
-    # 55 past the hour triggers (UTC). 
-    # Queues 5 minutes before the 03:00, 10:00, 13:00, 16:00, 19:00 UK target times.
-    - cron: '55 1,2,8,9,11,12,14,15,17,18 * * *'
-    # 25 past the hour triggers (UTC). 
-    # Queues 5 minutes before the 08:30 UK target time.
-    - cron: '25 7,8 * * *'
+    # Top of the hour triggers (UTC): 03:00, 10:00, 13:00, 16:00, 18:00, 19:00
+    - cron: '0 3,10,13,16,18,19 * * *'
+    # 30 past the hour triggers (UTC): 07:30, 08:30
+    - cron: '30 7,8 * * *'
   workflow_dispatch:
 
 jobs:
@@ -19,73 +17,41 @@ jobs:
         shell: pwsh
 
     steps:
-    - name: UK Time & Data Type Filter
-      id: dst-filter
+    - name: Determine Sync Data Type
+      id: sync-type
       run: |
-        $now = [DateTime]::UtcNow
-        $tzId = "Europe/London"
+        $hour = [DateTime]::UtcNow.Hour
+        $dataType = "both" # Default fallback
         
-        try {
-            $ukTime = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId($now, $tzId)
-        } catch {
-            Write-Host "TZ Conversion failed, falling back to UTC."
-            $ukTime = $now
-        }
-        
-        $hour = $ukTime.Hour
-        $minute = $ukTime.Minute
-        
-        $shouldRun = $false
-        $dataType = "both"
-        
-        # Windows accept runs starting up to 15 minutes early (e.g., 18:45) and extending through the target hour
-        if (($hour -eq 2 -and $minute -ge 45) -or ($hour -eq 3)) {
-            $shouldRun = $true
-            $dataType = "both"
-        } elseif (($hour -eq 8 -and $minute -ge 15) -or ($hour -eq 9 -and $minute -lt 30)) {
-            $shouldRun = $true
+        # 07:30 and 08:30 UTC targets (buffer accommodates delays up to 09:59)
+        if ($hour -ge 7 -and $hour -le 9) {
             $dataType = "summary"
-        } elseif (($hour -eq 9 -and $minute -ge 45) -or ($hour -eq 10)) {
-            $shouldRun = $true
+        } 
+        # 10:00, 13:00, 16:00 UTC targets (buffer accommodates delays up to 17:59)
+        elseif ($hour -ge 10 -and $hour -le 17) {
             $dataType = "activities"
-        } elseif (($hour -eq 12 -and $minute -ge 45) -or ($hour -eq 13)) {
-            $shouldRun = $true
-            $dataType = "activities"
-        } elseif (($hour -eq 15 -and $minute -ge 45) -or ($hour -eq 16)) {
-            $shouldRun = $true
-            $dataType = "activities"
-        } elseif (($hour -eq 18 -and $minute -ge 45) -or ($hour -eq 19)) {
-            $shouldRun = $true
+        } 
+        # 03:00, 18:00, 19:00 UTC targets (and default catch-all for severe delays)
+        else {
             $dataType = "both"
         }
         
-        if (-not $shouldRun) {
-            Write-Host "Current UK Time ($($ukTime.ToString('HH:mm'))) is not within a scheduled run window. Skipping execution."
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=false"
-            exit 0
-        }
-        
-        Write-Host "Current UK Time matches schedule ($($ukTime.ToString('HH:mm'))). Setting Mode: $dataType."
-        Add-Content -Path $env:GITHUB_OUTPUT -Value "should_run=true"
+        Write-Host "Current UTC Hour is $hour. Setting Mode: $dataType."
         Add-Content -Path $env:GITHUB_OUTPUT -Value "sync_data_type=$dataType"
 
     - name: Checkout code
-      if: steps.dst-filter.outputs.should_run == 'true'
       uses: actions/checkout@v3
 
     - name: Set up Python
-      if: steps.dst-filter.outputs.should_run == 'true'
       uses: actions/setup-python@v4
       with:
         python-version: '3.12'
 
     - name: Install dependencies
-      if: steps.dst-filter.outputs.should_run == 'true'
       run: |
         pip install -r requirements.txt
 
     - name: Restore Garmin Sessions Cache
-      if: steps.dst-filter.outputs.should_run == 'true'
       uses: actions/cache/restore@v4
       with:
         path: ~/.garth_encrypted
@@ -94,7 +60,6 @@ jobs:
           garmin-sessions-
 
     - name: Decrypt Garmin Sessions
-      if: steps.dst-filter.outputs.should_run == 'true'
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
@@ -108,7 +73,6 @@ jobs:
         }
 
     - name: Seed Garmin Sessions (Fallback)
-      if: steps.dst-filter.outputs.should_run == 'true'
       env:
         USER1_SESSION: ${{ secrets.USER1_GARMIN_SESSION }}
         USER2_SESSION: ${{ secrets.USER2_GARMIN_SESSION }}
@@ -128,7 +92,6 @@ jobs:
         }
 
     - name: Run Sync Script
-      if: steps.dst-filter.outputs.should_run == 'true'
       env:
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
@@ -144,14 +107,14 @@ jobs:
         USER2_GENDER: ${{ secrets.USER2_GENDER }}
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
-        SYNC_DATA_TYPE: ${{ steps.dst-filter.outputs.sync_data_type }}
+        SYNC_DATA_TYPE: ${{ steps.sync-type.outputs.sync_data_type }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "INFO"
       run: |
         python -m src.main
 
     - name: Encrypt Garmin Sessions
-      if: always() && steps.dst-filter.outputs.should_run == 'true'
+      if: always()
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
@@ -165,7 +128,7 @@ jobs:
         }
 
     - name: Save Garmin Sessions Cache
-      if: always() && steps.dst-filter.outputs.should_run == 'true'
+      if: always()
       uses: actions/cache/save@v4
       with:
         path: ~/.garth_encrypted
