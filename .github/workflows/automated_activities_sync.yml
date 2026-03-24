@@ -4,12 +4,6 @@ on:
   schedule:
     - cron: '55 2 * * *'
       timezone: Europe/London
-    - cron: '55 11 * * *'
-      timezone: Europe/London
-    - cron: '26 15 * * *'
-      timezone: Europe/London
-    - cron: '55 18 * * *'
-      timezone: Europe/London
   workflow_dispatch:
 
 concurrency:
