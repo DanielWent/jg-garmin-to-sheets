@@ -1,4 +1,4 @@
-name: Automated Garmin Sync - Activities
+name: Auto Sync - Activities
 
 on:
   schedule:
