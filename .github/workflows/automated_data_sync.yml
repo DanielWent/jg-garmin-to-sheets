@@ -1,4 +1,4 @@
-name: Automated Garmin Sync - Data
+name: Auto Sync - Data
 
 on:
   schedule:
