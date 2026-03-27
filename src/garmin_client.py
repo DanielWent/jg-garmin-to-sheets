@@ -121,6 +121,9 @@ class GarminClient:
         self.token_file = self.session_dir / "tokens.json"
         
         self.client = garminconnect.Garmin(email, password)
+        # FIX: Instantiate an isolated garth client for each profile to prevent session leakage
+        self.client.garth = garth.Client(domain="garmin.com")
+        
         self._authenticated = False
         self.mfa_ticket_dict = None
         self._auth_failed = False
@@ -140,7 +143,7 @@ class GarminClient:
 
     async def authenticate(self):
         loop = asyncio.get_event_loop()
-        garth.configure(domain="garmin.com")
+        # Removed global garth.configure() call here to ensure isolation is maintained.
 
         if self.token_file.exists():
             try:
