@@ -1,8 +1,8 @@
-name: Auto Sync - Activities
+name: Auto Sync - Data
 
 on:
   schedule:
-    - cron: '55 2 * * *'
+    - cron: '25 3 * * *'
       timezone: Europe/London
   workflow_dispatch:
 
@@ -24,15 +24,10 @@ jobs:
       shell: bash
       run: |
         export TZ="Europe/London"
-        HOUR=$(date +%-H)
         
-        if [ "$HOUR" -lt 6 ]; then
-            START_DATE=$(date -d "2 days ago" +%Y-%m-%d)
-            END_DATE=$(date -d "1 day ago" +%Y-%m-%d)
-        else
-            START_DATE=$(date +%Y-%m-%d)
-            END_DATE=$(date +%Y-%m-%d)
-        fi
+        # Pull data from a rolling 3-day window up to the current day
+        START_DATE=$(date -d "3 days ago" +%Y-%m-%d)
+        END_DATE=$(date +%Y-%m-%d)
         
         echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
         echo "end_date=$END_DATE" >> $GITHUB_OUTPUT
@@ -133,7 +128,7 @@ jobs:
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "INFO"
       run: |
-        python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile ALL --output-type drive --data-type "activities"
+        python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile ALL --output-type drive --data-type "summary"
 
     - name: Encrypt Garmin Sessions
       if: always()
