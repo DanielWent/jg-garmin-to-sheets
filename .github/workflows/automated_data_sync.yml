@@ -24,15 +24,10 @@ jobs:
       shell: bash
       run: |
         export TZ="Europe/London"
-        HOUR=$(date +%-H)
         
-        if [ "$HOUR" -lt 6 ]; then
-            START_DATE=$(date -d "2 days ago" +%Y-%m-%d)
-            END_DATE=$(date -d "1 day ago" +%Y-%m-%d)
-        else
-            START_DATE=$(date +%Y-%m-%d)
-            END_DATE=$(date +%Y-%m-%d)
-        fi
+        # Pull data from a rolling 3-day window up to the current day
+        START_DATE=$(date -d "3 days ago" +%Y-%m-%d)
+        END_DATE=$(date +%Y-%m-%d)
         
         echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
         echo "end_date=$END_DATE" >> $GITHUB_OUTPUT
