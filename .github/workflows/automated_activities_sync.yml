@@ -1,8 +1,8 @@
-name: Auto Sync - Data
+name: Auto Sync - Activities
 
 on:
   schedule:
-    - cron: '25 3 * * *'
+    - cron: '55 2 * * *'
       timezone: Europe/London
   workflow_dispatch:
 
@@ -128,7 +128,7 @@ jobs:
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "INFO"
       run: |
-        python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile ALL --output-type drive --data-type "summary"
+        python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile ALL --output-type drive --data-type "activities"
 
     - name: Encrypt Garmin Sessions
       if: always()
