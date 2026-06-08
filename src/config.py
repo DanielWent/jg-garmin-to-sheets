@@ -57,6 +57,12 @@ class GarminMetrics:
     body_battery_min: Optional[Any] = None
     body_battery_charged: Optional[Any] = None
     body_battery_drained: Optional[Any] = None
+    total_walking_distance: Optional[float] = None
+    total_walking_duration: Optional[float] = None
+    total_running_count: Optional[int] = None
+    total_running_distance: Optional[float] = None
+    total_running_duration: Optional[float] = None
+    total_strength_duration: Optional[float] = None
     activities: List[Any] = field(default_factory=list)
 
 # =========================================================
@@ -100,7 +106,13 @@ GENERAL_SUMMARY_HEADERS = [
     "Overnight Resting HR (bpm)",
     "Overnight HRV (ms)",
     "Garmin HRV Status (Text Label)",
-    "Garmin Training Status (Text Label)"
+    "Garmin Training Status (Text Label)",
+    "Total Walking Distance (km)",
+    "Total Walking Duration (min)",
+    "Total Running Activities Count",
+    "Total Running Distance (km)",
+    "Total Running Duration (min)",
+    "Total Strength Training Duration (min)"
 ]
 
 ACTIVITY_HEADERS = [
@@ -185,5 +197,11 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Garmin Training Load (7 Day Sum)": "seven_day_load",
     "Garmin Training Load Focus": "training_load_focus",
     "Morning Garmin Training Readiness (0-100)": "training_readiness",
-    "Garmin Training Status (Text Label)": "training_status"
+    "Garmin Training Status (Text Label)": "training_status",
+    "Total Walking Distance (km)": "total_walking_distance",
+    "Total Walking Duration (min)": "total_walking_duration",
+    "Total Running Activities Count": "total_running_count",
+    "Total Running Distance (km)": "total_running_distance",
+    "Total Running Duration (min)": "total_running_duration",
+    "Total Strength Training Duration (min)": "total_strength_duration"
 }
