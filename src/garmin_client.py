@@ -394,8 +394,9 @@ class GarminClient:
                 
                 readiness_data = await safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
 
-            if fetch_activities:
-                activities = await safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
+            # Fetch activities unconditionally because we need them to calculate daily totals 
+            # for running, walking, and strength training.
+            activities = await safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
 
             summary = summary or {}
             if isinstance(summary, list): summary = summary[0] if summary else {}
@@ -548,10 +549,37 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
+            # --- Calculate new daily activity aggregations ---
+            total_walking_distance = 0.0
+            total_walking_duration = 0.0
+            total_running_count = 0
+            total_running_distance = 0.0
+            total_running_duration = 0.0
+            total_strength_duration = 0.0
+
+            if activities:
+                for act in activities:
+                    if not isinstance(act, dict): continue
+                    atype = act.get('activityType', {})
+                    type_key = atype.get('typeKey', '')
+                    
+                    dist_km = (act.get('distance') or 0) / 1000
+                    dur_min = (act.get('duration') or 0) / 60
+                    
+                    if 'walk' in type_key:
+                        total_walking_distance += dist_km
+                        total_walking_duration += dur_min
+                    elif 'run' in type_key:
+                        total_running_count += 1
+                        total_running_distance += dist_km
+                        total_running_duration += dur_min
+                    elif 'strength' in type_key:
+                        total_strength_duration += dur_min
+
             FORCE_API_WEATHER_TO_CELSIUS = True
 
             processed_activities = []
-            if activities:
+            if fetch_activities and activities:
                 for activity in activities:
                     if not isinstance(activity, dict): continue
                     atype = activity.get('activityType') or {}
@@ -901,6 +929,12 @@ class GarminClient:
                 body_battery_min=bb_min,
                 body_battery_charged=bb_charged,
                 body_battery_drained=bb_drained,
+                total_walking_distance=round(total_walking_distance, 2),
+                total_walking_duration=round(total_walking_duration, 1),
+                total_running_count=total_running_count,
+                total_running_distance=round(total_running_distance, 2),
+                total_running_duration=round(total_running_duration, 1),
+                total_strength_duration=round(total_strength_duration, 1),
                 overnight_hrv=overnight_hrv_value,
                 hrv_status=hrv_status_value,
                 vo2max_running=vo2_run,
