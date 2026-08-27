@@ -1,9 +1,10 @@
 import os
 import io
+import json
 import pandas as pd
 import numpy as np
 from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 # Configurable Demographic Variables
@@ -22,7 +23,6 @@ def convert_pace_to_decimal(pace_str):
 
 def generate_quantified_self_csv(df: pd.DataFrame, output_path: str = "drw_quantified_self.csv"):
     
-    # 1. Map raw Garmin headers to the required internal schema
     column_mapping = {
         'Date (YYYY-MM-DD)': 'Date_YYYY_MM_DD',
         'Total Running Distance (km)': 'Daily_Running_Distance_km',
@@ -53,7 +53,6 @@ def generate_quantified_self_csv(df: pd.DataFrame, output_path: str = "drw_quant
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], format="mixed", errors="coerce").dt.strftime("%H:%M")
 
-    # 2. Derive rolling metrics safely based on available columns
     if "Daily_Running_Distance_km" in df.columns:
         df["Running_Distance_28d_Total_km"] = df["Daily_Running_Distance_km"].rolling(window=28, min_periods=1).sum().round(2)
     
@@ -72,7 +71,6 @@ def generate_quantified_self_csv(df: pd.DataFrame, output_path: str = "drw_quant
 
     df_export = df.tail(730).copy()
 
-    # 3. Enforce strict output schema (Missing data injected as blank empty strings via na_rep)
     required_columns = [
         "Date_YYYY_MM_DD", "Daily_Running_Distance_km", "Daily_Running_Duration_min",
         "Daily_Walking_Distance_km", "Daily_Strength_Duration_min", "Daily_Steps_Count",
@@ -92,13 +90,11 @@ def generate_quantified_self_csv(df: pd.DataFrame, output_path: str = "drw_quant
 
     df_export = df_export[required_columns]
 
-    # Convert numeric formats to Int64 to prevent integers from outputting with trailing decimals where possible
     for col in required_columns:
         if "min" in col or "bpm" in col or "Count" in col or "Sum" in col or "mmHg" in col or "ms" in col:
             if "decimal_min" not in col and "Average" not in col and "ZScore" not in col:
                 df_export[col] = pd.to_numeric(df_export[col], errors='coerce').astype('Int64')
 
-    # 4. Header Injection & Export
     header_string = f"# Context: Male, Age: {AGE}, Height: {HEIGHT_CM} cm, Max HR: {MAX_HR} bpm\n"
     with open(output_path, "w") as f:
         f.write(header_string)
@@ -107,7 +103,6 @@ def generate_quantified_self_csv(df: pd.DataFrame, output_path: str = "drw_quant
 
 
 def get_file_id(service, filename, folder_id):
-    """Searches a specific Google Drive folder for a file by name and returns its ID."""
     query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
     results = service.files().list(q=query, fields="files(id, name)").execute()
     items = results.get('files', [])
@@ -116,14 +111,21 @@ def get_file_id(service, filename, folder_id):
 
 if __name__ == "__main__":
     FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
+    SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
     RAW_FILENAME = "drw_garmin_data.csv"
     TARGET_FILENAME = "drw_quantified_self.csv"
     
     if not FOLDER_ID:
-        raise ValueError("DRIVE_FOLDER_ID environment variable is not set. Ensure it is configured in GitHub Secrets.")
+        raise ValueError("DRIVE_FOLDER_ID environment variable is not set.")
+    if not SERVICE_ACCOUNT_JSON:
+        raise ValueError("GOOGLE_SHEETS_CREDENTIALS environment variable is not set.")
         
     print("Authenticating with Google Drive...")
-    creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/drive'])
+    service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
+    creds = service_account.Credentials.from_service_account_info(
+        service_account_info, 
+        scopes=['https://www.googleapis.com/auth/drive']
+    )
     drive_service = build('drive', 'v3', credentials=creds)
     
     print(f"Locating files in folder {FOLDER_ID}...")
