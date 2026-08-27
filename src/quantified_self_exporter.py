@@ -94,7 +94,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         mask = df_medical['clean_test'].isin(aliases)
         subset = df_medical[mask].copy()
         if not subset.empty:
-            # Grouping by first valid text string to preserve >/< symbols without crashing
             subset_daily = subset.groupby('Date_YYYY_MM_DD')['Result'].first().reset_index()
             subset_daily = subset_daily.rename(columns={'Result': test_col})
             mapped_medical_data.append(subset_daily)
@@ -106,11 +105,10 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     else:
         df_m_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD'] + list(test_map.keys()))
 
-    # 4. Merge All Datasets (Outer merge ensures sparse dates align without dropping)
+    # 4. Merge All Datasets
     df = pd.merge(df_g, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
     
-    # Clean up empty dates and sort strictly ascending for accurate rolling math
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
     df = df.sort_values(by="Date_YYYY_MM_DD", ascending=True).reset_index(drop=True)
     
@@ -122,7 +120,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], format="mixed", errors="coerce").dt.strftime("%H:%M")
 
-    # 6. Derived Metrics (Right-aligned Rolling Windows)
+    # 6. Derived Metrics
     if "Daily_Running_Distance_km" in df.columns:
         df["Running_Distance_28d_Total_km"] = df["Daily_Running_Distance_km"].rolling(window=28, min_periods=1).sum().round(2)
     
@@ -170,7 +168,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     df_export = df_export[required_columns]
 
-    # Clean integer casting prevents NaN float crashes
     integer_columns = [
         "Daily_Running_Duration_min",
         "Daily_Strength_Duration_min",
@@ -198,7 +195,9 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
 
 def get_file_id(service, filename, folder_id):
-    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+    # Safely escape apostrophes to prevent Drive API parsing errors
+    safe_filename = filename.replace("'", "\\'")
+    query = f"name='{safe_filename}' and '{folder_id}' in parents and trashed=false"
     results = service.files().list(q=query, fields="files(id, name)").execute()
     items = results.get('files', [])
     return items[0]['id'] if items else None
