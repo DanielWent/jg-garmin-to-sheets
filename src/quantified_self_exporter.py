@@ -90,10 +90,23 @@ def generate_quantified_self_csv(df: pd.DataFrame, output_path: str = "drw_quant
 
     df_export = df_export[required_columns]
 
-    for col in required_columns:
-        if "min" in col or "bpm" in col or "Count" in col or "Sum" in col or "mmHg" in col or "ms" in col:
-            if "decimal_min" not in col and "Average" not in col and "ZScore" not in col:
-                df_export[col] = pd.to_numeric(df_export[col], errors='coerce').astype('Int64')
+    # Explicit integer targeting
+    integer_columns = [
+        "Daily_Running_Duration_min",
+        "Daily_Strength_Duration_min",
+        "Daily_Steps_Count",
+        "Garmin_7d_Training_Load_Sum",
+        "Lactate_Threshold_Heart_Rate_bpm",
+        "Overnight_Sleep_Duration_min",
+        "Overnight_Resting_Heart_Rate_bpm",
+        "Overnight_HRV_RMSSD_ms",
+        "Resting_Systolic_Blood_Pressure_mmHg",
+        "Resting_Diastolic_Blood_Pressure_mmHg"
+    ]
+    
+    for col in integer_columns:
+        if col in df_export.columns:
+            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
 
     header_string = f"# Context: Male, Age: {AGE}, Height: {HEIGHT_CM} cm, Max HR: {MAX_HR} bpm\n"
     with open(output_path, "w") as f:
