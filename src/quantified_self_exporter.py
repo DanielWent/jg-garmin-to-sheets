@@ -40,7 +40,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'Sleep Start Time': 'Sleep_Start_Time_HH_MM',
         'Sleep End Time': 'Sleep_End_Time_HH_MM',
         'Overnight Resting HR (bpm)': 'Overnight_Resting_Heart_Rate_bpm',
-        'Overnight HRV (ms)': 'Overnight_HRV_RMSSD_ms',
+        'Overnight HRV (ms)': 'Overnight_Average_HRV_RMSSD_ms',
         'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
         'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg'
     }
@@ -67,7 +67,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     }
     df_w_daily = df_w_daily.rename(columns=withings_mapping)
     
-    # 3. Process Medical Data (with dynamic nomenclature alias mapping)
+    # 3. Process Medical Data
     df_medical['Date_YYYY_MM_DD'] = pd.to_datetime(
         df_medical['Test Date'], format='%d/%m/%Y', errors='coerce'
     ).dt.strftime('%Y-%m-%d')
@@ -127,9 +127,9 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     if "Overnight_Resting_Heart_Rate_bpm" in df.columns:
         df["Resting_Heart_Rate_7d_Average_bpm"] = df["Overnight_Resting_Heart_Rate_bpm"].rolling(window=7, min_periods=1).mean().round(1)
         
-    if "Overnight_HRV_RMSSD_ms" in df.columns:
-        df["HRV_RMSSD_7d_Average_ms"] = df["Overnight_HRV_RMSSD_ms"].rolling(window=7, min_periods=1).mean().round(1)
-        shifted_hrv = df["Overnight_HRV_RMSSD_ms"].shift(7)
+    if "Overnight_Average_HRV_RMSSD_ms" in df.columns:
+        df["HRV_RMSSD_7d_Average_ms"] = df["Overnight_Average_HRV_RMSSD_ms"].rolling(window=7, min_periods=1).mean().round(1)
+        shifted_hrv = df["Overnight_Average_HRV_RMSSD_ms"].shift(7)
         shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
         shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
         df["HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore"] = ((df["HRV_RMSSD_7d_Average_ms"] - shifted_60d_mean) / shifted_60d_std).round(2)
@@ -154,7 +154,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Lactate_Threshold_Pace_decimal_min_km", "Lactate_Threshold_Heart_Rate_bpm", 
         "Physiological_Max_HR_bpm", "Overnight_Sleep_Duration_min", "Sleep_Start_Time_HH_MM", 
         "Sleep_End_Time_HH_MM", "Overnight_Resting_Heart_Rate_bpm", "Resting_Heart_Rate_7d_Average_bpm",
-        "Overnight_HRV_RMSSD_ms", "HRV_RMSSD_7d_Average_ms", 
+        "Overnight_Average_HRV_RMSSD_ms", "HRV_RMSSD_7d_Average_ms", 
         "HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore", "Daily_Morning_Weight_kg",
         "Body_Fat_Percentage_7d_Average", "Pulse_Wave_Velocity_m_s", 
         "Resting_Systolic_Blood_Pressure_mmHg", "Resting_Diastolic_Blood_Pressure_mmHg",
@@ -177,7 +177,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Physiological_Max_HR_bpm",
         "Overnight_Sleep_Duration_min",
         "Overnight_Resting_Heart_Rate_bpm",
-        "Overnight_HRV_RMSSD_ms",
+        "Overnight_Average_HRV_RMSSD_ms",
         "Resting_Systolic_Blood_Pressure_mmHg",
         "Resting_Diastolic_Blood_Pressure_mmHg"
     ]
@@ -195,7 +195,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
 
 def get_file_id(service, filename, folder_id):
-    # Safely escape apostrophes to prevent Drive API parsing errors
     safe_filename = filename.replace("'", "\\'")
     query = f"name='{safe_filename}' and '{folder_id}' in parents and trashed=false"
     results = service.files().list(q=query, fields="files(id, name)").execute()
