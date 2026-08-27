@@ -67,26 +67,26 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     }
     df_w_daily = df_w_daily.rename(columns=withings_mapping)
     
-    # 3. Process Medical Data
+    # 3. Process Medical Data (with explicit unit headers)
     df_medical['Date_YYYY_MM_DD'] = pd.to_datetime(
         df_medical['Test Date'], format='%d/%m/%Y', errors='coerce'
     ).dt.strftime('%Y-%m-%d')
     df_medical['clean_test'] = df_medical['Test Name'].astype(str).str.lower().str.strip()
     
     test_map = {
-        'ApoB': ['apolipoprotein b', 'apob'],
-        'LDL_Cholesterol': ['ldl cholesterol', 'ldl', 'ldl cholesterol (calculated)'],
-        'HDL_Cholesterol': ['hdl cholesterol', 'hdl'],
-        'Triglycerides': ['triglycerides', 'triglyceride'],
-        'HbA1c': ['hba1c'],
-        'Ferritin': ['ferritin'],
-        'Vitamin_D': ['vitamin d', '25-oh vitamin d', 'vit d', '25(oh)d'],
-        'hs_CRP': ['hs-crp', 'crp high sensitivity', 'high sensitivity crp', 'hscrp', 'crp'],
-        'ALT': ['alt', 'alanine transferase', 'alanine aminotransferase', 'sgpt'],
-        'GGT': ['ggt', 'gamma-gt', 'gamma glutamyl transferase', 'gamma-glutamyl transferase'],
-        'Creatinine': ['creatinine', 'creatine'],
-        'eGFR': ['egfr', 'estimated glomerular filtration rate'],
-        'TSH': ['tsh', 'thyroid stimulating hormone']
+        'ApoB_g_L': ['apolipoprotein b', 'apob'],
+        'LDL_Cholesterol_mmol_L': ['ldl cholesterol', 'ldl', 'ldl cholesterol (calculated)'],
+        'HDL_Cholesterol_mmol_L': ['hdl cholesterol', 'hdl'],
+        'Triglycerides_mmol_L': ['triglycerides', 'triglyceride'],
+        'HbA1c_mmol_mol': ['hba1c'],
+        'Ferritin_ug_L': ['ferritin'],
+        'Vitamin_D_nmol_L': ['vitamin d', '25-oh vitamin d', 'vit d', '25(oh)d'],
+        'hs_CRP_mg_L': ['hs-crp', 'crp high sensitivity', 'high sensitivity crp', 'hscrp', 'crp'],
+        'ALT_U_L': ['alt', 'alanine transferase', 'alanine aminotransferase', 'sgpt'],
+        'GGT_IU_L': ['ggt', 'gamma-gt', 'gamma glutamyl transferase', 'gamma-glutamyl transferase'],
+        'Creatinine_umol_L': ['creatinine', 'creatine'],
+        'eGFR_ml_min_1_73m2': ['egfr', 'estimated glomerular filtration rate'],
+        'TSH_mIU_L': ['tsh', 'thyroid stimulating hormone']
     }
 
     mapped_medical_data = []
@@ -128,11 +128,11 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         df["Resting_Heart_Rate_7d_Average_bpm"] = df["Overnight_Resting_Heart_Rate_bpm"].rolling(window=7, min_periods=1).mean().round(1)
         
     if "Overnight_Average_HRV_RMSSD_ms" in df.columns:
-        df["HRV_RMSSD_7d_Average_ms"] = df["Overnight_Average_HRV_RMSSD_ms"].rolling(window=7, min_periods=1).mean().round(1)
+        df["Overnight_Average_HRV_RMSSD_7d_Average_ms"] = df["Overnight_Average_HRV_RMSSD_ms"].rolling(window=7, min_periods=1).mean().round(1)
         shifted_hrv = df["Overnight_Average_HRV_RMSSD_ms"].shift(7)
         shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
         shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
-        df["HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore"] = ((df["HRV_RMSSD_7d_Average_ms"] - shifted_60d_mean) / shifted_60d_std).round(2)
+        df["Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore"] = ((df["Overnight_Average_HRV_RMSSD_7d_Average_ms"] - shifted_60d_mean) / shifted_60d_std).round(2)
     
     if "Raw_Body_Fat_Percentage" in df.columns:
         df["Body_Fat_Percentage_7d_Average"] = df["Raw_Body_Fat_Percentage"].rolling(window=7, min_periods=1).mean().round(1)
@@ -154,12 +154,12 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Lactate_Threshold_Pace_decimal_min_km", "Lactate_Threshold_Heart_Rate_bpm", 
         "Physiological_Max_HR_bpm", "Overnight_Sleep_Duration_min", "Sleep_Start_Time_HH_MM", 
         "Sleep_End_Time_HH_MM", "Overnight_Resting_Heart_Rate_bpm", "Resting_Heart_Rate_7d_Average_bpm",
-        "Overnight_Average_HRV_RMSSD_ms", "HRV_RMSSD_7d_Average_ms", 
-        "HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore", "Daily_Morning_Weight_kg",
+        "Overnight_Average_HRV_RMSSD_ms", "Overnight_Average_HRV_RMSSD_7d_Average_ms", 
+        "Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore", "Daily_Morning_Weight_kg",
         "Body_Fat_Percentage_7d_Average", "Pulse_Wave_Velocity_m_s", 
         "Resting_Systolic_Blood_Pressure_mmHg", "Resting_Diastolic_Blood_Pressure_mmHg",
-        "ApoB", "LDL_Cholesterol", "HDL_Cholesterol", "Triglycerides", "HbA1c",
-        "Ferritin", "Vitamin_D", "hs_CRP", "ALT", "GGT", "Creatinine", "eGFR", "TSH"
+        "ApoB_g_L", "LDL_Cholesterol_mmol_L", "HDL_Cholesterol_mmol_L", "Triglycerides_mmol_L", "HbA1c_mmol_mol",
+        "Ferritin_ug_L", "Vitamin_D_nmol_L", "hs_CRP_mg_L", "ALT_U_L", "GGT_IU_L", "Creatinine_umol_L", "eGFR_ml_min_1_73m2", "TSH_mIU_L"
     ]
 
     for col in required_columns:
