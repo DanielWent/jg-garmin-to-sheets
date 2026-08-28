@@ -1,5 +1,150 @@
-# DATA METRICS REFERENCE
-#
+```python
+import pandas as pd
+import numpy as np
+
+def get_col_letter(idx):
+    result = ""
+    idx += 1
+    while idx > 0:
+        idx, remainder = divmod(idx - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+def analyze_file(filename):
+    try:
+        df = pd.read_csv(filename)
+        cols = []
+        for i, col in enumerate(df.columns):
+            sample = df[col].dropna()
+            
+            # Format detection
+            if sample.empty:
+                fmt = "Empty"
+            else:
+                val = sample.iloc[0]
+                if isinstance(val, str):
+                    if ":" in val and len(val.split(":")) >= 2 and any(char.isdigit() for char in val):
+                        fmt = "HH:MM or HH:MM:SS"
+                    elif "-" in val and len(val) >= 8 and val[:4].isdigit():
+                        fmt = "YYYY-MM-DD"
+                    elif "/" in val and ":" in val and len(val) >= 14:
+                        fmt = "DD/MM/YYYY HH:MM"
+                    else:
+                        fmt = "String"
+                elif isinstance(val, bool):
+                    fmt = "Boolean"
+                elif isinstance(val, int) or np.issubdtype(sample.dtype, np.integer):
+                    fmt = "Integer"
+                elif isinstance(val, float) or np.issubdtype(sample.dtype, np.floating):
+                    if all(x.is_integer() for x in sample if pd.notnull(x)):
+                        fmt = "Integer (stored as float)"
+                    else:
+                        fmt = "Decimal"
+                else:
+                    fmt = str(type(val))
+            
+            # Unit extraction attempt from column name, else "None"
+            unit = "None"
+            if "(min)" in col or "(min/km)" in col:
+                unit = "Minutes" if "(min)" in col else "min/km"
+            elif "(km)" in col: unit = "km"
+            elif "(bpm)" in col: unit = "bpm"
+            elif "(kcal)" in col: unit = "kcal"
+            elif "(ml/kg/min)" in col: unit = "ml/kg/min"
+            elif "(0-100)" in col: unit = "Score (0-100)"
+            elif "(mmHg)" in col: unit = "mmHg"
+            elif "(ms)" in col: unit = "ms"
+            elif "(kg)" in col: unit = "kg"
+            elif "(%)" in col: unit = "%"
+            elif "(m/s)" in col: unit = "m/s"
+            elif "(years)" in col: unit = "Years"
+            elif "(HH:MM)" in col: unit = "HH:MM"
+            elif "(m)" in col and "(ms)" not in col and "(min/km)" not in col and "(m/s)" not in col: unit = "m"
+            elif "(Celsius)" in col: unit = "°C"
+            elif "(km/h)" in col: unit = "km/h"
+            elif "(cm)" in col: unit = "cm"
+            elif "(0.0-5.0)" in col: unit = "0.0-5.0"
+            elif "(Watts)" in col: unit = "Watts"
+            elif "(ml)" in col and "ml/kg/min" not in col: unit = "ml"
+            elif "Duration" in col: unit = "Minutes" # Fallbacks
+            elif "Time" in col and "Start" not in col and "End" not in col and "Date" not in col: unit = "HH:MM:SS"
+            elif "Pace" in col: unit = "min/km"
+            elif "Speed" in col: unit = "km/h"
+            elif "Ascent" in col or "Descent" in col or "Distance" in col or "Elevation" in col: unit = "m" if "Ascent" in col or "Descent" in col else "km"
+            elif "HR " in col or "HR" == col: unit = "bpm"
+            elif "Steps" in col: unit = "Steps"
+            elif "Floors" in col: unit = "Floors"
+            elif "Calories" in col: unit = "kcal"
+            elif "Age" in col and "Adjusted" not in col: unit = "Years"
+            
+            cols.append({
+                "name": col, # Exact header
+                "col": f"Column {get_col_letter(i)}",
+                "unit": unit,
+                "fmt": fmt
+            })
+        return cols
+    except Exception as e:
+        return str(e)
+
+files = ["drw_garmin_data.csv", "drw_withings_bodyscan_data.csv", "drw_garmin_activities_list.csv"]
+results = {f: analyze_file(f) for f in files}
+print(results)
+
+
+```
+
+```text
+{'drw_garmin_data.csv': [{'name': 'Date (YYYY-MM-DD)', 'col': 'Column A', 'unit': 'None', 'fmt': 'YYYY-MM-DD'}, {'name': 'User Name', 'col': 'Column B', 'unit': 'None', 'fmt': 'String'}, {'name': 'User Age', 'col': 'Column C', 'unit': 'Years', 'fmt': 'Decimal'}, {'name': 'User Gender', 'col': 'Column D', 'unit': 'None', 'fmt': 'String'}, {'name': 'Physiological Maximum Heart Rate (bpm)', 'col': 'Column E', 'unit': 'bpm', 'fmt': 'Integer'}, {'name': 'VO2 Max (ml/kg/min)', 'col': 'Column F', 'unit': 'ml/kg/min', 'fmt': 'Decimal'}, {'name': 'VO2 Max Percentile (Age-Gender Adjusted)', 'col': 'Column G', 'unit': 'None', 'fmt': 'Decimal'}, {'name': 'Lactate Threshold Pace (min/km)', 'col': 'Column H', 'unit': 'min/km', 'fmt': 'HH:MM or HH:MM:SS'}, {'name': 'Lactate Threshold Heart Rate (bpm)', 'col': 'Column I', 'unit': 'bpm', 'fmt': 'Integer (stored as float)'}, {'name': 'Garmin Sleep Score (0-100)', 'col': 'Column J', 'unit': 'Score (0-100)', 'fmt': 'Integer (stored as float)'}, {'name': 'Sleep Start Time', 'col': 'Column K', 'unit': 'None', 'fmt': 'HH:MM or HH:MM:SS'}, {'name': 'Sleep End Time', 'col': 'Column L', 'unit': 'None', 'fmt': 'HH:MM or HH:MM:SS'}, {'name': 'Deep Sleep (min)', 'col': 'Column M', 'unit': 'Minutes', 'fmt': 'Integer (stored as float)'}, {'name': 'Light Sleep (min)', 'col': 'Column N', 'unit': 'Minutes', 'fmt': 'Integer (stored as float)'}, {'name': 'REM Sleep (min)', 'col': 'Column O', 'unit': 'Minutes', 'fmt': 'Integer (stored as float)'}, {'name': 'Awake Time (min)', 'col': 'Column P', 'unit': 'Minutes', 'fmt': 'Integer (stored as float)'}, {'name': 'Sleep Length (min)', 'col': 'Column Q', 'unit': 'Minutes', 'fmt': 'Integer (stored as float)'}, {'name': 'Sleep Need (min)', 'col': 'Column R', 'unit': 'Minutes', 'fmt': 'Integer (stored as float)'}, {'name': 'Overnight Average Pulse Ox / SpO2 (%)', 'col': 'Column S', 'unit': '%', 'fmt': 'Integer (stored as float)'}, {'name': 'Garmin Average Stress Score (0-100)', 'col': 'Column T', 'unit': 'Score (0-100)', 'fmt': 'String'}, {'name': 'Daily Min Body Battery (0-100)', 'col': 'Column U', 'unit': 'Score (0-100)', 'fmt': 'String'}, {'name': 'Daily Max Body Battery (0-100)', 'col': 'Column V', 'unit': 'Score (0-100)', 'fmt': 'String'}, {'name': 'Body Battery Charged (0-100)', 'col': 'Column W', 'unit': 'Score (0-100)', 'fmt': 'String'}, {'name': 'Body Battery Drained (0-100)', 'col': 'Column X', 'unit': 'Score (0-100)', 'fmt': 'String'}, {'name': 'Daily Steps', 'col': 'Column Y', 'unit': 'Steps', 'fmt': 'String'}, {'name': 'Daily Floors Climbed', 'col': 'Column Z', 'unit': 'Floors', 'fmt': 'String'}, {'name': 'Daily Intensity Minutes', 'col': 'Column AA', 'unit': 'None', 'fmt': 'String'}, {'name': 'Total Calories (kcal)', 'col': 'Column AB', 'unit': 'kcal', 'fmt': 'String'}, {'name': 'Systolic Blood Pressure (mmHg)', 'col': 'Column AC', 'unit': 'mmHg', 'fmt': 'Integer (stored as float)'}, {'name': 'Diastolic Blood Pressure (mmHg)', 'col': 'Column AD', 'unit': 'mmHg', 'fmt': 'Integer (stored as float)'}, {'name': 'Garmin Training Load (7 Day Sum)', 'col': 'Column AE', 'unit': 'None', 'fmt': 'Integer (stored as float)'}, {'name': 'Garmin Training Load Focus', 'col': 'Column AF', 'unit': 'None', 'fmt': 'String'}, {'name': 'Morning Garmin Training Readiness (0-100)', 'col': 'Column AG', 'unit': 'Score (0-100)', 'fmt': 'Integer (stored as float)'}, {'name': 'Overnight Resting HR (bpm)', 'col': 'Column AH', 'unit': 'bpm', 'fmt': 'Integer (stored as float)'}, {'name': 'Overnight HRV (ms)', 'col': 'Column AI', 'unit': 'ms', 'fmt': 'Integer (stored as float)'}, {'name': 'Garmin HRV Status (Text Label)', 'col': 'Column AJ', 'unit': 'None', 'fmt': 'String'}, {'name': 'Garmin Training Status (Text Label)', 'col': 'Column AK', 'unit': 'None', 'fmt': 'String'}, {'name': 'Total Walking Distance (km)', 'col': 'Column AL', 'unit': 'km', 'fmt': 'Decimal'}, {'name': 'Total Walking Duration (min)', 'col': 'Column AM', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'Total Running Activities Count', 'col': 'Column AN', 'unit': 'None', 'fmt': 'Integer'}, {'name': 'Total Running Distance (km)', 'col': 'Column AO', 'unit': 'km', 'fmt': 'Decimal'}, {'name': 'Total Running Duration (min)', 'col': 'Column AP', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'Total Strength Training Duration (min)', 'col': 'Column AQ', 'unit': 'Minutes', 'fmt': 'Decimal'}], 'drw_withings_bodyscan_data.csv': [{'name': 'date', 'col': 'Column A', 'unit': 'None', 'fmt': 'HH:MM or HH:MM:SS'}, {'name': 'Weight (kg)', 'col': 'Column B', 'unit': 'kg', 'fmt': 'Decimal'}, {'name': 'BMI', 'col': 'Column C', 'unit': 'None', 'fmt': 'Decimal'}, {'name': 'Body Fat (%)', 'col': 'Column D', 'unit': '%', 'fmt': 'Decimal'}, {'name': 'Visceral Fat Rating', 'col': 'Column E', 'unit': 'None', 'fmt': 'Decimal'}, {'name': 'Pulse Wave Velocity (m/s)', 'col': 'Column F', 'unit': 'm/s', 'fmt': 'Decimal'}, {'name': 'AFib Status', 'col': 'Column G', 'unit': 'None', 'fmt': 'String'}, {'name': 'Vascular Age (years)', 'col': 'Column H', 'unit': 'Years', 'fmt': 'Decimal'}, {'name': 'Nerve Health Score', 'col': 'Column I', 'unit': 'None', 'fmt': 'Decimal'}], 'drw_garmin_activities_list.csv': [{'name': 'Activity ID', 'col': 'Column A', 'unit': 'None', 'fmt': 'Integer (stored as float)'}, {'name': 'Date (YYYY-MM-DD)', 'col': 'Column B', 'unit': 'None', 'fmt': 'YYYY-MM-DD'}, {'name': 'Start Time (HH:MM)', 'col': 'Column C', 'unit': 'HH:MM', 'fmt': 'HH:MM or HH:MM:SS'}, {'name': 'Activity Type', 'col': 'Column D', 'unit': 'None', 'fmt': 'String'}, {'name': 'Activity Name', 'col': 'Column E', 'unit': 'None', 'fmt': 'String'}, {'name': 'Distance (km)', 'col': 'Column F', 'unit': 'km', 'fmt': 'Decimal'}, {'name': 'Duration (min)', 'col': 'Column G', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'Avg Pace (min/km)', 'col': 'Column H', 'unit': 'min/km', 'fmt': 'HH:MM or HH:MM:SS'}, {'name': 'Average Grade Adjusted Pace (min/km)', 'col': 'Column I', 'unit': 'min/km', 'fmt': 'HH:MM or HH:MM:SS'}, {'name': 'Total Ascent (m)', 'col': 'Column J', 'unit': 'm', 'fmt': 'Integer (stored as float)'}, {'name': 'Total Descent (m)', 'col': 'Column K', 'unit': 'm', 'fmt': 'Integer (stored as float)'}, {'name': 'Feels Like Temperature (Celsius)', 'col': 'Column L', 'unit': '°C', 'fmt': 'Decimal'}, {'name': 'Weather Condition', 'col': 'Column M', 'unit': 'None', 'fmt': 'String'}, {'name': 'Sustained Wind Speed (km/h)', 'col': 'Column N', 'unit': 'km/h', 'fmt': 'Integer (stored as float)'}, {'name': 'Avg HR (bpm)', 'col': 'Column O', 'unit': 'bpm', 'fmt': 'Integer (stored as float)'}, {'name': 'Max HR (bpm)', 'col': 'Column P', 'unit': 'bpm', 'fmt': 'Integer (stored as float)'}, {'name': 'Average Cadence (spm)', 'col': 'Column Q', 'unit': 'None', 'fmt': 'Integer (stored as float)'}, {'name': 'Average Stride Length (m)', 'col': 'Column R', 'unit': 'm', 'fmt': 'Decimal'}, {'name': 'Average Ground Contact Time (ms)', 'col': 'Column S', 'unit': 'ms', 'fmt': 'Integer (stored as float)'}, {'name': 'Vertical Oscillation (cm)', 'col': 'Column T', 'unit': 'cm', 'fmt': 'Decimal'}, {'name': 'Aerobic Training Effect (0.0-5.0)', 'col': 'Column U', 'unit': '0.0-5.0', 'fmt': 'Decimal'}, {'name': 'Anaerobic Training Effect (0.0-5.0)', 'col': 'Column V', 'unit': '0.0-5.0', 'fmt': 'Decimal'}, {'name': 'Activity Training Load', 'col': 'Column W', 'unit': 'None', 'fmt': 'Decimal'}, {'name': 'Avg Power (Watts)', 'col': 'Column X', 'unit': 'Watts', 'fmt': 'Integer (stored as float)'}, {'name': 'Max Power (Watts)', 'col': 'Column Y', 'unit': 'Watts', 'fmt': 'Integer (stored as float)'}, {'name': 'Normalized Power (Watts)', 'col': 'Column Z', 'unit': 'Watts', 'fmt': 'Integer (stored as float)'}, {'name': 'Estimated Sweat Loss (ml)', 'col': 'Column AA', 'unit': 'ml', 'fmt': 'Integer (stored as float)'}, {'name': 'Garmin Training Effect Label', 'col': 'Column AB', 'unit': 'None', 'fmt': 'String'}, {'name': 'HR Zone 1 (min)', 'col': 'Column AC', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'HR Zone 2 (min)', 'col': 'Column AD', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'HR Zone 3 (min)', 'col': 'Column AE', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'HR Zone 4 (min)', 'col': 'Column AF', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'HR Zone 5 (min)', 'col': 'Column AG', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'Power Zone 1 (min)', 'col': 'Column AH', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'Power Zone 2 (min)', 'col': 'Column AI', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'Power Zone 3 (min)', 'col': 'Column AJ', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'Power Zone 4 (min)', 'col': 'Column AK', 'unit': 'Minutes', 'fmt': 'Decimal'}, {'name': 'Power Zone 5 (min)', 'col': 'Column AL', 'unit': 'Minutes', 'fmt': 'Decimal'}]}
+
+
+```
+
+```python
+out = "```python\n"
+
+out += "# --------------------------------------------------\n"
+out += "# FILE: drw_garmin_data.csv\n"
+out += "# NOTE: Contains daily aggregated physiological, sleep, and activity metrics recorded by Garmin.\n"
+out += "# STRUCTURE: One row per day.\n"
+out += "# --------------------------------------------------\n"
+out += "# | Metric Name | Column | Unit | Format |\n"
+out += "# | :--- | :--- | :--- | :--- |\n"
+for m in results['drw_garmin_data.csv']:
+    fmt = "Integer" if "Integer" in m['fmt'] else m['fmt']
+    out += f"# | {m['name']} | {m['col']} | Unit: {m['unit']} | {fmt} |\n"
+
+out += "#\n# --------------------------------------------------\n"
+out += "# FILE: drw_withings_bodyscan_data.csv\n"
+out += "# NOTE: Contains body composition, cardiovascular, and nerve health measurements from a Withings scale.\n"
+out += "# STRUCTURE: One row per recorded scan/weigh-in event.\n"
+out += "# --------------------------------------------------\n"
+out += "# | Metric Name | Column | Unit | Format |\n"
+out += "# | :--- | :--- | :--- | :--- |\n"
+for m in results['drw_withings_bodyscan_data.csv']:
+    fmt = "Integer" if "Integer" in m['fmt'] else m['fmt']
+    fmt = "DD/MM/YYYY HH:MM" if m['name'] == 'date' else fmt
+    out += f"# | {m['name']} | {m['col']} | Unit: {m['unit']} | {fmt} |\n"
+
+out += "#\n# --------------------------------------------------\n"
+out += "# FILE: drw_garmin_activities_list.csv\n"
+out += "# NOTE: Contains detailed statistics for individual recorded workouts and activities.\n"
+out += "# STRUCTURE: One row per tracked activity.\n"
+out += "# --------------------------------------------------\n"
+out += "# | Metric Name | Column | Unit | Format |\n"
+out += "# | :--- | :--- | :--- | :--- |\n"
+for m in results['drw_garmin_activities_list.csv']:
+    fmt = "Integer" if "Integer" in m['fmt'] else m['fmt']
+    out += f"# | {m['name']} | {m['col']} | Unit: {m['unit']} | {fmt} |\n"
+
+out += "```"
+print(out)
+
+
+```
+
+```text
+```python
 # --------------------------------------------------
 # FILE: drw_garmin_data.csv
 # NOTE: Contains daily aggregated physiological, sleep, and activity metrics recorded by Garmin.
@@ -7,49 +152,49 @@
 # --------------------------------------------------
 # | Metric Name | Column | Unit | Format |
 # | :--- | :--- | :--- | :--- |
-# | Date | Column A | Unit: None | YYYY-MM-DD |
+# | Date (YYYY-MM-DD) | Column A | Unit: None | YYYY-MM-DD |
 # | User Name | Column B | Unit: None | String |
 # | User Age | Column C | Unit: Years | Decimal |
 # | User Gender | Column D | Unit: None | String |
-# | Physiological Maximum Heart Rate | Column E | Unit: bpm | Integer |
-# | VO2 Max | Column F | Unit: ml/kg/min | Decimal |
-# | VO2 Max Percentile | Column G | Unit: % | Decimal |
-# | Lactate Threshold Pace | Column H | Unit: min/km | MM:SS |
-# | Lactate Threshold Heart Rate | Column I | Unit: bpm | Integer |
-# | Garmin Sleep Score | Column J | Unit: Score | Integer |
-# | Sleep Start Time | Column K | Unit: None | HH:MM |
-# | Sleep End Time | Column L | Unit: None | HH:MM |
-# | Deep Sleep | Column M | Unit: Minutes | Integer |
-# | Light Sleep | Column N | Unit: Minutes | Integer |
-# | REM Sleep | Column O | Unit: Minutes | Integer |
-# | Awake Time | Column P | Unit: Minutes | Integer |
-# | Sleep Length | Column Q | Unit: Minutes | Integer |
-# | Sleep Need | Column R | Unit: Minutes | Integer |
-# | Overnight Average Pulse Ox / SpO2 | Column S | Unit: % | Integer |
-# | Garmin Average Stress Score | Column T | Unit: Score | Integer |
-# | Daily Min Body Battery | Column U | Unit: Score | Integer |
-# | Daily Max Body Battery | Column V | Unit: Score | Integer |
-# | Body Battery Charged | Column W | Unit: Score | Integer |
-# | Body Battery Drained | Column X | Unit: Score | Integer |
-# | Daily Steps | Column Y | Unit: Steps | Integer |
-# | Daily Floors Climbed | Column Z | Unit: Floors | Integer |
-# | Daily Intensity Minutes | Column AA | Unit: Minutes | Integer |
-# | Total Calories | Column AB | Unit: kcal | Integer |
-# | Systolic Blood Pressure | Column AC | Unit: mmHg | Integer |
-# | Diastolic Blood Pressure | Column AD | Unit: mmHg | Integer |
-# | Garmin Training Load | Column AE | Unit: Load | Integer |
+# | Physiological Maximum Heart Rate (bpm) | Column E | Unit: bpm | Integer |
+# | VO2 Max (ml/kg/min) | Column F | Unit: ml/kg/min | Decimal |
+# | VO2 Max Percentile (Age-Gender Adjusted) | Column G | Unit: None | Decimal |
+# | Lactate Threshold Pace (min/km) | Column H | Unit: min/km | HH:MM or HH:MM:SS |
+# | Lactate Threshold Heart Rate (bpm) | Column I | Unit: bpm | Integer |
+# | Garmin Sleep Score (0-100) | Column J | Unit: Score (0-100) | Integer |
+# | Sleep Start Time | Column K | Unit: None | HH:MM or HH:MM:SS |
+# | Sleep End Time | Column L | Unit: None | HH:MM or HH:MM:SS |
+# | Deep Sleep (min) | Column M | Unit: Minutes | Integer |
+# | Light Sleep (min) | Column N | Unit: Minutes | Integer |
+# | REM Sleep (min) | Column O | Unit: Minutes | Integer |
+# | Awake Time (min) | Column P | Unit: Minutes | Integer |
+# | Sleep Length (min) | Column Q | Unit: Minutes | Integer |
+# | Sleep Need (min) | Column R | Unit: Minutes | Integer |
+# | Overnight Average Pulse Ox / SpO2 (%) | Column S | Unit: % | Integer |
+# | Garmin Average Stress Score (0-100) | Column T | Unit: Score (0-100) | String |
+# | Daily Min Body Battery (0-100) | Column U | Unit: Score (0-100) | String |
+# | Daily Max Body Battery (0-100) | Column V | Unit: Score (0-100) | String |
+# | Body Battery Charged (0-100) | Column W | Unit: Score (0-100) | String |
+# | Body Battery Drained (0-100) | Column X | Unit: Score (0-100) | String |
+# | Daily Steps | Column Y | Unit: Steps | String |
+# | Daily Floors Climbed | Column Z | Unit: Floors | String |
+# | Daily Intensity Minutes | Column AA | Unit: None | String |
+# | Total Calories (kcal) | Column AB | Unit: kcal | String |
+# | Systolic Blood Pressure (mmHg) | Column AC | Unit: mmHg | Integer |
+# | Diastolic Blood Pressure (mmHg) | Column AD | Unit: mmHg | Integer |
+# | Garmin Training Load (7 Day Sum) | Column AE | Unit: None | Integer |
 # | Garmin Training Load Focus | Column AF | Unit: None | String |
-# | Morning Garmin Training Readiness | Column AG | Unit: Score | Integer |
-# | Overnight Resting HR | Column AH | Unit: bpm | Integer |
-# | Overnight HRV | Column AI | Unit: ms | Integer |
-# | Garmin HRV Status | Column AJ | Unit: None | String |
-# | Garmin Training Status | Column AK | Unit: None | String |
-# | Total Walking Distance | Column AL | Unit: km | Decimal |
-# | Total Walking Duration | Column AM | Unit: Minutes | Decimal |
-# | Total Running Activities Count | Column AN | Unit: Count | Integer |
-# | Total Running Distance | Column AO | Unit: km | Decimal |
-# | Total Running Duration | Column AP | Unit: Minutes | Decimal |
-# | Total Strength Training Duration | Column AQ | Unit: Minutes | Decimal |
+# | Morning Garmin Training Readiness (0-100) | Column AG | Unit: Score (0-100) | Integer |
+# | Overnight Resting HR (bpm) | Column AH | Unit: bpm | Integer |
+# | Overnight HRV (ms) | Column AI | Unit: ms | Integer |
+# | Garmin HRV Status (Text Label) | Column AJ | Unit: None | String |
+# | Garmin Training Status (Text Label) | Column AK | Unit: None | String |
+# | Total Walking Distance (km) | Column AL | Unit: km | Decimal |
+# | Total Walking Duration (min) | Column AM | Unit: Minutes | Decimal |
+# | Total Running Activities Count | Column AN | Unit: None | Integer |
+# | Total Running Distance (km) | Column AO | Unit: km | Decimal |
+# | Total Running Duration (min) | Column AP | Unit: Minutes | Decimal |
+# | Total Strength Training Duration (min) | Column AQ | Unit: Minutes | Decimal |
 #
 # --------------------------------------------------
 # FILE: drw_withings_bodyscan_data.csv
@@ -58,15 +203,15 @@
 # --------------------------------------------------
 # | Metric Name | Column | Unit | Format |
 # | :--- | :--- | :--- | :--- |
-# | Date and Time | Column A | Unit: None | DD/MM/YYYY HH:MM |
-# | Weight | Column B | Unit: kg | Decimal |
-# | Body Mass Index (BMI) | Column C | Unit: None | Decimal |
-# | Body Fat | Column D | Unit: % | Decimal |
-# | Visceral Fat Rating | Column E | Unit: Rating | Decimal |
-# | Pulse Wave Velocity | Column F | Unit: m/s | Decimal |
+# | date | Column A | Unit: None | DD/MM/YYYY HH:MM |
+# | Weight (kg) | Column B | Unit: kg | Decimal |
+# | BMI | Column C | Unit: None | Decimal |
+# | Body Fat (%) | Column D | Unit: % | Decimal |
+# | Visceral Fat Rating | Column E | Unit: None | Decimal |
+# | Pulse Wave Velocity (m/s) | Column F | Unit: m/s | Decimal |
 # | AFib Status | Column G | Unit: None | String |
-# | Vascular Age | Column H | Unit: Years | Decimal |
-# | Nerve Health Score | Column I | Unit: Score | Decimal |
+# | Vascular Age (years) | Column H | Unit: Years | Decimal |
+# | Nerve Health Score | Column I | Unit: None | Decimal |
 #
 # --------------------------------------------------
 # FILE: drw_garmin_activities_list.csv
@@ -76,44 +221,164 @@
 # | Metric Name | Column | Unit | Format |
 # | :--- | :--- | :--- | :--- |
 # | Activity ID | Column A | Unit: None | Integer |
-# | Date | Column B | Unit: None | YYYY-MM-DD |
-# | Start Time | Column C | Unit: None | HH:MM:SS |
+# | Date (YYYY-MM-DD) | Column B | Unit: None | YYYY-MM-DD |
+# | Start Time (HH:MM) | Column C | Unit: HH:MM | HH:MM or HH:MM:SS |
 # | Activity Type | Column D | Unit: None | String |
 # | Activity Name | Column E | Unit: None | String |
-# | Distance | Column F | Unit: km | Decimal |
-# | Duration | Column G | Unit: Minutes | Decimal |
-# | Avg Pace | Column H | Unit: min/km | HH:MM:SS |
-# | Average Grade Adjusted Pace | Column I | Unit: min/km | HH:MM:SS |
-# | Total Ascent | Column J | Unit: m | Integer |
-# | Total Descent | Column K | Unit: m | Integer |
-# | Feels Like Temperature | Column L | Unit: °C | Decimal |
+# | Distance (km) | Column F | Unit: km | Decimal |
+# | Duration (min) | Column G | Unit: Minutes | Decimal |
+# | Avg Pace (min/km) | Column H | Unit: min/km | HH:MM or HH:MM:SS |
+# | Average Grade Adjusted Pace (min/km) | Column I | Unit: min/km | HH:MM or HH:MM:SS |
+# | Total Ascent (m) | Column J | Unit: m | Integer |
+# | Total Descent (m) | Column K | Unit: m | Integer |
+# | Feels Like Temperature (Celsius) | Column L | Unit: °C | Decimal |
 # | Weather Condition | Column M | Unit: None | String |
-# | Sustained Wind Speed | Column N | Unit: km/h | Integer |
-# | Avg HR | Column O | Unit: bpm | Integer |
-# | Max HR | Column P | Unit: bpm | Integer |
-# | Average Cadence | Column Q | Unit: spm | Integer |
-# | Average Stride Length | Column R | Unit: m | Decimal |
-# | Average Ground Contact Time | Column S | Unit: ms | Integer |
-# | Vertical Oscillation | Column T | Unit: cm | Decimal |
-# | Aerobic Training Effect | Column U | Unit: None | Decimal |
-# | Anaerobic Training Effect | Column V | Unit: None | Decimal |
+# | Sustained Wind Speed (km/h) | Column N | Unit: km/h | Integer |
+# | Avg HR (bpm) | Column O | Unit: bpm | Integer |
+# | Max HR (bpm) | Column P | Unit: bpm | Integer |
+# | Average Cadence (spm) | Column Q | Unit: None | Integer |
+# | Average Stride Length (m) | Column R | Unit: m | Decimal |
+# | Average Ground Contact Time (ms) | Column S | Unit: ms | Integer |
+# | Vertical Oscillation (cm) | Column T | Unit: cm | Decimal |
+# | Aerobic Training Effect (0.0-5.0) | Column U | Unit: 0.0-5.0 | Decimal |
+# | Anaerobic Training Effect (0.0-5.0) | Column V | Unit: 0.0-5.0 | Decimal |
 # | Activity Training Load | Column W | Unit: None | Decimal |
-# | Avg Power | Column X | Unit: Watts | Integer |
-# | Max Power | Column Y | Unit: Watts | Integer |
-# | Normalized Power | Column Z | Unit: Watts | Integer |
-# | Estimated Sweat Loss | Column AA | Unit: ml | Integer |
+# | Avg Power (Watts) | Column X | Unit: Watts | Integer |
+# | Max Power (Watts) | Column Y | Unit: Watts | Integer |
+# | Normalized Power (Watts) | Column Z | Unit: Watts | Integer |
+# | Estimated Sweat Loss (ml) | Column AA | Unit: ml | Integer |
 # | Garmin Training Effect Label | Column AB | Unit: None | String |
-# | HR Zone 1 | Column AC | Unit: Minutes | Decimal |
-# | HR Zone 2 | Column AD | Unit: Minutes | Decimal |
-# | HR Zone 3 | Column AE | Unit: Minutes | Decimal |
-# | HR Zone 4 | Column AF | Unit: Minutes | Decimal |
-# | HR Zone 5 | Column AG | Unit: Minutes | Decimal |
-# | Power Zone 1 | Column AH | Unit: Minutes | Decimal |
-# | Power Zone 2 | Column AI | Unit: Minutes | Decimal |
-# | Power Zone 3 | Column AJ | Unit: Minutes | Decimal |
-# | Power Zone 4 | Column AK | Unit: Minutes | Decimal |
-# | Power Zone 5 | Column AL | Unit: Minutes | Decimal |
+# | HR Zone 1 (min) | Column AC | Unit: Minutes | Decimal |
+# | HR Zone 2 (min) | Column AD | Unit: Minutes | Decimal |
+# | HR Zone 3 (min) | Column AE | Unit: Minutes | Decimal |
+# | HR Zone 4 (min) | Column AF | Unit: Minutes | Decimal |
+# | HR Zone 5 (min) | Column AG | Unit: Minutes | Decimal |
+# | Power Zone 1 (min) | Column AH | Unit: Minutes | Decimal |
+# | Power Zone 2 (min) | Column AI | Unit: Minutes | Decimal |
+# | Power Zone 3 (min) | Column AJ | Unit: Minutes | Decimal |
+# | Power Zone 4 (min) | Column AK | Unit: Minutes | Decimal |
+# | Power Zone 5 (min) | Column AL | Unit: Minutes | Decimal |
 
+```
+
+```
+
+```python
+# --------------------------------------------------
+# FILE: drw_garmin_data.csv
+# NOTE: Contains daily aggregated physiological, sleep, and activity metrics recorded by Garmin.
+# STRUCTURE: One row per day.
+# --------------------------------------------------
+# | Metric Name | Column | Unit | Format |
+# | :--- | :--- | :--- | :--- |
+# | Date (YYYY-MM-DD) | Column A | Unit: None | YYYY-MM-DD |
+# | User Name | Column B | Unit: None | String |
+# | User Age | Column C | Unit: Years | Decimal |
+# | User Gender | Column D | Unit: None | String |
+# | Physiological Maximum Heart Rate (bpm) | Column E | Unit: bpm | Integer |
+# | VO2 Max (ml/kg/min) | Column F | Unit: ml/kg/min | Decimal |
+# | VO2 Max Percentile (Age-Gender Adjusted) | Column G | Unit: None | Decimal |
+# | Lactate Threshold Pace (min/km) | Column H | Unit: min/km | HH:MM or HH:MM:SS |
+# | Lactate Threshold Heart Rate (bpm) | Column I | Unit: bpm | Integer |
+# | Garmin Sleep Score (0-100) | Column J | Unit: Score (0-100) | Integer |
+# | Sleep Start Time | Column K | Unit: None | HH:MM or HH:MM:SS |
+# | Sleep End Time | Column L | Unit: None | HH:MM or HH:MM:SS |
+# | Deep Sleep (min) | Column M | Unit: Minutes | Integer |
+# | Light Sleep (min) | Column N | Unit: Minutes | Integer |
+# | REM Sleep (min) | Column O | Unit: Minutes | Integer |
+# | Awake Time (min) | Column P | Unit: Minutes | Integer |
+# | Sleep Length (min) | Column Q | Unit: Minutes | Integer |
+# | Sleep Need (min) | Column R | Unit: Minutes | Integer |
+# | Overnight Average Pulse Ox / SpO2 (%) | Column S | Unit: % | Integer |
+# | Garmin Average Stress Score (0-100) | Column T | Unit: Score (0-100) | String |
+# | Daily Min Body Battery (0-100) | Column U | Unit: Score (0-100) | String |
+# | Daily Max Body Battery (0-100) | Column V | Unit: Score (0-100) | String |
+# | Body Battery Charged (0-100) | Column W | Unit: Score (0-100) | String |
+# | Body Battery Drained (0-100) | Column X | Unit: Score (0-100) | String |
+# | Daily Steps | Column Y | Unit: Steps | String |
+# | Daily Floors Climbed | Column Z | Unit: Floors | String |
+# | Daily Intensity Minutes | Column AA | Unit: None | String |
+# | Total Calories (kcal) | Column AB | Unit: kcal | String |
+# | Systolic Blood Pressure (mmHg) | Column AC | Unit: mmHg | Integer |
+# | Diastolic Blood Pressure (mmHg) | Column AD | Unit: mmHg | Integer |
+# | Garmin Training Load (7 Day Sum) | Column AE | Unit: None | Integer |
+# | Garmin Training Load Focus | Column AF | Unit: None | String |
+# | Morning Garmin Training Readiness (0-100) | Column AG | Unit: Score (0-100) | Integer |
+# | Overnight Resting HR (bpm) | Column AH | Unit: bpm | Integer |
+# | Overnight HRV (ms) | Column AI | Unit: ms | Integer |
+# | Garmin HRV Status (Text Label) | Column AJ | Unit: None | String |
+# | Garmin Training Status (Text Label) | Column AK | Unit: None | String |
+# | Total Walking Distance (km) | Column AL | Unit: km | Decimal |
+# | Total Walking Duration (min) | Column AM | Unit: Minutes | Decimal |
+# | Total Running Activities Count | Column AN | Unit: None | Integer |
+# | Total Running Distance (km) | Column AO | Unit: km | Decimal |
+# | Total Running Duration (min) | Column AP | Unit: Minutes | Decimal |
+# | Total Strength Training Duration (min) | Column AQ | Unit: Minutes | Decimal |
+#
+# --------------------------------------------------
+# FILE: drw_withings_bodyscan_data.csv
+# NOTE: Contains body composition, cardiovascular, and nerve health measurements from a Withings scale.
+# STRUCTURE: One row per recorded scan/weigh-in event.
+# --------------------------------------------------
+# | Metric Name | Column | Unit | Format |
+# | :--- | :--- | :--- | :--- |
+# | date | Column A | Unit: None | DD/MM/YYYY HH:MM |
+# | Weight (kg) | Column B | Unit: kg | Decimal |
+# | BMI | Column C | Unit: None | Decimal |
+# | Body Fat (%) | Column D | Unit: % | Decimal |
+# | Visceral Fat Rating | Column E | Unit: None | Decimal |
+# | Pulse Wave Velocity (m/s) | Column F | Unit: m/s | Decimal |
+# | AFib Status | Column G | Unit: None | String |
+# | Vascular Age (years) | Column H | Unit: Years | Decimal |
+# | Nerve Health Score | Column I | Unit: None | Decimal |
+#
+# --------------------------------------------------
+# FILE: drw_garmin_activities_list.csv
+# NOTE: Contains detailed statistics for individual recorded workouts and activities.
+# STRUCTURE: One row per tracked activity.
+# --------------------------------------------------
+# | Metric Name | Column | Unit | Format |
+# | :--- | :--- | :--- | :--- |
+# | Activity ID | Column A | Unit: None | Integer |
+# | Date (YYYY-MM-DD) | Column B | Unit: None | YYYY-MM-DD |
+# | Start Time (HH:MM) | Column C | Unit: HH:MM | HH:MM or HH:MM:SS |
+# | Activity Type | Column D | Unit: None | String |
+# | Activity Name | Column E | Unit: None | String |
+# | Distance (km) | Column F | Unit: km | Decimal |
+# | Duration (min) | Column G | Unit: Minutes | Decimal |
+# | Avg Pace (min/km) | Column H | Unit: min/km | HH:MM or HH:MM:SS |
+# | Average Grade Adjusted Pace (min/km) | Column I | Unit: min/km | HH:MM or HH:MM:SS |
+# | Total Ascent (m) | Column J | Unit: m | Integer |
+# | Total Descent (m) | Column K | Unit: m | Integer |
+# | Feels Like Temperature (Celsius) | Column L | Unit: °C | Decimal |
+# | Weather Condition | Column M | Unit: None | String |
+# | Sustained Wind Speed (km/h) | Column N | Unit: km/h | Integer |
+# | Avg HR (bpm) | Column O | Unit: bpm | Integer |
+# | Max HR (bpm) | Column P | Unit: bpm | Integer |
+# | Average Cadence (spm) | Column Q | Unit: None | Integer |
+# | Average Stride Length (m) | Column R | Unit: m | Decimal |
+# | Average Ground Contact Time (ms) | Column S | Unit: ms | Integer |
+# | Vertical Oscillation (cm) | Column T | Unit: cm | Decimal |
+# | Aerobic Training Effect (0.0-5.0) | Column U | Unit: 0.0-5.0 | Decimal |
+# | Anaerobic Training Effect (0.0-5.0) | Column V | Unit: 0.0-5.0 | Decimal |
+# | Activity Training Load | Column W | Unit: None | Decimal |
+# | Avg Power (Watts) | Column X | Unit: Watts | Integer |
+# | Max Power (Watts) | Column Y | Unit: Watts | Integer |
+# | Normalized Power (Watts) | Column Z | Unit: Watts | Integer |
+# | Estimated Sweat Loss (ml) | Column AA | Unit: ml | Integer |
+# | Garmin Training Effect Label | Column AB | Unit: None | String |
+# | HR Zone 1 (min) | Column AC | Unit: Minutes | Decimal |
+# | HR Zone 2 (min) | Column AD | Unit: Minutes | Decimal |
+# | HR Zone 3 (min) | Column AE | Unit: Minutes | Decimal |
+# | HR Zone 4 (min) | Column AF | Unit: Minutes | Decimal |
+# | HR Zone 5 (min) | Column AG | Unit: Minutes | Decimal |
+# | Power Zone 1 (min) | Column AH | Unit: Minutes | Decimal |
+# | Power Zone 2 (min) | Column AI | Unit: Minutes | Decimal |
+# | Power Zone 3 (min) | Column AJ | Unit: Minutes | Decimal |
+# | Power Zone 4 (min) | Column AK | Unit: Minutes | Decimal |
+# | Power Zone 5 (min) | Column AL | Unit: Minutes | Decimal |
+
+```
 import os
 import io
 import json
