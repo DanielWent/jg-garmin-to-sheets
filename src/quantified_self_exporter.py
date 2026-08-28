@@ -1,59 +1,118 @@
 # DATA METRICS REFERENCE
 #
-# | Metric Name | File Name | Column | Unit | Format |
-# | :--- | :--- | :--- | :--- | :--- |
-# | Date | drw_garmin_data.csv | Column A | Unit: None | YYYY-MM-DD |
-# | User Name | drw_garmin_data.csv | Column B | Unit: None | String |
-# | User Age | drw_garmin_data.csv | Column C | Unit: Years | Decimal |
-# | User Gender | drw_garmin_data.csv | Column D | Unit: None | String |
-# | Physiological Maximum Heart Rate | drw_garmin_data.csv | Column E | Unit: bpm | Integer |
-# | VO2 Max | drw_garmin_data.csv | Column F | Unit: ml/kg/min | Decimal |
-# | VO2 Max Percentile | drw_garmin_data.csv | Column G | Unit: % | Decimal |
-# | Lactate Threshold Pace | drw_garmin_data.csv | Column H | Unit: min/km | MM:SS |
-# | Lactate Threshold Heart Rate | drw_garmin_data.csv | Column I | Unit: bpm | Integer |
-# | Garmin Sleep Score | drw_garmin_data.csv | Column J | Unit: Score | Integer |
-# | Sleep Start Time | drw_garmin_data.csv | Column K | Unit: None | HH:MM |
-# | Sleep End Time | drw_garmin_data.csv | Column L | Unit: None | HH:MM |
-# | Deep Sleep | drw_garmin_data.csv | Column M | Unit: Minutes | Integer |
-# | Light Sleep | drw_garmin_data.csv | Column N | Unit: Minutes | Integer |
-# | REM Sleep | drw_garmin_data.csv | Column O | Unit: Minutes | Integer |
-# | Awake Time | drw_garmin_data.csv | Column P | Unit: Minutes | Integer |
-# | Sleep Length | drw_garmin_data.csv | Column Q | Unit: Minutes | Integer |
-# | Sleep Need | drw_garmin_data.csv | Column R | Unit: Minutes | Integer |
-# | Overnight Average Pulse Ox / SpO2 | drw_garmin_data.csv | Column S | Unit: % | Integer |
-# | Garmin Average Stress Score | drw_garmin_data.csv | Column T | Unit: Score | Integer |
-# | Daily Min Body Battery | drw_garmin_data.csv | Column U | Unit: Score | Integer |
-# | Daily Max Body Battery | drw_garmin_data.csv | Column V | Unit: Score | Integer |
-# | Body Battery Charged | drw_garmin_data.csv | Column W | Unit: Score | Integer |
-# | Body Battery Drained | drw_garmin_data.csv | Column X | Unit: Score | Integer |
-# | Daily Steps | drw_garmin_data.csv | Column Y | Unit: Steps | Integer |
-# | Daily Floors Climbed | drw_garmin_data.csv | Column Z | Unit: Floors | Integer |
-# | Daily Intensity Minutes | drw_garmin_data.csv | Column AA | Unit: Minutes | Integer |
-# | Total Calories | drw_garmin_data.csv | Column AB | Unit: kcal | Integer |
-# | Systolic Blood Pressure | drw_garmin_data.csv | Column AC | Unit: mmHg | Integer |
-# | Diastolic Blood Pressure | drw_garmin_data.csv | Column AD | Unit: mmHg | Integer |
-# | Garmin Training Load | drw_garmin_data.csv | Column AE | Unit: Load | Integer |
-# | Garmin Training Load Focus | drw_garmin_data.csv | Column AF | Unit: None | String |
-# | Morning Garmin Training Readiness | drw_garmin_data.csv | Column AG | Unit: Score | Integer |
-# | Overnight Resting HR | drw_garmin_data.csv | Column AH | Unit: bpm | Integer |
-# | Overnight HRV | drw_garmin_data.csv | Column AI | Unit: ms | Integer |
-# | Garmin HRV Status | drw_garmin_data.csv | Column AJ | Unit: None | String |
-# | Garmin Training Status | drw_garmin_data.csv | Column AK | Unit: None | String |
-# | Total Walking Distance | drw_garmin_data.csv | Column AL | Unit: km | Decimal |
-# | Total Walking Duration | drw_garmin_data.csv | Column AM | Unit: Minutes | Decimal |
-# | Total Running Activities Count | drw_garmin_data.csv | Column AN | Unit: Count | Integer |
-# | Total Running Distance | drw_garmin_data.csv | Column AO | Unit: km | Decimal |
-# | Total Running Duration | drw_garmin_data.csv | Column AP | Unit: Minutes | Decimal |
-# | Total Strength Training Duration | drw_garmin_data.csv | Column AQ | Unit: Minutes | Decimal |
-# | Date and Time | drw_withings_bodyscan_data.csv | Column A | Unit: None | DD/MM/YYYY HH:MM |
-# | Weight | drw_withings_bodyscan_data.csv | Column B | Unit: kg | Decimal |
-# | Body Mass Index (BMI) | drw_withings_bodyscan_data.csv | Column C | Unit: None | Decimal |
-# | Body Fat | drw_withings_bodyscan_data.csv | Column D | Unit: % | Decimal |
-# | Visceral Fat Rating | drw_withings_bodyscan_data.csv | Column E | Unit: Rating | Decimal |
-# | Pulse Wave Velocity | drw_withings_bodyscan_data.csv | Column F | Unit: m/s | Decimal |
-# | AFib Status | drw_withings_bodyscan_data.csv | Column G | Unit: None | String |
-# | Vascular Age | drw_withings_bodyscan_data.csv | Column H | Unit: Years | Decimal |
-# | Nerve Health Score | drw_withings_bodyscan_data.csv | Column I | Unit: Score | Decimal |
+# --------------------------------------------------
+# FILE: drw_garmin_data.csv
+# NOTE: Contains daily aggregated physiological, sleep, and activity metrics recorded by Garmin.
+# STRUCTURE: One row per day.
+# --------------------------------------------------
+# | Metric Name | Column | Unit | Format |
+# | :--- | :--- | :--- | :--- |
+# | Date | Column A | Unit: None | YYYY-MM-DD |
+# | User Name | Column B | Unit: None | String |
+# | User Age | Column C | Unit: Years | Decimal |
+# | User Gender | Column D | Unit: None | String |
+# | Physiological Maximum Heart Rate | Column E | Unit: bpm | Integer |
+# | VO2 Max | Column F | Unit: ml/kg/min | Decimal |
+# | VO2 Max Percentile | Column G | Unit: % | Decimal |
+# | Lactate Threshold Pace | Column H | Unit: min/km | MM:SS |
+# | Lactate Threshold Heart Rate | Column I | Unit: bpm | Integer |
+# | Garmin Sleep Score | Column J | Unit: Score | Integer |
+# | Sleep Start Time | Column K | Unit: None | HH:MM |
+# | Sleep End Time | Column L | Unit: None | HH:MM |
+# | Deep Sleep | Column M | Unit: Minutes | Integer |
+# | Light Sleep | Column N | Unit: Minutes | Integer |
+# | REM Sleep | Column O | Unit: Minutes | Integer |
+# | Awake Time | Column P | Unit: Minutes | Integer |
+# | Sleep Length | Column Q | Unit: Minutes | Integer |
+# | Sleep Need | Column R | Unit: Minutes | Integer |
+# | Overnight Average Pulse Ox / SpO2 | Column S | Unit: % | Integer |
+# | Garmin Average Stress Score | Column T | Unit: Score | Integer |
+# | Daily Min Body Battery | Column U | Unit: Score | Integer |
+# | Daily Max Body Battery | Column V | Unit: Score | Integer |
+# | Body Battery Charged | Column W | Unit: Score | Integer |
+# | Body Battery Drained | Column X | Unit: Score | Integer |
+# | Daily Steps | Column Y | Unit: Steps | Integer |
+# | Daily Floors Climbed | Column Z | Unit: Floors | Integer |
+# | Daily Intensity Minutes | Column AA | Unit: Minutes | Integer |
+# | Total Calories | Column AB | Unit: kcal | Integer |
+# | Systolic Blood Pressure | Column AC | Unit: mmHg | Integer |
+# | Diastolic Blood Pressure | Column AD | Unit: mmHg | Integer |
+# | Garmin Training Load | Column AE | Unit: Load | Integer |
+# | Garmin Training Load Focus | Column AF | Unit: None | String |
+# | Morning Garmin Training Readiness | Column AG | Unit: Score | Integer |
+# | Overnight Resting HR | Column AH | Unit: bpm | Integer |
+# | Overnight HRV | Column AI | Unit: ms | Integer |
+# | Garmin HRV Status | Column AJ | Unit: None | String |
+# | Garmin Training Status | Column AK | Unit: None | String |
+# | Total Walking Distance | Column AL | Unit: km | Decimal |
+# | Total Walking Duration | Column AM | Unit: Minutes | Decimal |
+# | Total Running Activities Count | Column AN | Unit: Count | Integer |
+# | Total Running Distance | Column AO | Unit: km | Decimal |
+# | Total Running Duration | Column AP | Unit: Minutes | Decimal |
+# | Total Strength Training Duration | Column AQ | Unit: Minutes | Decimal |
+#
+# --------------------------------------------------
+# FILE: drw_withings_bodyscan_data.csv
+# NOTE: Contains body composition, cardiovascular, and nerve health measurements from a Withings scale.
+# STRUCTURE: One row per recorded scan/weigh-in event.
+# --------------------------------------------------
+# | Metric Name | Column | Unit | Format |
+# | :--- | :--- | :--- | :--- |
+# | Date and Time | Column A | Unit: None | DD/MM/YYYY HH:MM |
+# | Weight | Column B | Unit: kg | Decimal |
+# | Body Mass Index (BMI) | Column C | Unit: None | Decimal |
+# | Body Fat | Column D | Unit: % | Decimal |
+# | Visceral Fat Rating | Column E | Unit: Rating | Decimal |
+# | Pulse Wave Velocity | Column F | Unit: m/s | Decimal |
+# | AFib Status | Column G | Unit: None | String |
+# | Vascular Age | Column H | Unit: Years | Decimal |
+# | Nerve Health Score | Column I | Unit: Score | Decimal |
+#
+# --------------------------------------------------
+# FILE: drw_garmin_activities_list.csv
+# NOTE: Contains detailed statistics for individual recorded workouts and activities.
+# STRUCTURE: One row per tracked activity.
+# --------------------------------------------------
+# | Metric Name | Column | Unit | Format |
+# | :--- | :--- | :--- | :--- |
+# | Activity ID | Column A | Unit: None | Integer |
+# | Date | Column B | Unit: None | YYYY-MM-DD |
+# | Start Time | Column C | Unit: None | HH:MM:SS |
+# | Activity Type | Column D | Unit: None | String |
+# | Activity Name | Column E | Unit: None | String |
+# | Distance | Column F | Unit: km | Decimal |
+# | Duration | Column G | Unit: Minutes | Decimal |
+# | Avg Pace | Column H | Unit: min/km | HH:MM:SS |
+# | Average Grade Adjusted Pace | Column I | Unit: min/km | HH:MM:SS |
+# | Total Ascent | Column J | Unit: m | Integer |
+# | Total Descent | Column K | Unit: m | Integer |
+# | Feels Like Temperature | Column L | Unit: °C | Decimal |
+# | Weather Condition | Column M | Unit: None | String |
+# | Sustained Wind Speed | Column N | Unit: km/h | Integer |
+# | Avg HR | Column O | Unit: bpm | Integer |
+# | Max HR | Column P | Unit: bpm | Integer |
+# | Average Cadence | Column Q | Unit: spm | Integer |
+# | Average Stride Length | Column R | Unit: m | Decimal |
+# | Average Ground Contact Time | Column S | Unit: ms | Integer |
+# | Vertical Oscillation | Column T | Unit: cm | Decimal |
+# | Aerobic Training Effect | Column U | Unit: None | Decimal |
+# | Anaerobic Training Effect | Column V | Unit: None | Decimal |
+# | Activity Training Load | Column W | Unit: None | Decimal |
+# | Avg Power | Column X | Unit: Watts | Integer |
+# | Max Power | Column Y | Unit: Watts | Integer |
+# | Normalized Power | Column Z | Unit: Watts | Integer |
+# | Estimated Sweat Loss | Column AA | Unit: ml | Integer |
+# | Garmin Training Effect Label | Column AB | Unit: None | String |
+# | HR Zone 1 | Column AC | Unit: Minutes | Decimal |
+# | HR Zone 2 | Column AD | Unit: Minutes | Decimal |
+# | HR Zone 3 | Column AE | Unit: Minutes | Decimal |
+# | HR Zone 4 | Column AF | Unit: Minutes | Decimal |
+# | HR Zone 5 | Column AG | Unit: Minutes | Decimal |
+# | Power Zone 1 | Column AH | Unit: Minutes | Decimal |
+# | Power Zone 2 | Column AI | Unit: Minutes | Decimal |
+# | Power Zone 3 | Column AJ | Unit: Minutes | Decimal |
+# | Power Zone 4 | Column AK | Unit: Minutes | Decimal |
+# | Power Zone 5 | Column AL | Unit: Minutes | Decimal |
 
 import os
 import io
