@@ -1,3 +1,60 @@
+# DATA METRICS REFERENCE
+#
+# | Metric Name | File Name | Column | Unit | Format |
+# | :--- | :--- | :--- | :--- | :--- |
+# | Date | drw_garmin_data.csv | Column A | Unit: None | YYYY-MM-DD |
+# | User Name | drw_garmin_data.csv | Column B | Unit: None | String |
+# | User Age | drw_garmin_data.csv | Column C | Unit: Years | Decimal |
+# | User Gender | drw_garmin_data.csv | Column D | Unit: None | String |
+# | Physiological Maximum Heart Rate | drw_garmin_data.csv | Column E | Unit: bpm | Integer |
+# | VO2 Max | drw_garmin_data.csv | Column F | Unit: ml/kg/min | Decimal |
+# | VO2 Max Percentile | drw_garmin_data.csv | Column G | Unit: % | Decimal |
+# | Lactate Threshold Pace | drw_garmin_data.csv | Column H | Unit: min/km | MM:SS |
+# | Lactate Threshold Heart Rate | drw_garmin_data.csv | Column I | Unit: bpm | Integer |
+# | Garmin Sleep Score | drw_garmin_data.csv | Column J | Unit: Score | Integer |
+# | Sleep Start Time | drw_garmin_data.csv | Column K | Unit: None | HH:MM |
+# | Sleep End Time | drw_garmin_data.csv | Column L | Unit: None | HH:MM |
+# | Deep Sleep | drw_garmin_data.csv | Column M | Unit: Minutes | Integer |
+# | Light Sleep | drw_garmin_data.csv | Column N | Unit: Minutes | Integer |
+# | REM Sleep | drw_garmin_data.csv | Column O | Unit: Minutes | Integer |
+# | Awake Time | drw_garmin_data.csv | Column P | Unit: Minutes | Integer |
+# | Sleep Length | drw_garmin_data.csv | Column Q | Unit: Minutes | Integer |
+# | Sleep Need | drw_garmin_data.csv | Column R | Unit: Minutes | Integer |
+# | Overnight Average Pulse Ox / SpO2 | drw_garmin_data.csv | Column S | Unit: % | Integer |
+# | Garmin Average Stress Score | drw_garmin_data.csv | Column T | Unit: Score | Integer |
+# | Daily Min Body Battery | drw_garmin_data.csv | Column U | Unit: Score | Integer |
+# | Daily Max Body Battery | drw_garmin_data.csv | Column V | Unit: Score | Integer |
+# | Body Battery Charged | drw_garmin_data.csv | Column W | Unit: Score | Integer |
+# | Body Battery Drained | drw_garmin_data.csv | Column X | Unit: Score | Integer |
+# | Daily Steps | drw_garmin_data.csv | Column Y | Unit: Steps | Integer |
+# | Daily Floors Climbed | drw_garmin_data.csv | Column Z | Unit: Floors | Integer |
+# | Daily Intensity Minutes | drw_garmin_data.csv | Column AA | Unit: Minutes | Integer |
+# | Total Calories | drw_garmin_data.csv | Column AB | Unit: kcal | Integer |
+# | Systolic Blood Pressure | drw_garmin_data.csv | Column AC | Unit: mmHg | Integer |
+# | Diastolic Blood Pressure | drw_garmin_data.csv | Column AD | Unit: mmHg | Integer |
+# | Garmin Training Load | drw_garmin_data.csv | Column AE | Unit: Load | Integer |
+# | Garmin Training Load Focus | drw_garmin_data.csv | Column AF | Unit: None | String |
+# | Morning Garmin Training Readiness | drw_garmin_data.csv | Column AG | Unit: Score | Integer |
+# | Overnight Resting HR | drw_garmin_data.csv | Column AH | Unit: bpm | Integer |
+# | Overnight HRV | drw_garmin_data.csv | Column AI | Unit: ms | Integer |
+# | Garmin HRV Status | drw_garmin_data.csv | Column AJ | Unit: None | String |
+# | Garmin Training Status | drw_garmin_data.csv | Column AK | Unit: None | String |
+# | Total Walking Distance | drw_garmin_data.csv | Column AL | Unit: km | Decimal |
+# | Total Walking Duration | drw_garmin_data.csv | Column AM | Unit: Minutes | Decimal |
+# | Total Running Activities Count | drw_garmin_data.csv | Column AN | Unit: Count | Integer |
+# | Total Running Distance | drw_garmin_data.csv | Column AO | Unit: km | Decimal |
+# | Total Running Duration | drw_garmin_data.csv | Column AP | Unit: Minutes | Decimal |
+# | Total Strength Training Duration | drw_garmin_data.csv | Column AQ | Unit: Minutes | Decimal |
+# | Date and Time | drw_withings_bodyscan_data.csv | Column A | Unit: None | DD/MM/YYYY HH:MM |
+# | Weight | drw_withings_bodyscan_data.csv | Column B | Unit: kg | Decimal |
+# | Body Mass Index (BMI) | drw_withings_bodyscan_data.csv | Column C | Unit: None | Decimal |
+# | Body Fat | drw_withings_bodyscan_data.csv | Column D | Unit: % | Decimal |
+# | Visceral Fat Rating | drw_withings_bodyscan_data.csv | Column E | Unit: Rating | Decimal |
+# | Pulse Wave Velocity | drw_withings_bodyscan_data.csv | Column F | Unit: m/s | Decimal |
+# | AFib Status | drw_withings_bodyscan_data.csv | Column G | Unit: None | String |
+# | Vascular Age | drw_withings_bodyscan_data.csv | Column H | Unit: Years | Decimal |
+# | Nerve Health Score | drw_withings_bodyscan_data.csv | Column I | Unit: Score | Decimal |
+
 import os
 import io
 import json
