@@ -13,6 +13,9 @@ from .config import HEADER_TO_ATTRIBUTE_MAP
 logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
+# Columns excluded to maximize LLM attention efficiency and eliminate redundant/empty data
+EXCLUDED_COLUMN_PREFIXES = ('hs-CRP', 'HRV Status', 'Sleep End Time', 'Work Day')
+
 class GoogleDriveClient:
     def __init__(self, credentials_path: str, folder_id: str):
         self.credentials = Credentials.from_service_account_file(credentials_path, scopes=SCOPES)
@@ -26,10 +29,16 @@ class GoogleDriveClient:
         return files[0]['id'] if files else None
 
     def _metrics_to_df(self, metrics: List, headers: List[str]) -> pd.DataFrame:
+        # Filter out redundant/empty headers
+        active_headers = [
+            h for h in headers 
+            if not h.startswith(EXCLUDED_COLUMN_PREFIXES)
+        ]
+        
         data = []
         for m in metrics:
             row = {}
-            for h in headers:
+            for h in active_headers:
                 attr = HEADER_TO_ATTRIBUTE_MAP.get(h)
                 
                 if not attr and h == 'Date (YYYY-MM-DD)':
@@ -61,7 +70,7 @@ class GoogleDriveClient:
                 
                 row[h] = val
             data.append(row)
-        return pd.DataFrame(data, columns=headers)
+        return pd.DataFrame(data, columns=active_headers)
 
     def update_csv(self, filename: str, metrics: List, headers: List[str], sort_date_desc: bool = True):
         new_df = self._metrics_to_df(metrics, headers)
@@ -85,9 +94,14 @@ class GoogleDriveClient:
         if file_id:
             try:
                 content = self.service.files().get_media(fileId=file_id).execute()
-                # Read CSV while discarding any legacy '# Context:' header comment lines
+                # Read CSV while ignoring legacy comment lines
                 existing_df = pd.read_csv(io.BytesIO(content), comment='#')
                 existing_df = existing_df.loc[:, ~existing_df.columns.str.contains('^Unnamed')]
+                
+                # Strip out removed legacy columns from the existing file if present
+                cols_to_drop = [c for c in existing_df.columns if c.startswith(EXCLUDED_COLUMN_PREFIXES)]
+                if cols_to_drop:
+                    existing_df = existing_df.drop(columns=cols_to_drop)
                 
                 # === SMART MERGE: PREVENT NA OVERWRITES ===
                 # Convert explicit "NA" and empty strings in the newly fetched data to actual NaN (null) values
@@ -104,7 +118,7 @@ class GoogleDriveClient:
                 # Reset the index to turn the Date back into a normal column
                 combined_df = combined_idx.reset_index()
                 
-                # Ensure the final column order strictly matches your expected headers
+                # Ensure the final column order strictly matches your expected active headers
                 valid_cols = [col for col in new_df.columns if col in combined_df.columns]
                 combined_df = combined_df[valid_cols]
                 
