@@ -9,11 +9,15 @@ from googleapiclient.http import MediaIoBaseUpload
 import numpy as np
 import pandas as pd
 
-from .config import HEADER_TO_ATTRIBUTE_MAP
+try:
+  from config import HEADER_TO_ATTRIBUTE_MAP
+except ImportError:
+  from .config import HEADER_TO_ATTRIBUTE_MAP
 
 logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
+# Columns excluded to maximize attention efficiency and eliminate redundant/empty data
 EXCLUDED_COLUMN_PREFIXES = (
     # Sleep, HRV, and Physiological Exclusions
     'Sleep End Time',
@@ -73,6 +77,7 @@ class GoogleDriveClient:
     return files[0]['id'] if files else None
 
   def _metrics_to_df(self, metrics: List, headers: List[str]) -> pd.DataFrame:
+    # Filter out redundant, excluded, and biomarker headers
     active_headers = [
         h for h in headers if not h.startswith(EXCLUDED_COLUMN_PREFIXES)
     ]
@@ -188,7 +193,7 @@ class GoogleDriveClient:
         if cols_to_drop:
           existing_df = existing_df.drop(columns=cols_to_drop)
 
-        # Smart merge: prioritize new valid values, preserve historical numerical values
+        # Smart merge: prioritize new data, preserve existing historical values
         new_df_cleaned = new_df.replace(['NA', '', 'NaN'], np.nan)
         existing_idx = existing_df.set_index(dedup_col)
         new_idx = new_df_cleaned.set_index(dedup_col)
