@@ -40,6 +40,8 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'Sleep End Time': 'Sleep_End_Time_HH_MM',
         'Overnight Resting HR (bpm)': 'Overnight_Resting_Heart_Rate_bpm',
         'Overnight HRV (ms)': 'Overnight_Average_HRV_RMSSD_ms',
+        'HRV Status': 'HRV_Status',
+        'Garmin HRV Status': 'HRV_Status',
         'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
         'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg'
     }
@@ -130,8 +132,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     # 7. Derived Metrics & Formatting
     df['Date_Obj'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
     df['Day_of_Week'] = df['Date_Obj'].dt.day_name()
-    df['Is_Work_Day'] = df['Time_in_Work_Zone_hours'].apply(lambda x: True if pd.notnull(x) and x > 0.5 else False)
-    df['Month'] = df['Date_Obj'].dt.month
+    df['Is_Work_Day'] = df['Time_in_Work_Zone_hours'].apply(lambda x: (x > 0.5) if pd.notna(x) else "")
 
     if "Lactate_Threshold_Pace" in df.columns:
         df["Lactate_Threshold_Pace_decimal_min_km"] = df["Lactate_Threshold_Pace"].apply(convert_pace_to_decimal)
@@ -180,8 +181,16 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
             df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'] < -1.0,
             df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'] > 1.0
         ]
-        df['HRV_Status'] = np.select(conditions_hrv, ['Suppressed', 'Elevated'], default='Normal')
-        df.loc[df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'].isna(), 'HRV_Status'] = np.nan
+        calculated_hrv_status = pd.Series(
+            np.select(conditions_hrv, ['Low', 'Elevated'], default='Balanced'),
+            index=df.index
+        )
+        calculated_hrv_status.loc[df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'].isna()] = np.nan
+        
+        if 'HRV_Status' in df.columns:
+            df['HRV_Status'] = df['HRV_Status'].fillna(calculated_hrv_status)
+        else:
+            df['HRV_Status'] = calculated_hrv_status
     
     if "Raw_Body_Fat_Percentage" in df.columns:
         df["Body_Fat_Percentage_7d_Average"] = df["Raw_Body_Fat_Percentage"].rolling(window=7, min_periods=1).mean().round(1)
@@ -199,7 +208,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     required_columns = [
         "Date_YYYY_MM_DD",
         "Day_of_Week",
-        "Month",
         "Is_Work_Day",
         "Time_in_Home_Zone_hours",
         "Time_in_Work_Zone_hours",
@@ -267,7 +275,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     column_rename_map = {
         "Date_YYYY_MM_DD": "Date (YYYY-MM-DD)",
         "Day_of_Week": "Day of Week",
-        "Month": "Month",
         "Is_Work_Day": "Work Day (Bool)",
         "Time_in_Home_Zone_hours": "Time at Home (hours)",
         "Time_in_Work_Zone_hours": "Time at Work (hours)",
@@ -307,6 +314,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     }
     
     df_export = df_export.rename(columns=column_rename_map)
+    df_export["Work Day (Bool)"] = df_export["Work Day (Bool)"].fillna("")
 
     # 9. Demographic Header Injection & Export
     header_string = f"# Context: Male, DOB: {DOB}, Height: {HEIGHT_CM} cm, Lp(a): {LPA_NMOL_L} nmol/l\n"
@@ -342,7 +350,7 @@ if __name__ == "__main__":
     ACTIVITIES_FILENAME = "drw_garmin_activities_list.csv"
     WITHINGS_FILENAME = "drw_withings_bodyscan_data.csv"
     MEDICAL_FILENAME = "Daniel's Medical Test Results.csv"
-    ZONES_FILENAME = "drw_home_assistant_zone_history.csv"
+    ZONES_URL = "https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv?v=1"
     TARGET_FILENAME = "drw_quantified_self.csv"
     
     if not FOLDER_ID:
@@ -363,7 +371,6 @@ if __name__ == "__main__":
     activities_file_id = get_file_id(drive_service, ACTIVITIES_FILENAME, FOLDER_ID)
     withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
     medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
-    zones_file_id = get_file_id(drive_service, ZONES_FILENAME, FOLDER_ID)
     target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
     
     if not garmin_file_id:
@@ -374,21 +381,18 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"Could not find '{WITHINGS_FILENAME}' in Drive folder.")
     if not medical_file_id:
         raise FileNotFoundError(f"Could not find '{MEDICAL_FILENAME}' in Drive folder.")
-    if not zones_file_id:
-        raise FileNotFoundError(f"Could not find '{ZONES_FILENAME}' in Drive folder.")
 
-    print("Downloading raw data...")
+    print("Downloading raw data from Google Drive and Home Assistant URL...")
     garmin_data = download_drive_file(drive_service, garmin_file_id)
     activities_data = download_drive_file(drive_service, activities_file_id)
     withings_data = download_drive_file(drive_service, withings_file_id)
     medical_data = download_drive_file(drive_service, medical_file_id)
-    zones_data = download_drive_file(drive_service, zones_file_id)
     
     df_garmin_raw = pd.read_csv(garmin_data)
     df_activities_raw = pd.read_csv(activities_data)
     df_withings_raw = pd.read_csv(withings_data)
     df_medical_raw = pd.read_csv(medical_data)
-    df_zones_raw = pd.read_csv(zones_data)
+    df_zones_raw = pd.read_csv(ZONES_URL)
     
     print("Processing physiological metrics...")
     generate_quantified_self_csv(df_garmin_raw, df_withings_raw, df_medical_raw, df_activities_raw, df_zones_raw, output_path=TARGET_FILENAME)
