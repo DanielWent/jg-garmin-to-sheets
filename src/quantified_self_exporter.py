@@ -21,7 +21,7 @@ def convert_pace_to_decimal(pace_str):
     except ValueError:
         return np.nan
 
-def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFrame, df_medical: pd.DataFrame, df_activities: pd.DataFrame, output_path: str = "drw_quantified_self.csv"):
+def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFrame, df_medical: pd.DataFrame, df_activities: pd.DataFrame, df_zones: pd.DataFrame, output_path: str = "drw_quantified_self.csv"):
     
     # 1. Process Garmin Daily Data
     garmin_mapping = {
@@ -32,7 +32,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'Garmin Training Load (7 Day Sum)': 'Garmin_7d_Training_Load_Sum',
         'VO2 Max (ml/kg/min)': 'Garmin_VO2_Max_ml_kg_min',
         'Lactate Threshold Pace (min/km)': 'Lactate_Threshold_Pace', 
-        'Lactate Threshold Heart Rate (bpm)': 'Lactate_Threshold_Heart_Rate_bpm',
+        'Lactate Threshold Heart Rate (bpm)': 'Lactate Threshold_Heart_Rate_bpm',
         'Intensity Minutes': 'Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min',
         'Sleep Length (min)': 'Overnight_Sleep_Duration_min',
         'Sleep Need (min)': 'Sleep_Need_min',
@@ -48,7 +48,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         df_g['Date_YYYY_MM_DD'] = np.nan
     df_g['Date_YYYY_MM_DD'] = pd.to_datetime(df_g['Date_YYYY_MM_DD'], errors='coerce').dt.strftime('%Y-%m-%d')
     
-    # 2. Process Garmin Activities Data (HR Zones & Daily Training Load)
+    # 2. Process Garmin Activities Data
     df_activities['Date_YYYY_MM_DD'] = pd.to_datetime(df_activities['Date (YYYY-MM-DD)'], errors='coerce').dt.strftime('%Y-%m-%d')
     df_a_daily = df_activities.groupby('Date_YYYY_MM_DD').agg({
         'Activity Training Load': 'sum',
@@ -63,10 +63,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     df_a_daily = df_a_daily.rename(columns={'Activity Training Load': 'Daily_Activity_Training_Load'})
     
     # 3. Process Withings Data
-    df_withings['Date_YYYY_MM_DD'] = pd.to_datetime(
-        df_withings['date'], format='mixed', dayfirst=True, errors='coerce'
-    ).dt.strftime('%Y-%m-%d')
-    
+    df_withings['Date_YYYY_MM_DD'] = pd.to_datetime(df_withings['date'], format='mixed', dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
     df_w_daily = df_withings.groupby('Date_YYYY_MM_DD').agg({
         'Weight (kg)': 'mean',
         'Body Fat (%)': 'mean',
@@ -81,9 +78,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     df_w_daily = df_w_daily.rename(columns=withings_mapping)
     
     # 4. Process Medical Data
-    df_medical['Date_YYYY_MM_DD'] = pd.to_datetime(
-        df_medical['Test Date'], format='%d/%m/%Y', errors='coerce'
-    ).dt.strftime('%Y-%m-%d')
+    df_medical['Date_YYYY_MM_DD'] = pd.to_datetime(df_medical['Test Date'], format='%d/%m/%Y', errors='coerce').dt.strftime('%Y-%m-%d')
     df_medical['clean_test'] = df_medical['Test Name'].astype(str).str.lower().str.strip()
     
     test_map = {
@@ -111,20 +106,33 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     else:
         df_m_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD'] + list(test_map.keys()))
 
-    # 5. Merge All Datasets
+    # 5. Process Home Assistant Zone Data
+    df_zones['Date_YYYY_MM_DD'] = pd.to_datetime(df_zones['Date'], errors='coerce').dt.strftime('%Y-%m-%d')
+    zone_mapping = {
+        'Time in Home Zone (hours)': 'Time_in_Home_Zone_hours',
+        'Time in Work Zone (hours)': 'Time_in_Work_Zone_hours'
+    }
+    df_z_daily = df_zones.rename(columns=zone_mapping)[['Date_YYYY_MM_DD', 'Time_in_Home_Zone_hours', 'Time_in_Work_Zone_hours']]
+
+    # 6. Merge All Datasets
     df = pd.merge(df_g, df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load', 'Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min', 'Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min']], on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
+    df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
     
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
     df = df.sort_values(by="Date_YYYY_MM_DD", ascending=True).reset_index(drop=True)
     
-    # Fill missing active durations/loads with 0 for days without recorded activities
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
     df['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'] = df['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'].fillna(0)
     df['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'] = df['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'].fillna(0)
     
-    # 6. Pace and Time Formatting
+    # 7. Derived Metrics & Formatting
+    df['Date_Obj'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
+    df['Day_of_Week'] = df['Date_Obj'].dt.day_name()
+    df['Is_Work_Day'] = df['Time_in_Work_Zone_hours'].apply(lambda x: True if pd.notnull(x) and x > 0.5 else False)
+    df['Month'] = df['Date_Obj'].dt.month
+
     if "Lactate_Threshold_Pace" in df.columns:
         df["Lactate_Threshold_Pace_decimal_min_km"] = df["Lactate_Threshold_Pace"].apply(convert_pace_to_decimal)
         
@@ -132,14 +140,28 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], format="mixed", errors="coerce").dt.strftime("%H:%M")
 
-    # 7. Derived Metrics (Load, Sleep, Rolling Averages)
-    
-    # Acute-to-Chronic Training Load Ratio
+    def time_to_decimal(time_str):
+        if pd.isna(time_str): return np.nan
+        try:
+            h, m = map(int, str(time_str).split(':'))
+            if h < 12: h += 24 
+            return round(h + (m / 60.0), 2)
+        except ValueError:
+            return np.nan
+            
+    df['Sleep_Start_Decimal'] = df['Sleep_Start_Time_HH_MM'].apply(time_to_decimal)
+
     acute_load = df['Daily_Activity_Training_Load'].rolling(window=7, min_periods=1).sum()
     chronic_load = df['Daily_Activity_Training_Load'].rolling(window=28, min_periods=1).sum() / 4
     df['Acute_to_Chronic_Training_Load_Ratio'] = (acute_load / chronic_load).replace([np.inf, -np.inf], np.nan).round(2)
     
-    # EWMA Sleep Debt
+    conditions_load = [
+        df['Acute_to_Chronic_Training_Load_Ratio'] < 0.8,
+        df['Acute_to_Chronic_Training_Load_Ratio'] > 1.3
+    ]
+    df['Training_Phase'] = np.select(conditions_load, ['Detraining', 'Overreaching'], default='Optimal')
+    df.loc[df['Acute_to_Chronic_Training_Load_Ratio'].isna(), 'Training_Phase'] = np.nan
+
     if "Sleep_Need_min" in df.columns and "Overnight_Sleep_Duration_min" in df.columns:
         daily_sleep_deficit = df["Sleep_Need_min"] - df["Overnight_Sleep_Duration_min"]
         df["EWMA_Sleep_Debt_min"] = daily_sleep_deficit.ewm(span=7, adjust=False).mean()
@@ -153,6 +175,13 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
         shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
         df["Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore"] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)
+        
+        conditions_hrv = [
+            df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'] < -1.0,
+            df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'] > 1.0
+        ]
+        df['HRV_Status'] = np.select(conditions_hrv, ['Suppressed', 'Elevated'], default='Normal')
+        df.loc[df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'].isna(), 'HRV_Status'] = np.nan
     
     if "Raw_Body_Fat_Percentage" in df.columns:
         df["Body_Fat_Percentage_7d_Average"] = df["Raw_Body_Fat_Percentage"].rolling(window=7, min_periods=1).mean().round(1)
@@ -167,9 +196,13 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     df_export = df.tail(730).copy()
     df_export = df_export.sort_values(by="Date_YYYY_MM_DD", ascending=False).reset_index(drop=True)
 
-    # Logically ordered columns for export logic
     required_columns = [
         "Date_YYYY_MM_DD",
+        "Day_of_Week",
+        "Month",
+        "Is_Work_Day",
+        "Time_in_Home_Zone_hours",
+        "Time_in_Work_Zone_hours",
         "Daily_Steps_Count",
         "Daily_Running_Distance_km",
         "Running_Distance_28d_Total_km",
@@ -178,17 +211,20 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min",
         "Garmin_7d_Training_Load_Sum",
         "Acute_to_Chronic_Training_Load_Ratio",
+        "Training_Phase",
         "Garmin_VO2_Max_ml_kg_min",
         "Lactate_Threshold_Heart_Rate_bpm",
         "Lactate_Threshold_Pace_decimal_min_km",
         "Physiological_Max_HR_bpm",
         "Overnight_Sleep_Duration_min",
         "Sleep_Start_Time_HH_MM",
+        "Sleep_Start_Decimal",
         "Sleep_End_Time_HH_MM",
         "EWMA_Sleep_Debt_min",
         "Overnight_Resting_Heart_Rate_bpm",
         "Overnight_Average_HRV_RMSSD_ms",
         "Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore",
+        "HRV_Status",
         "Daily_Morning_Weight_7d_Average_kg",
         "Body_Fat_Percentage_7d_Average",
         "Resting_Systolic_Blood_Pressure_mmHg",
@@ -208,7 +244,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     df_export = df_export[required_columns]
 
-    # Cast appropriate data to nullable Integers
     integer_columns = [
         "Daily_Steps_Count",
         "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min",
@@ -229,9 +264,13 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         if col in df_export.columns:
             df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
 
-    # Mapping dictionary to convert internal snake_case to clean CSV headers
     column_rename_map = {
         "Date_YYYY_MM_DD": "Date (YYYY-MM-DD)",
+        "Day_of_Week": "Day of Week",
+        "Month": "Month",
+        "Is_Work_Day": "Work Day (Bool)",
+        "Time_in_Home_Zone_hours": "Time at Home (hours)",
+        "Time_in_Work_Zone_hours": "Time at Work (hours)",
         "Daily_Steps_Count": "Step Count - Daily (steps)",
         "Daily_Running_Distance_km": "Running Distance - Daily (km)",
         "Running_Distance_28d_Total_km": "Running Distance - 28d Total (km)",
@@ -240,17 +279,20 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min": "Intensity Minutes - %LTHR Zones (min)",
         "Garmin_7d_Training_Load_Sum": "Training Load - Garmin 7d Sum",
         "Acute_to_Chronic_Training_Load_Ratio": "Training Load Ratio - Acute:Chronic",
+        "Training_Phase": "Training Phase",
         "Garmin_VO2_Max_ml_kg_min": "VO2 Max - Garmin (ml/kg/min)",
         "Lactate_Threshold_Heart_Rate_bpm": "Lactate Threshold HR (bpm)",
         "Lactate_Threshold_Pace_decimal_min_km": "Lactate Threshold Pace (decimal min/km)",
         "Physiological_Max_HR_bpm": "Max Heart Rate - Physiological (bpm)",
         "Overnight_Sleep_Duration_min": "Sleep Duration - Overnight (min)",
         "Sleep_Start_Time_HH_MM": "Sleep Start Time (HH:MM)",
+        "Sleep_Start_Decimal": "Sleep Start Time (Decimal)",
         "Sleep_End_Time_HH_MM": "Sleep End Time (HH:MM)",
         "EWMA_Sleep_Debt_min": "Sleep Debt - 7d EWMA (min)",
         "Overnight_Resting_Heart_Rate_bpm": "Resting Heart Rate - Overnight (bpm)",
         "Overnight_Average_HRV_RMSSD_ms": "HRV RMSSD - Overnight (ms)",
         "Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore": "HRV RMSSD Z-Score - 7d Avg vs 60d Baseline",
+        "HRV_Status": "HRV Status",
         "Daily_Morning_Weight_7d_Average_kg": "Weight - Morning 7d Avg (kg)",
         "Body_Fat_Percentage_7d_Average": "Body Fat - 7d Avg (%)",
         "Resting_Systolic_Blood_Pressure_mmHg": "Blood Pressure Systolic - Resting (mmHg)",
@@ -300,6 +342,7 @@ if __name__ == "__main__":
     ACTIVITIES_FILENAME = "drw_garmin_activities_list.csv"
     WITHINGS_FILENAME = "drw_withings_bodyscan_data.csv"
     MEDICAL_FILENAME = "Daniel's Medical Test Results.csv"
+    ZONES_FILENAME = "drw_home_assistant_zone_history.csv"
     TARGET_FILENAME = "drw_quantified_self.csv"
     
     if not FOLDER_ID:
@@ -320,6 +363,7 @@ if __name__ == "__main__":
     activities_file_id = get_file_id(drive_service, ACTIVITIES_FILENAME, FOLDER_ID)
     withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
     medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
+    zones_file_id = get_file_id(drive_service, ZONES_FILENAME, FOLDER_ID)
     target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
     
     if not garmin_file_id:
@@ -330,20 +374,24 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"Could not find '{WITHINGS_FILENAME}' in Drive folder.")
     if not medical_file_id:
         raise FileNotFoundError(f"Could not find '{MEDICAL_FILENAME}' in Drive folder.")
+    if not zones_file_id:
+        raise FileNotFoundError(f"Could not find '{ZONES_FILENAME}' in Drive folder.")
 
     print("Downloading raw data...")
     garmin_data = download_drive_file(drive_service, garmin_file_id)
     activities_data = download_drive_file(drive_service, activities_file_id)
     withings_data = download_drive_file(drive_service, withings_file_id)
     medical_data = download_drive_file(drive_service, medical_file_id)
+    zones_data = download_drive_file(drive_service, zones_file_id)
     
     df_garmin_raw = pd.read_csv(garmin_data)
     df_activities_raw = pd.read_csv(activities_data)
     df_withings_raw = pd.read_csv(withings_data)
     df_medical_raw = pd.read_csv(medical_data)
+    df_zones_raw = pd.read_csv(zones_data)
     
     print("Processing physiological metrics...")
-    generate_quantified_self_csv(df_garmin_raw, df_withings_raw, df_medical_raw, df_activities_raw, output_path=TARGET_FILENAME)
+    generate_quantified_self_csv(df_garmin_raw, df_withings_raw, df_medical_raw, df_activities_raw, df_zones_raw, output_path=TARGET_FILENAME)
     
     print("Uploading updated CSV to Google Drive...")
     media = MediaFileUpload(TARGET_FILENAME, mimetype='text/csv', resumable=True)
