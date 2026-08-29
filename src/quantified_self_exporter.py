@@ -24,6 +24,7 @@ def convert_pace_to_decimal(pace_str):
 def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFrame, df_medical: pd.DataFrame, df_activities: pd.DataFrame, df_zones: pd.DataFrame, output_path: str = "drw_quantified_self.csv"):
     
     # 1. Process Garmin Daily Data
+    # Mapped 'Garmin HRV Status (Text Label)' directly from drw_garmin_data.csv to 'HRV_Status'
     garmin_mapping = {
         'Date (YYYY-MM-DD)': 'Date_YYYY_MM_DD',
         'Physiological Maximum Heart Rate (bpm)': 'Physiological_Max_HR_bpm',
@@ -40,8 +41,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'Sleep End Time': 'Sleep_End_Time_HH_MM',
         'Overnight Resting HR (bpm)': 'Overnight_Resting_Heart_Rate_bpm',
         'Overnight HRV (ms)': 'Overnight_Average_HRV_RMSSD_ms',
-        'HRV Status': 'HRV_Status',
-        'Garmin HRV Status': 'HRV_Status',
+        'Garmin HRV Status (Text Label)': 'HRV_Status',
         'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
         'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg'
     }
@@ -155,13 +155,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     acute_load = df['Daily_Activity_Training_Load'].rolling(window=7, min_periods=1).sum()
     chronic_load = df['Daily_Activity_Training_Load'].rolling(window=28, min_periods=1).sum() / 4
     df['Acute_to_Chronic_Training_Load_Ratio'] = (acute_load / chronic_load).replace([np.inf, -np.inf], np.nan).round(2)
-    
-    conditions_load = [
-        df['Acute_to_Chronic_Training_Load_Ratio'] < 0.8,
-        df['Acute_to_Chronic_Training_Load_Ratio'] > 1.3
-    ]
-    df['Training_Phase'] = np.select(conditions_load, ['Detraining', 'Overreaching'], default='Optimal')
-    df.loc[df['Acute_to_Chronic_Training_Load_Ratio'].isna(), 'Training_Phase'] = np.nan
 
     if "Sleep_Need_min" in df.columns and "Overnight_Sleep_Duration_min" in df.columns:
         daily_sleep_deficit = df["Sleep_Need_min"] - df["Overnight_Sleep_Duration_min"]
@@ -176,21 +169,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
         shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
         df["Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore"] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)
-        
-        conditions_hrv = [
-            df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'] < -1.0,
-            df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'] > 1.0
-        ]
-        calculated_hrv_status = pd.Series(
-            np.select(conditions_hrv, ['Low', 'Elevated'], default='Balanced'),
-            index=df.index
-        )
-        calculated_hrv_status.loc[df['Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'].isna()] = np.nan
-        
-        if 'HRV_Status' in df.columns:
-            df['HRV_Status'] = df['HRV_Status'].fillna(calculated_hrv_status)
-        else:
-            df['HRV_Status'] = calculated_hrv_status
     
     if "Raw_Body_Fat_Percentage" in df.columns:
         df["Body_Fat_Percentage_7d_Average"] = df["Raw_Body_Fat_Percentage"].rolling(window=7, min_periods=1).mean().round(1)
@@ -219,7 +197,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min",
         "Garmin_7d_Training_Load_Sum",
         "Acute_to_Chronic_Training_Load_Ratio",
-        "Training_Phase",
         "Garmin_VO2_Max_ml_kg_min",
         "Lactate_Threshold_Heart_Rate_bpm",
         "Lactate_Threshold_Pace_decimal_min_km",
@@ -286,7 +263,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min": "Intensity Minutes - %LTHR Zones (min)",
         "Garmin_7d_Training_Load_Sum": "Training Load - Garmin 7d Sum",
         "Acute_to_Chronic_Training_Load_Ratio": "Training Load Ratio - Acute:Chronic",
-        "Training_Phase": "Training Phase",
         "Garmin_VO2_Max_ml_kg_min": "VO2 Max - Garmin (ml/kg/min)",
         "Lactate_Threshold_Heart_Rate_bpm": "Lactate Threshold HR (bpm)",
         "Lactate_Threshold_Pace_decimal_min_km": "Lactate Threshold Pace (decimal min/km)",
