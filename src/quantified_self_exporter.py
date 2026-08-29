@@ -167,17 +167,39 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     df_export = df.tail(730).copy()
     df_export = df_export.sort_values(by="Date_YYYY_MM_DD", ascending=False).reset_index(drop=True)
 
+    # Logically ordered columns for export logic
     required_columns = [
-        "Date_YYYY_MM_DD", "Daily_Running_Distance_km", "Daily_Steps_Count", "Running_Distance_28d_Total_km",
-        "Acute_to_Chronic_Training_Load_Ratio", "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min", 
-        "Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min", "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min",
-        "Garmin_7d_Training_Load_Sum", "Garmin_VO2_Max_ml_kg_min", "Lactate_Threshold_Pace_decimal_min_km", 
-        "Lactate_Threshold_Heart_Rate_bpm", "Physiological_Max_HR_bpm", "Overnight_Sleep_Duration_min", 
-        "Sleep_Start_Time_HH_MM", "Sleep_End_Time_HH_MM", "EWMA_Sleep_Debt_min", "Overnight_Resting_Heart_Rate_bpm", 
-        "Overnight_Average_HRV_RMSSD_ms", "Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore", 
-        "Daily_Morning_Weight_7d_Average_kg", "Body_Fat_Percentage_7d_Average", "Pulse_Wave_Velocity_m_s", 
-        "Resting_Systolic_Blood_Pressure_mmHg", "Resting_Diastolic_Blood_Pressure_mmHg", "ApoB_g_L", 
-        "LDL_Cholesterol_mmol_L", "HDL_Cholesterol_mmol_L", "Triglycerides_mmol_L", "HbA1c_mmol_mol", "hs_CRP_mg_L"
+        "Date_YYYY_MM_DD",
+        "Daily_Steps_Count",
+        "Daily_Running_Distance_km",
+        "Running_Distance_28d_Total_km",
+        "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min",
+        "Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min",
+        "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min",
+        "Garmin_7d_Training_Load_Sum",
+        "Acute_to_Chronic_Training_Load_Ratio",
+        "Garmin_VO2_Max_ml_kg_min",
+        "Lactate_Threshold_Heart_Rate_bpm",
+        "Lactate_Threshold_Pace_decimal_min_km",
+        "Physiological_Max_HR_bpm",
+        "Overnight_Sleep_Duration_min",
+        "Sleep_Start_Time_HH_MM",
+        "Sleep_End_Time_HH_MM",
+        "EWMA_Sleep_Debt_min",
+        "Overnight_Resting_Heart_Rate_bpm",
+        "Overnight_Average_HRV_RMSSD_ms",
+        "Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore",
+        "Daily_Morning_Weight_7d_Average_kg",
+        "Body_Fat_Percentage_7d_Average",
+        "Resting_Systolic_Blood_Pressure_mmHg",
+        "Resting_Diastolic_Blood_Pressure_mmHg",
+        "Pulse_Wave_Velocity_m_s",
+        "ApoB_g_L",
+        "LDL_Cholesterol_mmol_L",
+        "HDL_Cholesterol_mmol_L",
+        "Triglycerides_mmol_L",
+        "HbA1c_mmol_mol",
+        "hs_CRP_mg_L"
     ]
 
     for col in required_columns:
@@ -186,6 +208,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     df_export = df_export[required_columns]
 
+    # Cast appropriate data to nullable Integers
     integer_columns = [
         "Daily_Steps_Count",
         "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min",
@@ -205,6 +228,43 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     for col in integer_columns:
         if col in df_export.columns:
             df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
+
+    # Mapping dictionary to convert internal snake_case to clean CSV headers
+    column_rename_map = {
+        "Date_YYYY_MM_DD": "Date (YYYY-MM-DD)",
+        "Daily_Steps_Count": "Step Count - Daily (steps)",
+        "Daily_Running_Distance_km": "Running Distance - Daily (km)",
+        "Running_Distance_28d_Total_km": "Running Distance - 28d Total (km)",
+        "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min": "HR Zone 2 & 3 Time - %LTHR (min)",
+        "Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min": "HR Zone 4 & 5 Time - %LTHR (min)",
+        "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min": "Intensity Minutes - %LTHR Zones (min)",
+        "Garmin_7d_Training_Load_Sum": "Training Load - Garmin 7d Sum",
+        "Acute_to_Chronic_Training_Load_Ratio": "Training Load Ratio - Acute:Chronic",
+        "Garmin_VO2_Max_ml_kg_min": "VO2 Max - Garmin (ml/kg/min)",
+        "Lactate_Threshold_Heart_Rate_bpm": "Lactate Threshold HR (bpm)",
+        "Lactate_Threshold_Pace_decimal_min_km": "Lactate Threshold Pace (decimal min/km)",
+        "Physiological_Max_HR_bpm": "Max Heart Rate - Physiological (bpm)",
+        "Overnight_Sleep_Duration_min": "Sleep Duration - Overnight (min)",
+        "Sleep_Start_Time_HH_MM": "Sleep Start Time (HH:MM)",
+        "Sleep_End_Time_HH_MM": "Sleep End Time (HH:MM)",
+        "EWMA_Sleep_Debt_min": "Sleep Debt - 7d EWMA (min)",
+        "Overnight_Resting_Heart_Rate_bpm": "Resting Heart Rate - Overnight (bpm)",
+        "Overnight_Average_HRV_RMSSD_ms": "HRV RMSSD - Overnight (ms)",
+        "Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore": "HRV RMSSD Z-Score - 7d Avg vs 60d Baseline",
+        "Daily_Morning_Weight_7d_Average_kg": "Weight - Morning 7d Avg (kg)",
+        "Body_Fat_Percentage_7d_Average": "Body Fat - 7d Avg (%)",
+        "Resting_Systolic_Blood_Pressure_mmHg": "Blood Pressure Systolic - Resting (mmHg)",
+        "Resting_Diastolic_Blood_Pressure_mmHg": "Blood Pressure Diastolic - Resting (mmHg)",
+        "Pulse_Wave_Velocity_m_s": "Pulse Wave Velocity (m/s)",
+        "ApoB_g_L": "ApoB (g/L)",
+        "LDL_Cholesterol_mmol_L": "LDL Cholesterol (mmol/L)",
+        "HDL_Cholesterol_mmol_L": "HDL Cholesterol (mmol/L)",
+        "Triglycerides_mmol_L": "Triglycerides (mmol/L)",
+        "HbA1c_mmol_mol": "HbA1c (mmol/mol)",
+        "hs_CRP_mg_L": "hs-CRP (mg/L)"
+    }
+    
+    df_export = df_export.rename(columns=column_rename_map)
 
     # 9. Demographic Header Injection & Export
     header_string = f"# Context: Male, DOB: {DOB}, Height: {HEIGHT_CM} cm, Lp(a): {LPA_NMOL_L} nmol/l\n"
