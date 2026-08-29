@@ -24,7 +24,7 @@ def convert_pace_to_decimal(pace_str):
 def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFrame, df_medical: pd.DataFrame, df_activities: pd.DataFrame, df_zones: pd.DataFrame, output_path: str = "drw_quantified_self.csv"):
     
     # 1. Process Garmin Daily Data
-    # Mapped 'Garmin HRV Status (Text Label)' directly from drw_garmin_data.csv to 'HRV_Status'
+    # Fixed typo in key mapping for Lactate Threshold Heart Rate
     garmin_mapping = {
         'Date (YYYY-MM-DD)': 'Date_YYYY_MM_DD',
         'Physiological Maximum Heart Rate (bpm)': 'Physiological_Max_HR_bpm',
@@ -33,7 +33,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'Garmin Training Load (7 Day Sum)': 'Garmin_7d_Training_Load_Sum',
         'VO2 Max (ml/kg/min)': 'Garmin_VO2_Max_ml_kg_min',
         'Lactate Threshold Pace (min/km)': 'Lactate_Threshold_Pace', 
-        'Lactate Threshold Heart Rate (bpm)': 'Lactate Threshold_Heart_Rate_bpm',
+        'Lactate Threshold Heart Rate (bpm)': 'Lactate_Threshold_Heart_Rate_bpm',
         'Intensity Minutes': 'Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min',
         'Sleep Length (min)': 'Overnight_Sleep_Duration_min',
         'Sleep Need (min)': 'Sleep_Need_min',
