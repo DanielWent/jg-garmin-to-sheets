@@ -33,6 +33,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'VO2 Max (ml/kg/min)': 'Garmin_VO2_Max_ml_kg_min',
         'Lactate Threshold Pace (min/km)': 'Lactate_Threshold_Pace', 
         'Lactate Threshold Heart Rate (bpm)': 'Lactate_Threshold_Heart_Rate_bpm',
+        'Intensity Minutes': 'Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min',
         'Sleep Length (min)': 'Overnight_Sleep_Duration_min',
         'Sleep Need (min)': 'Sleep_Need_min',
         'Sleep Start Time': 'Sleep_Start_Time_HH_MM',
@@ -57,8 +58,8 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'HR Zone 5 (min)': 'sum'
     }).reset_index()
     
-    df_a_daily['Time_in_HR_Zone_2_3_min'] = df_a_daily['HR Zone 2 (min)'] + df_a_daily['HR Zone 3 (min)']
-    df_a_daily['Time_in_HR_Zone_4_5_min'] = df_a_daily['HR Zone 4 (min)'] + df_a_daily['HR Zone 5 (min)']
+    df_a_daily['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'] = df_a_daily['HR Zone 2 (min)'] + df_a_daily['HR Zone 3 (min)']
+    df_a_daily['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'] = df_a_daily['HR Zone 4 (min)'] + df_a_daily['HR Zone 5 (min)']
     df_a_daily = df_a_daily.rename(columns={'Activity Training Load': 'Daily_Activity_Training_Load'})
     
     # 3. Process Withings Data
@@ -91,14 +92,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'HDL_Cholesterol_mmol_L': ['hdl cholesterol', 'hdl'],
         'Triglycerides_mmol_L': ['triglycerides', 'triglyceride'],
         'HbA1c_mmol_mol': ['hba1c'],
-        'Ferritin_ug_L': ['ferritin'],
-        'Vitamin_D_nmol_L': ['vitamin d', '25-oh vitamin d', 'vit d', '25(oh)d'],
-        'hs_CRP_mg_L': ['hs-crp', 'crp high sensitivity', 'high sensitivity crp', 'hscrp', 'crp'],
-        'ALT_U_L': ['alt', 'alanine transferase', 'alanine aminotransferase', 'sgpt'],
-        'GGT_IU_L': ['ggt', 'gamma-gt', 'gamma glutamyl transferase', 'gamma-glutamyl transferase'],
-        'Creatinine_umol_L': ['creatinine', 'creatine'],
-        'eGFR_ml_min_1_73m2': ['egfr', 'estimated glomerular filtration rate'],
-        'TSH_mIU_L': ['tsh', 'thyroid stimulating hormone']
+        'hs_CRP_mg_L': ['hs-crp', 'crp high sensitivity', 'high sensitivity crp', 'hscrp', 'crp']
     }
 
     mapped_medical_data = []
@@ -118,7 +112,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         df_m_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD'] + list(test_map.keys()))
 
     # 5. Merge All Datasets
-    df = pd.merge(df_g, df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load', 'Time_in_HR_Zone_2_3_min', 'Time_in_HR_Zone_4_5_min']], on='Date_YYYY_MM_DD', how='outer')
+    df = pd.merge(df_g, df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load', 'Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min', 'Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min']], on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
     
@@ -127,8 +121,8 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     
     # Fill missing active durations/loads with 0 for days without recorded activities
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
-    df['Time_in_HR_Zone_2_3_min'] = df['Time_in_HR_Zone_2_3_min'].fillna(0)
-    df['Time_in_HR_Zone_4_5_min'] = df['Time_in_HR_Zone_4_5_min'].fillna(0)
+    df['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'] = df['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'].fillna(0)
+    df['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'] = df['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'].fillna(0)
     
     # 6. Pace and Time Formatting
     if "Lactate_Threshold_Pace" in df.columns:
@@ -152,22 +146,19 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     if "Daily_Running_Distance_km" in df.columns:
         df["Running_Distance_28d_Total_km"] = df["Daily_Running_Distance_km"].rolling(window=28, min_periods=1).sum().round(2)
-    
-    if "Overnight_Resting_Heart_Rate_bpm" in df.columns:
-        df["Resting_Heart_Rate_7d_Average_bpm"] = df["Overnight_Resting_Heart_Rate_bpm"].rolling(window=7, min_periods=1).mean().round(1)
         
     if "Overnight_Average_HRV_RMSSD_ms" in df.columns:
-        df["Overnight_Average_HRV_RMSSD_7d_Average_ms"] = df["Overnight_Average_HRV_RMSSD_ms"].rolling(window=7, min_periods=1).mean().round(1)
+        hrv_7d_avg = df["Overnight_Average_HRV_RMSSD_ms"].rolling(window=7, min_periods=1).mean()
         shifted_hrv = df["Overnight_Average_HRV_RMSSD_ms"].shift(7)
         shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
         shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
-        df["Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore"] = ((df["Overnight_Average_HRV_RMSSD_7d_Average_ms"] - shifted_60d_mean) / shifted_60d_std).round(2)
+        df["Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore"] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)
     
     if "Raw_Body_Fat_Percentage" in df.columns:
         df["Body_Fat_Percentage_7d_Average"] = df["Raw_Body_Fat_Percentage"].rolling(window=7, min_periods=1).mean().round(1)
         
     if "Daily_Morning_Weight_kg" in df.columns:
-        df["Daily_Morning_Weight_kg"] = df["Daily_Morning_Weight_kg"].round(2)
+        df["Daily_Morning_Weight_7d_Average_kg"] = df["Daily_Morning_Weight_kg"].rolling(window=7, min_periods=1).mean().round(2)
         
     if "Pulse_Wave_Velocity_m_s" in df.columns:
         df["Pulse_Wave_Velocity_m_s"] = df["Pulse_Wave_Velocity_m_s"].round(2)
@@ -178,16 +169,15 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     required_columns = [
         "Date_YYYY_MM_DD", "Daily_Running_Distance_km", "Daily_Steps_Count", "Running_Distance_28d_Total_km",
-        "Acute_to_Chronic_Training_Load_Ratio", "Time_in_HR_Zone_2_3_min", "Time_in_HR_Zone_4_5_min", 
+        "Acute_to_Chronic_Training_Load_Ratio", "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min", 
+        "Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min", "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min",
         "Garmin_7d_Training_Load_Sum", "Garmin_VO2_Max_ml_kg_min", "Lactate_Threshold_Pace_decimal_min_km", 
         "Lactate_Threshold_Heart_Rate_bpm", "Physiological_Max_HR_bpm", "Overnight_Sleep_Duration_min", 
         "Sleep_Start_Time_HH_MM", "Sleep_End_Time_HH_MM", "EWMA_Sleep_Debt_min", "Overnight_Resting_Heart_Rate_bpm", 
-        "Resting_Heart_Rate_7d_Average_bpm", "Overnight_Average_HRV_RMSSD_ms", "Overnight_Average_HRV_RMSSD_7d_Average_ms", 
-        "Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore", "Daily_Morning_Weight_kg",
-        "Body_Fat_Percentage_7d_Average", "Pulse_Wave_Velocity_m_s", "Resting_Systolic_Blood_Pressure_mmHg", 
-        "Resting_Diastolic_Blood_Pressure_mmHg", "ApoB_g_L", "LDL_Cholesterol_mmol_L", "HDL_Cholesterol_mmol_L", 
-        "Triglycerides_mmol_L", "HbA1c_mmol_mol", "Ferritin_ug_L", "Vitamin_D_nmol_L", "hs_CRP_mg_L", 
-        "ALT_U_L", "GGT_IU_L", "Creatinine_umol_L", "eGFR_ml_min_1_73m2", "TSH_mIU_L"
+        "Overnight_Average_HRV_RMSSD_ms", "Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore", 
+        "Daily_Morning_Weight_7d_Average_kg", "Body_Fat_Percentage_7d_Average", "Pulse_Wave_Velocity_m_s", 
+        "Resting_Systolic_Blood_Pressure_mmHg", "Resting_Diastolic_Blood_Pressure_mmHg", "ApoB_g_L", 
+        "LDL_Cholesterol_mmol_L", "HDL_Cholesterol_mmol_L", "Triglycerides_mmol_L", "HbA1c_mmol_mol", "hs_CRP_mg_L"
     ]
 
     for col in required_columns:
@@ -198,8 +188,9 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     integer_columns = [
         "Daily_Steps_Count",
-        "Time_in_HR_Zone_2_3_min",
-        "Time_in_HR_Zone_4_5_min",
+        "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min",
+        "Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min",
+        "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min",
         "Garmin_7d_Training_Load_Sum",
         "Lactate_Threshold_Heart_Rate_bpm",
         "Physiological_Max_HR_bpm",
