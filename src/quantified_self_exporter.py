@@ -34,7 +34,17 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'VO2 Max (ml/kg/min)': 'Garmin_VO2_Max_ml_kg_min',
         'Lactate Threshold Pace (min/km)': 'Lactate_Threshold_Pace', 
         'Lactate Threshold Heart Rate (bpm)': 'Lactate_Threshold_Heart_Rate_bpm',
-        'Daily Intensity Minutes': 'Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min',
+        'Moderate Intensity Minutes': 'Garmin_Moderate_Intensity_Minutes',
+        'Moderate Intensity Minutes (min)': 'Garmin_Moderate_Intensity_Minutes',
+        'Garmin Moderate Intensity Minutes': 'Garmin_Moderate_Intensity_Minutes',
+        'Vigorous Intensity Minutes': 'Garmin_Vigorous_Intensity_Minutes',
+        'Vigorous Intensity Minutes (min)': 'Garmin_Vigorous_Intensity_Minutes',
+        'Garmin Vigorous Intensity Minutes': 'Garmin_Vigorous_Intensity_Minutes',
+        'Total Calories': 'Total_Calories',
+        'Total Calories (kcal)': 'Total_Calories',
+        'Calories': 'Total_Calories',
+        'Active Calories': 'Active_Calories',
+        'Active Calories (kcal)': 'Active_Calories',
         'Sleep Length (min)': 'Overnight_Sleep_Duration_min',
         'Sleep Need (min)': 'Sleep_Need_min',
         'Sleep Start Time': 'Sleep_Start_Time_HH_MM',
@@ -46,6 +56,17 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg'
     }
     df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))
+    
+    # Positional fallbacks for Garmin columns (AB=27, AR=43, AS=44, AT=45) if names differ
+    if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:
+        df_g['Total_Calories'] = df_garmin.iloc[:, 27]
+    if 'Garmin_Moderate_Intensity_Minutes' not in df_g.columns and df_garmin.shape[1] > 43:
+        df_g['Garmin_Moderate_Intensity_Minutes'] = df_garmin.iloc[:, 43]
+    if 'Garmin_Vigorous_Intensity_Minutes' not in df_g.columns and df_garmin.shape[1] > 44:
+        df_g['Garmin_Vigorous_Intensity_Minutes'] = df_garmin.iloc[:, 44]
+    if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:
+        df_g['Active_Calories'] = df_garmin.iloc[:, 45]
+
     if 'Date_YYYY_MM_DD' not in df_g.columns:
         df_g['Date_YYYY_MM_DD'] = np.nan
     df_g['Date_YYYY_MM_DD'] = pd.to_datetime(df_g['Date_YYYY_MM_DD'], errors='coerce').dt.strftime('%Y-%m-%d')
@@ -54,29 +75,28 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     # 2. Process Garmin Activities Data
     df_activities['Date_YYYY_MM_DD'] = pd.to_datetime(df_activities['Date (YYYY-MM-DD)'], errors='coerce').dt.strftime('%Y-%m-%d')
     df_a_daily = df_activities.groupby('Date_YYYY_MM_DD').agg({
-        'Activity Training Load': 'sum',
-        'HR Zone 2 (min)': 'sum',
-        'HR Zone 3 (min)': 'sum',
-        'HR Zone 4 (min)': 'sum',
-        'HR Zone 5 (min)': 'sum'
+        'Activity Training Load': 'sum'
     }).reset_index()
-    
-    df_a_daily['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'] = df_a_daily['HR Zone 2 (min)'] + df_a_daily['HR Zone 3 (min)']
-    df_a_daily['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'] = df_a_daily['HR Zone 4 (min)'] + df_a_daily['HR Zone 5 (min)']
     df_a_daily = df_a_daily.rename(columns={'Activity Training Load': 'Daily_Activity_Training_Load'})
     
     # 3. Process Withings Data
     df_withings['Date_YYYY_MM_DD'] = pd.to_datetime(df_withings['date'], format='mixed', dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
+    
+    # Check if Weight column is mapped by position (Column B = index 1) if name differs
+    weight_col = 'Weight (kg)' if 'Weight (kg)' in df_withings.columns else df_withings.columns[1]
+    body_fat_col = 'Body Fat (%)' if 'Body Fat (%)' in df_withings.columns else df_withings.columns[2]
+    pwv_col = 'Pulse Wave Velocity (m/s)' if 'Pulse Wave Velocity (m/s)' in df_withings.columns else df_withings.columns[3]
+    
     df_w_daily = df_withings.groupby('Date_YYYY_MM_DD').agg({
-        'Weight (kg)': 'mean',
-        'Body Fat (%)': 'mean',
-        'Pulse Wave Velocity (m/s)': 'mean'
+        weight_col: 'mean',
+        body_fat_col: 'mean',
+        pwv_col: 'mean'
     }).reset_index()
     
     withings_mapping = {
-        'Weight (kg)': 'Daily_Morning_Weight_kg',
-        'Body Fat (%)': 'Raw_Body_Fat_Percentage',
-        'Pulse Wave Velocity (m/s)': 'Pulse_Wave_Velocity_m_s'
+        weight_col: 'Daily_Morning_Weight_kg',
+        body_fat_col: 'Raw_Body_Fat_Percentage',
+        pwv_col: 'Pulse_Wave_Velocity_m_s'
     }
     df_w_daily = df_w_daily.rename(columns=withings_mapping)
     
@@ -118,7 +138,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     df_z_daily = df_zones.rename(columns=zone_mapping)[['Date_YYYY_MM_DD', 'Time_in_Home_Zone_hours', 'Time_in_Work_Zone_hours']]
 
     # 6. Merge All Datasets
-    df = pd.merge(df_g, df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load', 'Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min', 'Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min']], on='Date_YYYY_MM_DD', how='outer')
+    df = pd.merge(df_g, df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load']], on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
@@ -130,8 +150,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     df = df.loc[:, ~df.columns.duplicated()]
 
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
-    df['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'] = df['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'].fillna(0)
-    df['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'] = df['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'].fillna(0)
     
     # 7. Derived Metrics & Formatting
     # Round home and work zone hours to nearest 0.1 hours
@@ -187,6 +205,11 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     if "Pulse_Wave_Velocity_m_s" in df.columns:
         df["Pulse_Wave_Velocity_m_s"] = df["Pulse_Wave_Velocity_m_s"].round(2)
 
+    # Net Active MET Minutes = (Active Calories / Mass in kg) * 60
+    if "Active_Calories" in df.columns and "Daily_Morning_Weight_kg" in df.columns:
+        effective_weight = df["Daily_Morning_Weight_kg"].combine_first(df.get("Daily_Morning_Weight_7d_Average_kg", pd.Series(np.nan, index=df.index))).ffill().bfill()
+        df["Net_Active_MET_Minutes"] = (pd.to_numeric(df["Active_Calories"], errors="coerce") / effective_weight) * 60.0
+
     # 8. Filter, Re-sort Descending, and Align Output Schema
     df_export = df.tail(730).copy()
     df_export = df_export.sort_values(by="Date_YYYY_MM_DD", ascending=False).reset_index(drop=True)
@@ -199,9 +222,9 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Daily_Steps_Count",
         "Daily_Running_Distance_km",
         "Running_Distance_28d_Total_km",
-        "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min",
-        "Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min",
-        "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min",
+        "Garmin_Moderate_Intensity_Minutes",
+        "Garmin_Vigorous_Intensity_Minutes",
+        "Net_Active_MET_Minutes",
         "Garmin_7d_Training_Load_Sum",
         "Acute_to_Chronic_Training_Load_Ratio",
         "Garmin_VO2_Max_ml_kg_min",
@@ -238,9 +261,9 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     integer_columns = [
         "Daily_Steps_Count",
-        "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min",
-        "Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min",
-        "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min",
+        "Garmin_Moderate_Intensity_Minutes",
+        "Garmin_Vigorous_Intensity_Minutes",
+        "Net_Active_MET_Minutes",
         "Garmin_7d_Training_Load_Sum",
         "Lactate_Threshold_Heart_Rate_bpm",
         "Physiological_Max_HR_bpm",
@@ -264,9 +287,9 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Daily_Steps_Count": "Step Count - Daily (steps)",
         "Daily_Running_Distance_km": "Running Distance - Daily (km)",
         "Running_Distance_28d_Total_km": "Running Distance - 28d Total (km)",
-        "Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min": "HR Zone 2 & 3 Time - %LTHR (min)",
-        "Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min": "HR Zone 4 & 5 Time - %LTHR (min)",
-        "Garmin_Intensity_Minutes_Lactate_Threshold_Zones_min": "Intensity Minutes - %LTHR Zones (min)",
+        "Garmin_Moderate_Intensity_Minutes": "Moderate Intensity Minutes - Garmin (min)",
+        "Garmin_Vigorous_Intensity_Minutes": "Vigorous Intensity Minutes - Garmin (min)",
+        "Net_Active_MET_Minutes": "Net Active MET Minutes",
         "Garmin_7d_Training_Load_Sum": "Training Load - Garmin 7d Sum",
         "Acute_to_Chronic_Training_Load_Ratio": "Training Load Ratio - Acute:Chronic",
         "Garmin_VO2_Max_ml_kg_min": "VO2 Max - Garmin (ml/kg/min)",
