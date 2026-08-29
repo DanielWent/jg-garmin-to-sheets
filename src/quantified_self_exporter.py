@@ -38,6 +38,7 @@ def generate_quantified_self_csv(
   # 1. Process Garmin Daily Data
   garmin_mapping = {
       'Date (YYYY-MM-DD)': 'Date_YYYY_MM_DD',
+      'Date': 'Date_YYYY_MM_DD',
       'Total Running Distance (km)': 'Daily_Running_Distance_km',
       'Daily Steps': 'Daily_Steps_Count',
       'Garmin Training Load (7 Day Sum)': 'Garmin_7d_Training_Load_Sum',
@@ -63,133 +64,144 @@ def generate_quantified_self_csv(
       'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
       'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg',
   }
-  df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))
+  df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))[cite: 1]
+
+  if 'Date_YYYY_MM_DD' in df_garmin.columns:
+    df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
+        df_garmin['Date_YYYY_MM_DD'], errors='coerce'
+    ).dt.strftime('%Y-%m-%d')
+  elif 'Date (YYYY-MM-DD)' in df_garmin.columns:
+    df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
+        df_garmin['Date (YYYY-MM-DD)'], errors='coerce'
+    ).dt.strftime('%Y-%m-%d')[cite: 1]
+  elif 'Date' in df_garmin.columns:
+    df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
+        df_garmin['Date'], errors='coerce'
+    ).dt.strftime('%Y-%m-%d')
+  else:
+    df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
+        df_garmin.iloc[:, 0], errors='coerce'
+    ).dt.strftime('%Y-%m-%d')
 
   # Positional fallbacks for Garmin columns if headers differ
-  if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:
-    df_g['Total_Calories'] = df_garmin.iloc[:, 27]
+  if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:[cite: 1]
+    df_g['Total_Calories'] = df_garmin.iloc[:, 27][cite: 1]
   if (
       'Garmin_Moderate_Intensity_Minutes' not in df_g.columns
       and df_garmin.shape[1] > 43
-  ):
-    df_g['Garmin_Moderate_Intensity_Minutes'] = df_garmin.iloc[:, 43]
+  ):[cite: 1]
+    df_g['Garmin_Moderate_Intensity_Minutes'] = df_garmin.iloc[:, 43][cite: 1]
   if (
       'Garmin_Vigorous_Intensity_Minutes' not in df_g.columns
       and df_garmin.shape[1] > 44
-  ):
-    df_g['Garmin_Vigorous_Intensity_Minutes'] = df_garmin.iloc[:, 44]
-  if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:
-    df_g['Active_Calories'] = df_garmin.iloc[:, 45]
+  ):[cite: 1]
+    df_g['Garmin_Vigorous_Intensity_Minutes'] = df_garmin.iloc[:, 44][cite: 1]
+  if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:[cite: 1]
+    df_g['Active_Calories'] = df_garmin.iloc[:, 45][cite: 1]
 
-  if 'Date_YYYY_MM_DD' not in df_g.columns:
-    df_g['Date_YYYY_MM_DD'] = np.nan
-  df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_g['Date_YYYY_MM_DD'], errors='coerce'
-  ).dt.strftime('%Y-%m-%d')
-  df_g = df_g.loc[:, ~df_g.columns.duplicated()]
+  df_g = df_g.loc[:, ~df_g.columns.duplicated()][cite: 1]
 
   # 2. Process Garmin Activities Data
+  act_date_col = (
+      'Date (YYYY-MM-DD)'
+      if 'Date (YYYY-MM-DD)' in df_activities.columns
+      else df_activities.columns[0]
+  )
   df_activities['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_activities['Date (YYYY-MM-DD)'], errors='coerce'
-  ).dt.strftime('%Y-%m-%d')
+      df_activities[act_date_col], errors='coerce'
+  ).dt.strftime('%Y-%m-%d')[cite: 1]
   df_a_daily = (
       df_activities.groupby('Date_YYYY_MM_DD')
       .agg({'Activity Training Load': 'sum'})
       .reset_index()
-  )
+  )[cite: 1]
   df_a_daily = df_a_daily.rename(
       columns={'Activity Training Load': 'Daily_Activity_Training_Load'}
-  )
+  )[cite: 1]
 
   # 3. Process Withings Data
+  date_col_w = (
+      'date' if 'date' in df_withings.columns else df_withings.columns[0]
+  )
   df_withings['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_withings['date'], format='mixed', dayfirst=True, errors='coerce'
-  ).dt.strftime('%Y-%m-%d')
+      df_withings[date_col_w], format='mixed', dayfirst=True, errors='coerce'
+  ).dt.strftime('%Y-%m-%d')[cite: 1]
 
   weight_col = (
       'Weight (kg)'
       if 'Weight (kg)' in df_withings.columns
       else df_withings.columns[1]
-  )
+  )[cite: 1]
   body_fat_col = (
       'Body Fat (%)'
       if 'Body Fat (%)' in df_withings.columns
       else df_withings.columns[2]
-  )
+  )[cite: 1]
   pwv_col = (
       'Pulse Wave Velocity (m/s)'
       if 'Pulse Wave Velocity (m/s)' in df_withings.columns
       else df_withings.columns[3]
-  )
+  )[cite: 1]
 
   df_w_daily = (
       df_withings.groupby('Date_YYYY_MM_DD')
       .agg({weight_col: 'mean', body_fat_col: 'mean', pwv_col: 'mean'})
       .reset_index()
-  )
+  )[cite: 1]
 
   withings_mapping = {
       weight_col: 'Daily_Morning_Weight_kg',
       body_fat_col: 'Raw_Body_Fat_Percentage',
       pwv_col: 'Pulse_Wave_Velocity_m_s',
-  }
-  df_w_daily = df_w_daily.rename(columns=withings_mapping)
+  }[cite: 1]
+  df_w_daily = df_w_daily.rename(columns=withings_mapping)[cite: 1]
 
-  # 4. Process Medical Data (Retain Medical Notes only)
-  date_col = next(
-      (
-          c
-          for c in ['Test Date', 'Date', 'Date (YYYY-MM-DD)']
-          if c in df_medical.columns
-      ),
-      df_medical.columns[0],
-  )
-  df_medical['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_medical[date_col], format='mixed', dayfirst=True, errors='coerce'
+  # 4. Process Medical Data (Positional: Col A = Date, Col D = Biological Significance, Col E = Note)
+  df_med = df_medical.copy()
+  df_med['Date_YYYY_MM_DD'] = pd.to_datetime(
+      df_med.iloc[:, 0], dayfirst=True, errors='coerce'
   ).dt.strftime('%Y-%m-%d')
 
-  notes_col = next(
-      (
-          c
-          for c in [
-              'Medical Notes',
-              'Notes',
-              'Medical Note',
-              'Clinical Notes',
-              'Comments',
-          ]
-          if c in df_medical.columns
-      ),
-      None,
+  # Filter where Biological Significance (Column D / Index 3) equals 1
+  sig_col = df_med.iloc[:, 3]
+  is_significant = (pd.to_numeric(sig_col, errors='coerce') == 1) | (
+      sig_col.astype(str).str.strip() == '1'
   )
+  df_med_filtered = df_med[is_significant].copy()
 
-  if notes_col:
+  if not df_med_filtered.empty:
+    df_med_filtered['Medical_Notes'] = (
+        df_med_filtered.iloc[:, 4].astype(str).str.strip()
+    )
+    df_med_filtered = df_med_filtered[
+        ~df_med_filtered['Medical_Notes']
+        .str.lower()
+        .isin(['nan', 'none', '', 'null'])
+    ]
     df_m_daily = (
-        df_medical.dropna(subset=[notes_col])
-        .groupby('Date_YYYY_MM_DD')[notes_col]
-        .apply(
-            lambda x: ' | '.join(
-                [str(v).strip() for v in x if str(v).strip() and str(v) != 'nan']
-            )
-        )
+        df_med_filtered.groupby('Date_YYYY_MM_DD')['Medical_Notes']
+        .apply(lambda x: ' | '.join(x))
         .reset_index()
     )
-    df_m_daily = df_m_daily.rename(columns={notes_col: 'Medical_Notes'})
   else:
     df_m_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Medical_Notes'])
 
   # 5. Process Home Assistant Zone Data
+  zone_date_col = (
+      'Date' if 'Date' in df_zones.columns else df_zones.columns[0]
+  )
   df_zones['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_zones['Date'], errors='coerce'
-  ).dt.strftime('%Y-%m-%d')
+      df_zones[zone_date_col], errors='coerce'
+  ).dt.strftime('%Y-%m-%d')[cite: 1]
+
   zone_mapping = {
       'Time in Home Zone (hours)': 'Time_in_Home_Zone_hours',
       'Time in Work Zone (hours)': 'Time_in_Work_Zone_hours',
-  }
-  available_zone_cols = ['Date_YYYY_MM_DD'] + [
+  }[cite: 1]
+  avail_zone_cols = ['Date_YYYY_MM_DD'] + [
       v for k, v in zone_mapping.items() if k in df_zones.columns
   ]
-  df_z_daily = df_zones.rename(columns=zone_mapping)[available_zone_cols]
+  df_z_daily = df_zones.rename(columns=zone_mapping)[avail_zone_cols]
 
   # 6. Merge All Datasets
   df = pd.merge(
@@ -197,103 +209,102 @@ def generate_quantified_self_csv(
       df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load']],
       on='Date_YYYY_MM_DD',
       how='outer',
-  )
-  df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
+  )[cite: 1]
+  df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')[cite: 1]
   df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
-  df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
+  df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')[cite: 1]
 
-  df = df.dropna(subset=['Date_YYYY_MM_DD'])
+  df = df.dropna(subset=['Date_YYYY_MM_DD'])[cite: 1]
   df = df.sort_values(by='Date_YYYY_MM_DD', ascending=True).reset_index(
       drop=True
-  )
-  df = df.loc[:, ~df.columns.duplicated()]
+  )[cite: 1]
+  df = df.loc[:, ~df.columns.duplicated()][cite: 1]
+  df['Daily_Activity_Training_Load'] = df[
+      'Daily_Activity_Training_Load'
+  ].fillna(0)[cite: 1]
 
-  df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(
-      0
-  )
-
-  # 7. Derived Metrics & Computations
-  if 'Lactate_Threshold_Pace' in df.columns:
+  # 7. Derived Metrics
+  if 'Lactate_Threshold_Pace' in df.columns:[cite: 1]
     df['Lactate_Threshold_Pace_decimal_min_km'] = df[
         'Lactate_Threshold_Pace'
-    ].apply(convert_pace_to_decimal)
+    ].apply(convert_pace_to_decimal)[cite: 1]
 
-  def time_to_decimal(time_str):
-    if pd.isna(time_str):
-      return np.nan
-    try:
-      h, m = map(int, str(time_str).split(':'))
-      if h < 12:
-        h += 24
-      return round(h + (m / 60.0), 2)
-    except ValueError:
-      return np.nan
+  def time_to_decimal(time_str):[cite: 1]
+    if pd.isna(time_str):[cite: 1]
+      return np.nan[cite: 1]
+    try:[cite: 1]
+      h, m = map(int, str(time_str).split(':'))[cite: 1]
+      if h < 12:[cite: 1]
+        h += 24[cite: 1]
+      return round(h + (m / 60.0), 2)[cite: 1]
+    except ValueError:[cite: 1]
+      return np.nan[cite: 1]
 
-  if 'Sleep_Start_Time_HH_MM' in df.columns:
+  if 'Sleep_Start_Time_HH_MM' in df.columns:[cite: 1]
     df['Sleep_Start_Decimal'] = df['Sleep_Start_Time_HH_MM'].apply(
         time_to_decimal
-    )
+    )[cite: 1]
 
   acute_load = (
       df['Daily_Activity_Training_Load'].rolling(window=7, min_periods=1).sum()
-  )
+  )[cite: 1]
   chronic_load = (
       df['Daily_Activity_Training_Load'].rolling(window=28, min_periods=1).sum()
       / 4
-  )
+  )[cite: 1]
   df['Acute_to_Chronic_Training_Load_Ratio'] = (
       (acute_load / chronic_load).replace([np.inf, -np.inf], np.nan).round(2)
-  )
+  )[cite: 1]
 
   if (
       'Sleep_Need_min' in df.columns
       and 'Overnight_Sleep_Duration_min' in df.columns
-  ):
+  ):[cite: 1]
     daily_sleep_deficit = (
         df['Sleep_Need_min'] - df['Overnight_Sleep_Duration_min']
-    )
+    )[cite: 1]
     df['EWMA_Sleep_Debt_min'] = daily_sleep_deficit.ewm(
         span=7, adjust=False
-    ).mean()
+    ).mean()[cite: 1]
 
-  if 'Daily_Running_Distance_km' in df.columns:
+  if 'Daily_Running_Distance_km' in df.columns:[cite: 1]
     df['Running_Distance_28d_Total_km'] = (
         df['Daily_Running_Distance_km']
         .rolling(window=28, min_periods=1)
         .sum()
         .round(2)
-    )
+    )[cite: 1]
 
-  if 'Overnight_Average_HRV_RMSSD_ms' in df.columns:
+  if 'Overnight_Average_HRV_RMSSD_ms' in df.columns:[cite: 1]
     hrv_7d_avg = (
         df['Overnight_Average_HRV_RMSSD_ms']
         .rolling(window=7, min_periods=1)
         .mean()
-    )
-    shifted_hrv = df['Overnight_Average_HRV_RMSSD_ms'].shift(7)
-    shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
-    shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
+    )[cite: 1]
+    shifted_hrv = df['Overnight_Average_HRV_RMSSD_ms'].shift(7)[cite: 1]
+    shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()[cite: 1]
+    shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()[cite: 1]
     df[
         'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'
-    ] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)
+    ] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)[cite: 1]
 
-  if 'Raw_Body_Fat_Percentage' in df.columns:
+  if 'Raw_Body_Fat_Percentage' in df.columns:[cite: 1]
     df['Body_Fat_Percentage_7d_Average'] = (
         df['Raw_Body_Fat_Percentage']
         .rolling(window=7, min_periods=1)
         .mean()
         .round(1)
-    )
+    )[cite: 1]
 
-  if 'Daily_Morning_Weight_kg' in df.columns:
+  if 'Daily_Morning_Weight_kg' in df.columns:[cite: 1]
     df['Daily_Morning_Weight_7d_Average_kg'] = (
         df['Daily_Morning_Weight_kg']
         .rolling(window=7, min_periods=1)
         .mean()
         .round(2)
-    )
+    )[cite: 1]
 
-  if 'Active_Calories' in df.columns and 'Daily_Morning_Weight_kg' in df.columns:
+  if 'Active_Calories' in df.columns and 'Daily_Morning_Weight_kg' in df.columns:[cite: 1]
     effective_weight = (
         df['Daily_Morning_Weight_kg']
         .combine_first(
@@ -304,16 +315,16 @@ def generate_quantified_self_csv(
         )
         .ffill()
         .bfill()
-    )
+    )[cite: 1]
     df['Net_Active_MET_Minutes'] = (
         pd.to_numeric(df['Active_Calories'], errors='coerce') / effective_weight
-    ) * 60.0
+    ) * 60.0[cite: 1]
 
-  # 8. Schema Alignment & Descending Sort
-  df_export = df.tail(730).copy()
+  # 8. Filter, Sort Descending, and Select Target Columns
+  df_export = df.tail(730).copy()[cite: 1]
   df_export = df_export.sort_values(
       by='Date_YYYY_MM_DD', ascending=False
-  ).reset_index(drop=True)
+  ).reset_index(drop=True)[cite: 1]
 
   required_columns = [
       'Date_YYYY_MM_DD',
@@ -344,11 +355,11 @@ def generate_quantified_self_csv(
       'Medical_Notes',
   ]
 
-  for col in required_columns:
-    if col not in df_export.columns:
-      df_export[col] = np.nan
+  for col in required_columns:[cite: 1]
+    if col not in df_export.columns:[cite: 1]
+      df_export[col] = np.nan[cite: 1]
 
-  df_export = df_export[required_columns]
+  df_export = df_export[required_columns][cite: 1]
 
   column_rename_map = {
       'Date_YYYY_MM_DD': 'Date (YYYY-MM-DD)',
@@ -391,9 +402,10 @@ def generate_quantified_self_csv(
       ),
       'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
       'Medical_Notes': 'Medical Notes',
-  }
-  df_export = df_export.rename(columns=column_rename_map)
-  df_export = df_export.loc[:, ~df_export.columns.duplicated()]
+  }[cite: 1]
+
+  df_export = df_export.rename(columns=column_rename_map)[cite: 1]
+  df_export = df_export.loc[:, ~df_export.columns.duplicated()][cite: 1]
 
   # 9. Strict Type & Decimal Precision Formatting
   integer_columns = [
@@ -416,7 +428,6 @@ def generate_quantified_self_csv(
           pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
       )
 
-  # Exact 1 Decimal Place
   float_1dp_columns = [
       'Time at Home (hours)',
       'Time at Work (hours)',
@@ -427,7 +438,6 @@ def generate_quantified_self_csv(
     if col in df_export.columns:
       df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(1)
 
-  # Exact 2 Decimal Places
   float_2dp_columns = [
       'Running Distance - Daily (km)',
       'Running Distance - 28d Total (km)',
@@ -442,7 +452,7 @@ def generate_quantified_self_csv(
     if col in df_export.columns:
       df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(2)
 
-  # 10. Clean CSV Export (No comment/context header)
+  # 10. Write Out Clean CSV
   df_export.to_csv(output_path, header=True, index=False, na_rep='')
 
 
@@ -524,7 +534,7 @@ if __name__ == '__main__':
   df_medical_raw = pd.read_csv(medical_data)[cite: 1]
   df_zones_raw = pd.read_csv(ZONES_URL)[cite: 1]
 
-  print('Processing physiological metrics...')[cite: 1]
+  print('Processing physiological metrics...')
   generate_quantified_self_csv(
       df_garmin_raw,
       df_withings_raw,
@@ -534,7 +544,7 @@ if __name__ == '__main__':
       output_path=TARGET_FILENAME,
   )
 
-  print('Uploading updated CSV to Google Drive...')[cite: 1]
+  print('Uploading updated CSV to Google Drive...')
   media = MediaFileUpload(TARGET_FILENAME, mimetype='text/csv', resumable=True)[cite: 1]
 
   if target_file_id:
