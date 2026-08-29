@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import time
 import pandas as pd
 import numpy as np
 from googleapiclient.discovery import build
@@ -24,7 +25,6 @@ def convert_pace_to_decimal(pace_str):
 def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFrame, df_medical: pd.DataFrame, df_activities: pd.DataFrame, df_zones: pd.DataFrame, output_path: str = "drw_quantified_self.csv"):
     
     # 1. Process Garmin Daily Data
-    # Fixed 'Daily Intensity Minutes' mapping key
     garmin_mapping = {
         'Date (YYYY-MM-DD)': 'Date_YYYY_MM_DD',
         'Physiological Maximum Heart Rate (bpm)': 'Physiological_Max_HR_bpm',
@@ -49,6 +49,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     if 'Date_YYYY_MM_DD' not in df_g.columns:
         df_g['Date_YYYY_MM_DD'] = np.nan
     df_g['Date_YYYY_MM_DD'] = pd.to_datetime(df_g['Date_YYYY_MM_DD'], errors='coerce').dt.strftime('%Y-%m-%d')
+    df_g = df_g.loc[:, ~df_g.columns.duplicated()]
     
     # 2. Process Garmin Activities Data
     df_activities['Date_YYYY_MM_DD'] = pd.to_datetime(df_activities['Date (YYYY-MM-DD)'], errors='coerce').dt.strftime('%Y-%m-%d')
@@ -125,13 +126,20 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
     df = df.sort_values(by="Date_YYYY_MM_DD", ascending=True).reset_index(drop=True)
     
+    # Remove any duplicate columns after merging
+    df = df.loc[:, ~df.columns.duplicated()]
+
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
     df['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'] = df['Time_in_HR_Zone_2_and_3_combined_percent_Lactate_Threshold_min'].fillna(0)
     df['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'] = df['Time_in_HR_Zone_4_and_5_combined_percent_Lactate_Threshold_min'].fillna(0)
     
     # 7. Derived Metrics & Formatting
-    df['Date_Obj'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
-    df['Day_of_Week'] = df['Date_Obj'].dt.day_name()
+    # Round home and work zone hours to nearest 0.1 hours
+    if 'Time_in_Home_Zone_hours' in df.columns:
+        df['Time_in_Home_Zone_hours'] = pd.to_numeric(df['Time_in_Home_Zone_hours'], errors='coerce').round(1)
+    if 'Time_in_Work_Zone_hours' in df.columns:
+        df['Time_in_Work_Zone_hours'] = pd.to_numeric(df['Time_in_Work_Zone_hours'], errors='coerce').round(1)
+
     df['Is_Work_Day'] = df['Time_in_Work_Zone_hours'].apply(lambda x: (x > 0.5) if pd.notna(x) else "")
 
     if "Lactate_Threshold_Pace" in df.columns:
@@ -185,7 +193,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     required_columns = [
         "Date_YYYY_MM_DD",
-        "Day_of_Week",
         "Is_Work_Day",
         "Time_in_Home_Zone_hours",
         "Time_in_Work_Zone_hours",
@@ -251,7 +258,6 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     column_rename_map = {
         "Date_YYYY_MM_DD": "Date (YYYY-MM-DD)",
-        "Day_of_Week": "Day of Week",
         "Is_Work_Day": "Work Day (Bool)",
         "Time_in_Home_Zone_hours": "Time at Home (hours)",
         "Time_in_Work_Zone_hours": "Time at Work (hours)",
@@ -292,6 +298,9 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     df_export = df_export.rename(columns=column_rename_map)
     df_export["Work Day (Bool)"] = df_export["Work Day (Bool)"].fillna("")
 
+    # Deduplicate final columns explicitly
+    df_export = df_export.loc[:, ~df_export.columns.duplicated()]
+
     # 9. Demographic Header Injection & Export
     header_string = f"# Context: Male, DOB: {DOB}, Height: {HEIGHT_CM} cm, Lp(a): {LPA_NMOL_L} nmol/l\n"
     with open(output_path, "w") as f:
@@ -326,7 +335,11 @@ if __name__ == "__main__":
     ACTIVITIES_FILENAME = "drw_garmin_activities_list.csv"
     WITHINGS_FILENAME = "drw_withings_bodyscan_data.csv"
     MEDICAL_FILENAME = "Daniel's Medical Test Results.csv"
-    ZONES_URL = "https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv?v=1"
+    
+    # Append a dynamic timestamp query parameter to bust HTTP cache
+    ZONES_BASE_URL = "https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv"
+    ZONES_URL = f"{ZONES_BASE_URL}?v={int(time.time())}"
+    
     TARGET_FILENAME = "drw_quantified_self.csv"
     
     if not FOLDER_ID:
