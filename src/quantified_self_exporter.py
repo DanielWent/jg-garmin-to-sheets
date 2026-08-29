@@ -83,7 +83,6 @@ def generate_quantified_self_csv(
         df_garmin.iloc[:, 0], errors='coerce'
     ).dt.strftime('%Y-%m-%d')
 
-  # Positional fallbacks for Garmin columns if headers differ
   if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:
     df_g['Total_Calories'] = df_garmin.iloc[:, 27]
   if (
@@ -156,7 +155,7 @@ def generate_quantified_self_csv(
   }
   df_w_daily = df_w_daily.rename(columns=withings_mapping)
 
-  # 4. Process Medical Data (Column A: Date, Column D: Significance == 1, Column E: Note)
+  # 4. Process Medical Notes (Column A: Date, Column D: Biologically Significant == 1, Column E: Summary)
   df_med = df_medical.copy()
   df_med['Date_YYYY_MM_DD'] = pd.to_datetime(
       df_med.iloc[:, 0], dayfirst=True, errors='coerce'
@@ -164,7 +163,7 @@ def generate_quantified_self_csv(
 
   sig_col = df_med.iloc[:, 3]
   is_significant = (pd.to_numeric(sig_col, errors='coerce') == 1) | (
-      sig_col.astype(str).str.strip() == '1'
+      sig_col.astype(str).str.strip().isin(['1', '1.0', 'True', 'true'])
   )
   df_med_filtered = df_med[is_significant].copy()
 
@@ -222,7 +221,7 @@ def generate_quantified_self_csv(
       'Daily_Activity_Training_Load'
   ].fillna(0)
 
-  # 7. Derived Metrics & Precision
+  # 7. Derived Metrics
   if 'Lactate_Threshold_Pace' in df.columns:
     df['Lactate_Threshold_Pace_decimal_min_km'] = df[
         'Lactate_Threshold_Pace'
@@ -400,7 +399,7 @@ def generate_quantified_self_csv(
           'Blood Pressure Diastolic - Resting (mmHg)'
       ),
       'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
-      'Medical_Notes': 'Medical Notes',
+      'Medical_Notes': 'Medical Note',
   }
 
   df_export = df_export.rename(columns=column_rename_map)
@@ -480,7 +479,7 @@ if __name__ == '__main__':
   GARMIN_FILENAME = 'drw_garmin_data.csv'
   ACTIVITIES_FILENAME = 'drw_garmin_activities_list.csv'
   WITHINGS_FILENAME = 'drw_withings_bodyscan_data.csv'
-  MEDICAL_FILENAME = "Daniel's Medical Test Results.csv"
+  MEDICAL_FILENAME = "Daniel's Full Medical Notes.csv"
 
   ZONES_BASE_URL = 'https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv'
   ZONES_URL = f'{ZONES_BASE_URL}?v={int(time.time())}'
@@ -508,6 +507,13 @@ if __name__ == '__main__':
   )
   withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
   medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
+
+  # Fallback check if the file was stored under previous name
+  if not medical_file_id:
+    medical_file_id = get_file_id(
+        drive_service, "Daniel's Medical Test Results.csv", FOLDER_ID
+    )
+
   target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
 
   if not garmin_file_id:
