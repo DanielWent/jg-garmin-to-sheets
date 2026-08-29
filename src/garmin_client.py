@@ -776,6 +776,8 @@ class GarminClient:
             resting_cal = None
             total_cal = None
             intensity_min = None
+            moderate_intensity_min = None
+            vigorous_intensity_min = None
             resting_hr = None
             avg_stress = None
             floors = None
@@ -789,6 +791,8 @@ class GarminClient:
                     total_cal = (active_cal or 0) + (resting_cal or 0)
 
                 intensity_min = (summary.get('moderateIntensityMinutes', 0) or 0) + (2 * (summary.get('vigorousIntensityMinutes', 0) or 0))
+                moderate_intensity_min = summary.get('moderateIntensityMinutes')
+                vigorous_intensity_min = summary.get('vigorousIntensityMinutes')
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
                 
@@ -950,6 +954,8 @@ class GarminClient:
                 resting_calories=resting_cal,
                 total_calories=total_cal,
                 intensity_minutes=intensity_min,
+                moderate_intensity_minutes=moderate_intensity_min,
+                vigorous_intensity_minutes=vigorous_intensity_min,
                 steps=steps,
                 floors_climbed=floors,
                 activities=processed_activities
