@@ -9,6 +9,28 @@ import numpy as np
 import pandas as pd
 
 
+def parse_to_iso_date(series: pd.Series) -> pd.Series:
+  s_str = (
+      series.astype(str)
+      .str.strip()
+      .str.split('T')
+      .str[0]
+      .str.split(' ')
+      .str[0]
+  )
+  s_dt = pd.to_datetime(s_str, format='%Y-%m-%d', errors='coerce')
+  missing_mask = (
+      s_dt.isna()
+      & series.notna()
+      & ~series.astype(str).str.lower().isin(['nan', 'none', '', 'null'])
+  )
+  if missing_mask.any():
+    s_dt.loc[missing_mask] = pd.to_datetime(
+        series.loc[missing_mask], dayfirst=True, format='mixed', errors='coerce'
+    )
+  return s_dt.dt.strftime('%Y-%m-%d')
+
+
 def convert_pace_to_decimal(pace_val):
   if pd.isna(pace_val):
     return np.nan
@@ -66,22 +88,15 @@ def generate_quantified_self_csv(
   }
   df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))
 
-  if 'Date_YYYY_MM_DD' in df_garmin.columns:
-    df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
-        df_garmin['Date_YYYY_MM_DD'], errors='coerce'
-    ).dt.strftime('%Y-%m-%d')
-  elif 'Date (YYYY-MM-DD)' in df_garmin.columns:
-    df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
-        df_garmin['Date (YYYY-MM-DD)'], errors='coerce'
-    ).dt.strftime('%Y-%m-%d')
-  elif 'Date' in df_garmin.columns:
-    df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
-        df_garmin['Date'], errors='coerce'
-    ).dt.strftime('%Y-%m-%d')
-  else:
-    df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
-        df_garmin.iloc[:, 0], errors='coerce'
-    ).dt.strftime('%Y-%m-%d')
+  date_col_g = next(
+      (
+          c
+          for c in ['Date_YYYY_MM_DD', 'Date (YYYY-MM-DD)', 'Date']
+          if c in df_g.columns
+      ),
+      df_g.columns[0],
+  )
+  df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
 
   if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:
     df_g['Total_Calories'] = df_garmin.iloc[:, 27]
@@ -101,14 +116,17 @@ def generate_quantified_self_csv(
   df_g = df_g.loc[:, ~df_g.columns.duplicated()]
 
   # 2. Process Garmin Activities Data
-  act_date_col = (
-      'Date (YYYY-MM-DD)'
-      if 'Date (YYYY-MM-DD)' in df_activities.columns
-      else df_activities.columns[0]
+  act_date_col = next(
+      (
+          c
+          for c in ['Date (YYYY-MM-DD)', 'Date', 'Date_YYYY_MM_DD']
+          if c in df_activities.columns
+      ),
+      df_activities.columns[0],
   )
-  df_activities['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_activities[act_date_col], errors='coerce'
-  ).dt.strftime('%Y-%m-%d')
+  df_activities['Date_YYYY_MM_DD'] = parse_to_iso_date(
+      df_activities[act_date_col]
+  )
   df_a_daily = (
       df_activities.groupby('Date_YYYY_MM_DD')
       .agg({'Activity Training Load': 'sum'})
@@ -119,12 +137,15 @@ def generate_quantified_self_csv(
   )
 
   # 3. Process Withings Data
-  date_col_w = (
-      'date' if 'date' in df_withings.columns else df_withings.columns[0]
+  date_col_w = next(
+      (
+          c
+          for c in ['date', 'Date', 'Date (YYYY-MM-DD)']
+          if c in df_withings.columns
+      ),
+      df_withings.columns[0],
   )
-  df_withings['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_withings[date_col_w], format='mixed', dayfirst=True, errors='coerce'
-  ).dt.strftime('%Y-%m-%d')
+  df_withings['Date_YYYY_MM_DD'] = parse_to_iso_date(df_withings[date_col_w])
 
   weight_col = (
       'Weight (kg)'
@@ -155,11 +176,9 @@ def generate_quantified_self_csv(
   }
   df_w_daily = df_w_daily.rename(columns=withings_mapping)
 
-  # 4. Process Medical Notes (Column A: Date, Column D: Biologically Significant == 1, Column E: Summary)
+  # 4. Process Medical Data (Column A: Date, Column D: Biologically Significant == 1, Column E: Summary)
   df_med = df_medical.copy()
-  df_med['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_med.iloc[:, 0], dayfirst=True, errors='coerce'
-  ).dt.strftime('%Y-%m-%d')
+  df_med['Date_YYYY_MM_DD'] = parse_to_iso_date(df_med.iloc[:, 0])
 
   sig_col = df_med.iloc[:, 3]
   is_significant = (pd.to_numeric(sig_col, errors='coerce') == 1) | (
@@ -185,12 +204,15 @@ def generate_quantified_self_csv(
     df_m_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Medical_Notes'])
 
   # 5. Process Home Assistant Zone Data
-  zone_date_col = (
-      'Date' if 'Date' in df_zones.columns else df_zones.columns[0]
+  zone_date_col = next(
+      (
+          c
+          for c in ['Date', 'date', 'Date (YYYY-MM-DD)']
+          if c in df_zones.columns
+      ),
+      df_zones.columns[0],
   )
-  df_zones['Date_YYYY_MM_DD'] = pd.to_datetime(
-      df_zones[zone_date_col], errors='coerce'
-  ).dt.strftime('%Y-%m-%d')
+  df_zones['Date_YYYY_MM_DD'] = parse_to_iso_date(df_zones[zone_date_col])
 
   zone_mapping = {
       'Time in Home Zone (hours)': 'Time_in_Home_Zone_hours',
@@ -213,15 +235,18 @@ def generate_quantified_self_csv(
   df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
 
   df = df.dropna(subset=['Date_YYYY_MM_DD'])
-  df = df.sort_values(by='Date_YYYY_MM_DD', ascending=True).reset_index(
-      drop=True
+  df['_sort_date'] = pd.to_datetime(
+      df['Date_YYYY_MM_DD'], format='%Y-%m-%d', errors='coerce'
   )
+  df = df.dropna(subset=['_sort_date'])
+  df = df.sort_values(by='_sort_date', ascending=True).reset_index(drop=True)
+  df = df.drop(columns=['_sort_date'])
   df = df.loc[:, ~df.columns.duplicated()]
   df['Daily_Activity_Training_Load'] = df[
       'Daily_Activity_Training_Load'
   ].fillna(0)
 
-  # 7. Derived Metrics
+  # 7. Derived Metrics & Precision
   if 'Lactate_Threshold_Pace' in df.columns:
     df['Lactate_Threshold_Pace_decimal_min_km'] = df[
         'Lactate_Threshold_Pace'
@@ -320,9 +345,13 @@ def generate_quantified_self_csv(
 
   # 8. Filter, Sort Descending, and Select Target Columns
   df_export = df.tail(730).copy()
+  df_export['_sort_date'] = pd.to_datetime(
+      df_export['Date_YYYY_MM_DD'], format='%Y-%m-%d', errors='coerce'
+  )
   df_export = df_export.sort_values(
-      by='Date_YYYY_MM_DD', ascending=False
+      by='_sort_date', ascending=False
   ).reset_index(drop=True)
+  df_export = df_export.drop(columns=['_sort_date'])
 
   required_columns = [
       'Date_YYYY_MM_DD',
@@ -452,6 +481,7 @@ def generate_quantified_self_csv(
 
   # 10. Write Out Clean CSV
   df_export.to_csv(output_path, header=True, index=False, na_rep='')
+  return df_export
 
 
 def get_file_id(service, filename, folder_id):
@@ -508,7 +538,6 @@ if __name__ == '__main__':
   withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
   medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
 
-  # Fallback check if the file was stored under previous name
   if not medical_file_id:
     medical_file_id = get_file_id(
         drive_service, "Daniel's Medical Test Results.csv", FOLDER_ID
