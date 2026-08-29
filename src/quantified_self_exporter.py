@@ -64,7 +64,7 @@ def generate_quantified_self_csv(
       'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
       'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg',
   }
-  df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))[cite: 1]
+  df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))
 
   if 'Date_YYYY_MM_DD' in df_garmin.columns:
     df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
@@ -73,7 +73,7 @@ def generate_quantified_self_csv(
   elif 'Date (YYYY-MM-DD)' in df_garmin.columns:
     df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
         df_garmin['Date (YYYY-MM-DD)'], errors='coerce'
-    ).dt.strftime('%Y-%m-%d')[cite: 1]
+    ).dt.strftime('%Y-%m-%d')
   elif 'Date' in df_garmin.columns:
     df_g['Date_YYYY_MM_DD'] = pd.to_datetime(
         df_garmin['Date'], errors='coerce'
@@ -84,22 +84,22 @@ def generate_quantified_self_csv(
     ).dt.strftime('%Y-%m-%d')
 
   # Positional fallbacks for Garmin columns if headers differ
-  if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:[cite: 1]
-    df_g['Total_Calories'] = df_garmin.iloc[:, 27][cite: 1]
+  if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:
+    df_g['Total_Calories'] = df_garmin.iloc[:, 27]
   if (
       'Garmin_Moderate_Intensity_Minutes' not in df_g.columns
       and df_garmin.shape[1] > 43
-  ):[cite: 1]
-    df_g['Garmin_Moderate_Intensity_Minutes'] = df_garmin.iloc[:, 43][cite: 1]
+  ):
+    df_g['Garmin_Moderate_Intensity_Minutes'] = df_garmin.iloc[:, 43]
   if (
       'Garmin_Vigorous_Intensity_Minutes' not in df_g.columns
       and df_garmin.shape[1] > 44
-  ):[cite: 1]
-    df_g['Garmin_Vigorous_Intensity_Minutes'] = df_garmin.iloc[:, 44][cite: 1]
-  if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:[cite: 1]
-    df_g['Active_Calories'] = df_garmin.iloc[:, 45][cite: 1]
+  ):
+    df_g['Garmin_Vigorous_Intensity_Minutes'] = df_garmin.iloc[:, 44]
+  if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:
+    df_g['Active_Calories'] = df_garmin.iloc[:, 45]
 
-  df_g = df_g.loc[:, ~df_g.columns.duplicated()][cite: 1]
+  df_g = df_g.loc[:, ~df_g.columns.duplicated()]
 
   # 2. Process Garmin Activities Data
   act_date_col = (
@@ -109,15 +109,15 @@ def generate_quantified_self_csv(
   )
   df_activities['Date_YYYY_MM_DD'] = pd.to_datetime(
       df_activities[act_date_col], errors='coerce'
-  ).dt.strftime('%Y-%m-%d')[cite: 1]
+  ).dt.strftime('%Y-%m-%d')
   df_a_daily = (
       df_activities.groupby('Date_YYYY_MM_DD')
       .agg({'Activity Training Load': 'sum'})
       .reset_index()
-  )[cite: 1]
+  )
   df_a_daily = df_a_daily.rename(
       columns={'Activity Training Load': 'Daily_Activity_Training_Load'}
-  )[cite: 1]
+  )
 
   # 3. Process Withings Data
   date_col_w = (
@@ -125,44 +125,43 @@ def generate_quantified_self_csv(
   )
   df_withings['Date_YYYY_MM_DD'] = pd.to_datetime(
       df_withings[date_col_w], format='mixed', dayfirst=True, errors='coerce'
-  ).dt.strftime('%Y-%m-%d')[cite: 1]
+  ).dt.strftime('%Y-%m-%d')
 
   weight_col = (
       'Weight (kg)'
       if 'Weight (kg)' in df_withings.columns
       else df_withings.columns[1]
-  )[cite: 1]
+  )
   body_fat_col = (
       'Body Fat (%)'
       if 'Body Fat (%)' in df_withings.columns
       else df_withings.columns[2]
-  )[cite: 1]
+  )
   pwv_col = (
       'Pulse Wave Velocity (m/s)'
       if 'Pulse Wave Velocity (m/s)' in df_withings.columns
       else df_withings.columns[3]
-  )[cite: 1]
+  )
 
   df_w_daily = (
       df_withings.groupby('Date_YYYY_MM_DD')
       .agg({weight_col: 'mean', body_fat_col: 'mean', pwv_col: 'mean'})
       .reset_index()
-  )[cite: 1]
+  )
 
   withings_mapping = {
       weight_col: 'Daily_Morning_Weight_kg',
       body_fat_col: 'Raw_Body_Fat_Percentage',
       pwv_col: 'Pulse_Wave_Velocity_m_s',
-  }[cite: 1]
-  df_w_daily = df_w_daily.rename(columns=withings_mapping)[cite: 1]
+  }
+  df_w_daily = df_w_daily.rename(columns=withings_mapping)
 
-  # 4. Process Medical Data (Positional: Col A = Date, Col D = Biological Significance, Col E = Note)
+  # 4. Process Medical Data (Column A: Date, Column D: Significance == 1, Column E: Note)
   df_med = df_medical.copy()
   df_med['Date_YYYY_MM_DD'] = pd.to_datetime(
       df_med.iloc[:, 0], dayfirst=True, errors='coerce'
   ).dt.strftime('%Y-%m-%d')
 
-  # Filter where Biological Significance (Column D / Index 3) equals 1
   sig_col = df_med.iloc[:, 3]
   is_significant = (pd.to_numeric(sig_col, errors='coerce') == 1) | (
       sig_col.astype(str).str.strip() == '1'
@@ -192,12 +191,12 @@ def generate_quantified_self_csv(
   )
   df_zones['Date_YYYY_MM_DD'] = pd.to_datetime(
       df_zones[zone_date_col], errors='coerce'
-  ).dt.strftime('%Y-%m-%d')[cite: 1]
+  ).dt.strftime('%Y-%m-%d')
 
   zone_mapping = {
       'Time in Home Zone (hours)': 'Time_in_Home_Zone_hours',
       'Time in Work Zone (hours)': 'Time_in_Work_Zone_hours',
-  }[cite: 1]
+  }
   avail_zone_cols = ['Date_YYYY_MM_DD'] + [
       v for k, v in zone_mapping.items() if k in df_zones.columns
   ]
@@ -209,102 +208,102 @@ def generate_quantified_self_csv(
       df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load']],
       on='Date_YYYY_MM_DD',
       how='outer',
-  )[cite: 1]
-  df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')[cite: 1]
+  )
+  df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
   df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
-  df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')[cite: 1]
+  df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
 
-  df = df.dropna(subset=['Date_YYYY_MM_DD'])[cite: 1]
+  df = df.dropna(subset=['Date_YYYY_MM_DD'])
   df = df.sort_values(by='Date_YYYY_MM_DD', ascending=True).reset_index(
       drop=True
-  )[cite: 1]
-  df = df.loc[:, ~df.columns.duplicated()][cite: 1]
+  )
+  df = df.loc[:, ~df.columns.duplicated()]
   df['Daily_Activity_Training_Load'] = df[
       'Daily_Activity_Training_Load'
-  ].fillna(0)[cite: 1]
+  ].fillna(0)
 
-  # 7. Derived Metrics
-  if 'Lactate_Threshold_Pace' in df.columns:[cite: 1]
+  # 7. Derived Metrics & Precision
+  if 'Lactate_Threshold_Pace' in df.columns:
     df['Lactate_Threshold_Pace_decimal_min_km'] = df[
         'Lactate_Threshold_Pace'
-    ].apply(convert_pace_to_decimal)[cite: 1]
+    ].apply(convert_pace_to_decimal)
 
-  def time_to_decimal(time_str):[cite: 1]
-    if pd.isna(time_str):[cite: 1]
-      return np.nan[cite: 1]
-    try:[cite: 1]
-      h, m = map(int, str(time_str).split(':'))[cite: 1]
-      if h < 12:[cite: 1]
-        h += 24[cite: 1]
-      return round(h + (m / 60.0), 2)[cite: 1]
-    except ValueError:[cite: 1]
-      return np.nan[cite: 1]
+  def time_to_decimal(time_str):
+    if pd.isna(time_str):
+      return np.nan
+    try:
+      h, m = map(int, str(time_str).split(':'))
+      if h < 12:
+        h += 24
+      return round(h + (m / 60.0), 2)
+    except ValueError:
+      return np.nan
 
-  if 'Sleep_Start_Time_HH_MM' in df.columns:[cite: 1]
+  if 'Sleep_Start_Time_HH_MM' in df.columns:
     df['Sleep_Start_Decimal'] = df['Sleep_Start_Time_HH_MM'].apply(
         time_to_decimal
-    )[cite: 1]
+    )
 
   acute_load = (
       df['Daily_Activity_Training_Load'].rolling(window=7, min_periods=1).sum()
-  )[cite: 1]
+  )
   chronic_load = (
       df['Daily_Activity_Training_Load'].rolling(window=28, min_periods=1).sum()
       / 4
-  )[cite: 1]
+  )
   df['Acute_to_Chronic_Training_Load_Ratio'] = (
       (acute_load / chronic_load).replace([np.inf, -np.inf], np.nan).round(2)
-  )[cite: 1]
+  )
 
   if (
       'Sleep_Need_min' in df.columns
       and 'Overnight_Sleep_Duration_min' in df.columns
-  ):[cite: 1]
+  ):
     daily_sleep_deficit = (
         df['Sleep_Need_min'] - df['Overnight_Sleep_Duration_min']
-    )[cite: 1]
+    )
     df['EWMA_Sleep_Debt_min'] = daily_sleep_deficit.ewm(
         span=7, adjust=False
-    ).mean()[cite: 1]
+    ).mean()
 
-  if 'Daily_Running_Distance_km' in df.columns:[cite: 1]
+  if 'Daily_Running_Distance_km' in df.columns:
     df['Running_Distance_28d_Total_km'] = (
         df['Daily_Running_Distance_km']
         .rolling(window=28, min_periods=1)
         .sum()
         .round(2)
-    )[cite: 1]
+    )
 
-  if 'Overnight_Average_HRV_RMSSD_ms' in df.columns:[cite: 1]
+  if 'Overnight_Average_HRV_RMSSD_ms' in df.columns:
     hrv_7d_avg = (
         df['Overnight_Average_HRV_RMSSD_ms']
         .rolling(window=7, min_periods=1)
         .mean()
-    )[cite: 1]
-    shifted_hrv = df['Overnight_Average_HRV_RMSSD_ms'].shift(7)[cite: 1]
-    shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()[cite: 1]
-    shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()[cite: 1]
+    )
+    shifted_hrv = df['Overnight_Average_HRV_RMSSD_ms'].shift(7)
+    shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
+    shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
     df[
         'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'
-    ] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)[cite: 1]
+    ] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)
 
-  if 'Raw_Body_Fat_Percentage' in df.columns:[cite: 1]
+  if 'Raw_Body_Fat_Percentage' in df.columns:
     df['Body_Fat_Percentage_7d_Average'] = (
         df['Raw_Body_Fat_Percentage']
         .rolling(window=7, min_periods=1)
         .mean()
         .round(1)
-    )[cite: 1]
+    )
 
-  if 'Daily_Morning_Weight_kg' in df.columns:[cite: 1]
+  if 'Daily_Morning_Weight_kg' in df.columns:
     df['Daily_Morning_Weight_7d_Average_kg'] = (
         df['Daily_Morning_Weight_kg']
         .rolling(window=7, min_periods=1)
         .mean()
         .round(2)
-    )[cite: 1]
+    )
 
-  if 'Active_Calories' in df.columns and 'Daily_Morning_Weight_kg' in df.columns:[cite: 1]
+  if 'Active_Calories' in df.columns and 'Daily_Morning_Weight_kg' in df.columns:
     effective_weight = (
         df['Daily_Morning_Weight_kg']
         .combine_first(
@@ -315,16 +314,16 @@ def generate_quantified_self_csv(
         )
         .ffill()
         .bfill()
-    )[cite: 1]
+    )
     df['Net_Active_MET_Minutes'] = (
         pd.to_numeric(df['Active_Calories'], errors='coerce') / effective_weight
-    ) * 60.0[cite: 1]
+    ) * 60.0
 
   # 8. Filter, Sort Descending, and Select Target Columns
-  df_export = df.tail(730).copy()[cite: 1]
+  df_export = df.tail(730).copy()
   df_export = df_export.sort_values(
       by='Date_YYYY_MM_DD', ascending=False
-  ).reset_index(drop=True)[cite: 1]
+  ).reset_index(drop=True)
 
   required_columns = [
       'Date_YYYY_MM_DD',
@@ -355,11 +354,11 @@ def generate_quantified_self_csv(
       'Medical_Notes',
   ]
 
-  for col in required_columns:[cite: 1]
-    if col not in df_export.columns:[cite: 1]
-      df_export[col] = np.nan[cite: 1]
+  for col in required_columns:
+    if col not in df_export.columns:
+      df_export[col] = np.nan
 
-  df_export = df_export[required_columns][cite: 1]
+  df_export = df_export[required_columns]
 
   column_rename_map = {
       'Date_YYYY_MM_DD': 'Date (YYYY-MM-DD)',
@@ -402,10 +401,10 @@ def generate_quantified_self_csv(
       ),
       'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
       'Medical_Notes': 'Medical Notes',
-  }[cite: 1]
+  }
 
-  df_export = df_export.rename(columns=column_rename_map)[cite: 1]
-  df_export = df_export.loc[:, ~df_export.columns.duplicated()][cite: 1]
+  df_export = df_export.rename(columns=column_rename_map)
+  df_export = df_export.loc[:, ~df_export.columns.duplicated()]
 
   # 9. Strict Type & Decimal Precision Formatting
   integer_columns = [
@@ -457,82 +456,82 @@ def generate_quantified_self_csv(
 
 
 def get_file_id(service, filename, folder_id):
-  safe_filename = filename.replace("'", "\\'")[cite: 1]
-  query = f"name='{safe_filename}' and '{folder_id}' in parents and trashed=false"[cite: 1]
-  results = service.files().list(q=query, fields='files(id, name)').execute()[cite: 1]
-  items = results.get('files', [])[cite: 1]
-  return items[0]['id'] if items else None[cite: 1]
+  safe_filename = filename.replace("'", "\\'")
+  query = f"name='{safe_filename}' and '{folder_id}' in parents and trashed=false"
+  results = service.files().list(q=query, fields='files(id, name)').execute()
+  items = results.get('files', [])
+  return items[0]['id'] if items else None
 
 
 def download_drive_file(service, file_id):
-  request = service.files().get_media(fileId=file_id)[cite: 1]
-  downloaded_data = io.BytesIO()[cite: 1]
-  downloader = MediaIoBaseDownload(downloaded_data, request)[cite: 1]
-  done = False[cite: 1]
-  while not done:[cite: 1]
-    status, done = downloader.next_chunk()[cite: 1]
-  downloaded_data.seek(0)[cite: 1]
-  return downloaded_data[cite: 1]
+  request = service.files().get_media(fileId=file_id)
+  downloaded_data = io.BytesIO()
+  downloader = MediaIoBaseDownload(downloaded_data, request)
+  done = False
+  while not done:
+    status, done = downloader.next_chunk()
+  downloaded_data.seek(0)
+  return downloaded_data
 
 
 if __name__ == '__main__':
-  FOLDER_ID = os.getenv('DRIVE_FOLDER_ID')[cite: 1]
-  SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SHEETS_CREDENTIALS')[cite: 1]
-  GARMIN_FILENAME = 'drw_garmin_data.csv'[cite: 1]
-  ACTIVITIES_FILENAME = 'drw_garmin_activities_list.csv'[cite: 1]
-  WITHINGS_FILENAME = 'drw_withings_bodyscan_data.csv'[cite: 1]
-  MEDICAL_FILENAME = "Daniel's Medical Test Results.csv"[cite: 1]
+  FOLDER_ID = os.getenv('DRIVE_FOLDER_ID')
+  SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
+  GARMIN_FILENAME = 'drw_garmin_data.csv'
+  ACTIVITIES_FILENAME = 'drw_garmin_activities_list.csv'
+  WITHINGS_FILENAME = 'drw_withings_bodyscan_data.csv'
+  MEDICAL_FILENAME = "Daniel's Medical Test Results.csv"
 
-  ZONES_BASE_URL = 'https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv'[cite: 1]
-  ZONES_URL = f'{ZONES_BASE_URL}?v={int(time.time())}'[cite: 1]
+  ZONES_BASE_URL = 'https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv'
+  ZONES_URL = f'{ZONES_BASE_URL}?v={int(time.time())}'
 
-  TARGET_FILENAME = 'drw_quantified_self.csv'[cite: 1]
+  TARGET_FILENAME = 'drw_quantified_self.csv'
 
   if not FOLDER_ID:
-    raise ValueError('DRIVE_FOLDER_ID environment variable is not set.')[cite: 1]
+    raise ValueError('DRIVE_FOLDER_ID environment variable is not set.')
   if not SERVICE_ACCOUNT_JSON:
     raise ValueError(
-        'GOOGLE_SHEETS_CREDENTIALS environment variable is not set.'[cite: 1]
+        'GOOGLE_SHEETS_CREDENTIALS environment variable is not set.'
     )
 
-  print('Authenticating with Google Drive...')[cite: 1]
-  service_account_info = json.loads(SERVICE_ACCOUNT_JSON)[cite: 1]
+  print('Authenticating with Google Drive...')
+  service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
   creds = service_account.Credentials.from_service_account_info(
-      service_account_info, scopes=['https://www.googleapis.com/auth/drive'][cite: 1]
+      service_account_info, scopes=['https://www.googleapis.com/auth/drive']
   )
-  drive_service = build('drive', 'v3', credentials=creds)[cite: 1]
+  drive_service = build('drive', 'v3', credentials=creds)
 
-  print(f'Locating files in folder {FOLDER_ID}...')[cite: 1]
-  garmin_file_id = get_file_id(drive_service, GARMIN_FILENAME, FOLDER_ID)[cite: 1]
+  print(f'Locating files in folder {FOLDER_ID}...')
+  garmin_file_id = get_file_id(drive_service, GARMIN_FILENAME, FOLDER_ID)
   activities_file_id = get_file_id(
-      drive_service, ACTIVITIES_FILENAME, FOLDER_ID[cite: 1]
+      drive_service, ACTIVITIES_FILENAME, FOLDER_ID
   )
-  withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)[cite: 1]
-  medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)[cite: 1]
-  target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)[cite: 1]
+  withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
+  medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
+  target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
 
   if not garmin_file_id:
-    raise FileNotFoundError(f"Could not find '{GARMIN_FILENAME}' in Drive.")[cite: 1]
+    raise FileNotFoundError(f"Could not find '{GARMIN_FILENAME}' in Drive.")
   if not activities_file_id:
     raise FileNotFoundError(
-        f"Could not find '{ACTIVITIES_FILENAME}' in Drive."[cite: 1]
+        f"Could not find '{ACTIVITIES_FILENAME}' in Drive."
     )
   if not withings_file_id:
-    raise FileNotFoundError(f"Could not find '{WITHINGS_FILENAME}' in Drive.")[cite: 1]
+    raise FileNotFoundError(f"Could not find '{WITHINGS_FILENAME}' in Drive.")
   if not medical_file_id:
-    raise FileNotFoundError(f"Could not find '{MEDICAL_FILENAME}' in Drive.")[cite: 1]
+    raise FileNotFoundError(f"Could not find '{MEDICAL_FILENAME}' in Drive.")
 
-  print('Downloading raw data from Google Drive and Home Assistant...')[cite: 1]
-  garmin_data = download_drive_file(drive_service, garmin_file_id)[cite: 1]
-  activities_data = download_drive_file(drive_service, activities_file_id)[cite: 1]
-  withings_data = download_drive_file(drive_service, withings_file_id)[cite: 1]
-  medical_data = download_drive_file(drive_service, medical_file_id)[cite: 1]
+  print('Downloading raw data from Google Drive and Home Assistant...')
+  garmin_data = download_drive_file(drive_service, garmin_file_id)
+  activities_data = download_drive_file(drive_service, activities_file_id)
+  withings_data = download_drive_file(drive_service, withings_file_id)
+  medical_data = download_drive_file(drive_service, medical_file_id)
 
-  df_garmin_raw = pd.read_csv(garmin_data)[cite: 1]
-  df_activities_raw = pd.read_csv(activities_data)[cite: 1]
-  df_withings_raw = pd.read_csv(withings_data)[cite: 1]
-  df_medical_raw = pd.read_csv(medical_data)[cite: 1]
-  df_zones_raw = pd.read_csv(ZONES_URL)[cite: 1]
+  df_garmin_raw = pd.read_csv(garmin_data)
+  df_activities_raw = pd.read_csv(activities_data)
+  df_withings_raw = pd.read_csv(withings_data)
+  df_medical_raw = pd.read_csv(medical_data)
+  df_zones_raw = pd.read_csv(ZONES_URL)
 
   print('Processing physiological metrics...')
   generate_quantified_self_csv(
@@ -545,16 +544,16 @@ if __name__ == '__main__':
   )
 
   print('Uploading updated CSV to Google Drive...')
-  media = MediaFileUpload(TARGET_FILENAME, mimetype='text/csv', resumable=True)[cite: 1]
+  media = MediaFileUpload(TARGET_FILENAME, mimetype='text/csv', resumable=True)
 
   if target_file_id:
     drive_service.files().update(
-        fileId=target_file_id, media_body=media[cite: 1]
+        fileId=target_file_id, media_body=media
     ).execute()
   else:
-    file_metadata = {'name': TARGET_FILENAME, 'parents': [FOLDER_ID]}[cite: 1]
+    file_metadata = {'name': TARGET_FILENAME, 'parents': [FOLDER_ID]}
     drive_service.files().create(
-        body=file_metadata, media_body=media[cite: 1]
+        body=file_metadata, media_body=media
     ).execute()
 
-  print('Export and upload complete.')[cite: 1]
+  print('Export and upload complete.')
