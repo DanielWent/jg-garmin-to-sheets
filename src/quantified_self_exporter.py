@@ -22,7 +22,7 @@ def convert_pace_to_decimal(pace_str):
     except ValueError:
         return np.nan
 
-def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFrame, df_medical: pd.DataFrame, df_activities: pd.DataFrame, df_zones: pd.DataFrame, output_path: str = "drw_quantified_self.csv"):
+def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFrame, df_medical: pd.DataFrame, df_activities: pd.DataFrame, df_zones: pd.DataFrame, df_medical_notes: pd.DataFrame, output_path: str = "drw_quantified_self.csv"):
     
     # 1. Process Garmin Daily Data
     garmin_mapping = {
@@ -85,7 +85,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     # Check if Weight column is mapped by position (Column B = index 1) if name differs
     weight_col = 'Weight (kg)' if 'Weight (kg)' in df_withings.columns else df_withings.columns[1]
     body_fat_col = 'Body Fat (%)' if 'Body Fat (%)' in df_withings.columns else df_withings.columns[2]
-    pwv_col = 'Pulse Wave Velocity (m/s)' if 'Pulse Wave Velocity (m/s)' in df_withings.columns else df_withings.columns[3]
+    pwv_col = 'Pulse Daily Velocity (m/s)' if 'Pulse Daily Velocity (m/s)' in df_withings.columns else df_withings.columns[3]
     
     df_w_daily = df_withings.groupby('Date_YYYY_MM_DD').agg({
         weight_col: 'mean',
@@ -137,11 +137,24 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     }
     df_z_daily = df_zones.rename(columns=zone_mapping)[['Date_YYYY_MM_DD', 'Time_in_Home_Zone_hours', 'Time_in_Work_Zone_hours']]
 
-    # 6. Merge All Datasets
+    # 6. Process Medical Notes Data
+    notes_date = pd.to_datetime(df_medical_notes.iloc[:, 0], format='mixed', dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
+    notes_cond = df_medical_notes.iloc[:, 3].astype(str).str.strip().isin(['1', '1.0'])
+    df_notes_filtered = pd.DataFrame({
+        'Date_YYYY_MM_DD': notes_date[notes_cond],
+        'Medical_Notes': df_medical_notes.iloc[:, 4][notes_cond]
+    })
+    if not df_notes_filtered.empty:
+        df_notes_daily = df_notes_filtered.groupby('Date_YYYY_MM_DD')['Medical_Notes'].first().reset_index()
+    else:
+        df_notes_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Medical_Notes'])
+
+    # 7. Merge All Datasets
     df = pd.merge(df_g, df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load']], on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
+    df = pd.merge(df, df_notes_daily, on='Date_YYYY_MM_DD', how='outer')
     
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
     df = df.sort_values(by="Date_YYYY_MM_DD", ascending=True).reset_index(drop=True)
@@ -151,7 +164,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
 
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
     
-    # 7. Derived Metrics & Formatting
+    # 8. Derived Metrics & Formatting
     # Round home and work zone hours to nearest 0.1 hours
     if 'Time_in_Home_Zone_hours' in df.columns:
         df['Time_in_Home_Zone_hours'] = pd.to_numeric(df['Time_in_Home_Zone_hours'], errors='coerce').round(1)
@@ -210,7 +223,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         effective_weight = df["Daily_Morning_Weight_kg"].combine_first(df.get("Daily_Morning_Weight_7d_Average_kg", pd.Series(np.nan, index=df.index))).ffill().bfill()
         df["Net_Active_MET_Minutes"] = (pd.to_numeric(df["Active_Calories"], errors="coerce") / effective_weight) * 60.0
 
-    # 8. Filter, Re-sort Descending, and Align Output Schema
+    # 9. Filter, Re-sort Descending, and Align Output Schema
     df_export = df.tail(730).copy()
     df_export = df_export.sort_values(by="Date_YYYY_MM_DD", ascending=False).reset_index(drop=True)
 
@@ -249,7 +262,8 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "HDL_Cholesterol_mmol_L",
         "Triglycerides_mmol_L",
         "HbA1c_mmol_mol",
-        "hs_CRP_mg_L"
+        "hs_CRP_mg_L",
+        "Medical_Notes"
     ]
 
     for col in required_columns:
@@ -283,6 +297,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "Is_Work_Day": "Work Day (Bool)",
         "Time_in_Home_Zone_hours": "Time at Home (hours)",
         "Time_in_Work_Zone_hours": "Time at Work (hours)",
+        "Step_Count_Daily_steps": "Step Count - Daily (steps)",
         "Daily_Steps_Count": "Step Count - Daily (steps)",
         "Daily_Running_Distance_km": "Running Distance - Daily (km)",
         "Running_Distance_28d_Total_km": "Running Distance - 28d Total (km)",
@@ -313,7 +328,8 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
         "HDL_Cholesterol_mmol_L": "HDL Cholesterol (mmol/L)",
         "Triglycerides_mmol_L": "Triglycerides (mmol/L)",
         "HbA1c_mmol_mol": "HbA1c (mmol/mol)",
-        "hs_CRP_mg_L": "hs-CRP (mg/L)"
+        "hs_CRP_mg_L": "hs-CRP (mg/L)",
+        "Medical_Notes": "Medical Notes"
     }
     
     df_export = df_export.rename(columns=column_rename_map)
@@ -322,7 +338,7 @@ def generate_quantified_self_csv(df_garmin: pd.DataFrame, df_withings: pd.DataFr
     # Deduplicate final columns explicitly
     df_export = df_export.loc[:, ~df_export.columns.duplicated()]
 
-    # 9. Demographic Header Injection & Export
+    # 10. Demographic Header Injection & Export
     header_string = f"# Context: Male, DOB: {DOB}, Height: {HEIGHT_CM} cm, Lp(a): {LPA_NMOL_L} nmol/l\n"
     with open(output_path, "w") as f:
         f.write(header_string)
@@ -356,6 +372,7 @@ if __name__ == "__main__":
     ACTIVITIES_FILENAME = "drw_garmin_activities_list.csv"
     WITHINGS_FILENAME = "drw_withings_bodyscan_data.csv"
     MEDICAL_FILENAME = "Daniel's Medical Test Results.csv"
+    MEDICAL_NOTES_FILENAME = "Daniel's Full Medical Notes.csv"
     
     # Append a dynamic timestamp query parameter to bust HTTP cache
     ZONES_BASE_URL = "https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv"
@@ -381,6 +398,7 @@ if __name__ == "__main__":
     activities_file_id = get_file_id(drive_service, ACTIVITIES_FILENAME, FOLDER_ID)
     withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
     medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
+    medical_notes_file_id = get_file_id(drive_service, MEDICAL_NOTES_FILENAME, FOLDER_ID)
     target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
     
     if not garmin_file_id:
@@ -391,21 +409,25 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"Could not find '{WITHINGS_FILENAME}' in Drive folder.")
     if not medical_file_id:
         raise FileNotFoundError(f"Could not find '{MEDICAL_FILENAME}' in Drive folder.")
+    if not medical_notes_file_id:
+        raise FileNotFoundError(f"Could not find '{MEDICAL_NOTES_FILENAME}' in Drive folder.")
 
     print("Downloading raw data from Google Drive and Home Assistant URL...")
     garmin_data = download_drive_file(drive_service, garmin_file_id)
     activities_data = download_drive_file(drive_service, activities_file_id)
     withings_data = download_drive_file(drive_service, withings_file_id)
     medical_data = download_drive_file(drive_service, medical_file_id)
+    medical_notes_data = download_drive_file(drive_service, medical_notes_file_id)
     
     df_garmin_raw = pd.read_csv(garmin_data)
     df_activities_raw = pd.read_csv(activities_data)
     df_withings_raw = pd.read_csv(withings_data)
     df_medical_raw = pd.read_csv(medical_data)
+    df_medical_notes_raw = pd.read_csv(medical_notes_data)
     df_zones_raw = pd.read_csv(ZONES_URL)
     
     print("Processing physiological metrics...")
-    generate_quantified_self_csv(df_garmin_raw, df_withings_raw, df_medical_raw, df_activities_raw, df_zones_raw, output_path=TARGET_FILENAME)
+    generate_quantified_self_csv(df_garmin_raw, df_withings_raw, df_medical_raw, df_activities_raw, df_zones_raw, df_medical_notes_raw, output_path=TARGET_FILENAME)
     
     print("Uploading updated CSV to Google Drive...")
     media = MediaFileUpload(TARGET_FILENAME, mimetype='text/csv', resumable=True)
