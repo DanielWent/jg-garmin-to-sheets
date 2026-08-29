@@ -134,7 +134,7 @@ class GoogleDriveClient:
                     combined_df = combined_df.drop_duplicates(subset=[dedup_col], keep='last')
                 
                 # 5. Apply 5-Year Retention Policy
-                cutoff_date = pd.Timestamp.now(tz='UTC').normalize() - pd.Timedelta(days=1826)
+                cutoff_date = pd.Timestamp.now(tz='UTC').normalize() - pd.Timedelta(days=36525)
                 valid_mask = combined_df['_temp_date'].isna() | (combined_df['_temp_date'] >= cutoff_date)
                 combined_df = combined_df[valid_mask]
 
