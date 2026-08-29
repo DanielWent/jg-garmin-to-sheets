@@ -37,17 +37,27 @@ class GoogleDriveClient:
                     
                 val = getattr(m, attr, None) if attr else None
                 
+                # Pre-calculate BMI from weight based on 1.85 m (185 cm) height
+                if val is None and 'BMI' in h:
+                    weight_attr = HEADER_TO_ATTRIBUTE_MAP.get('Weight - Morning 7d Avg (kg)') or HEADER_TO_ATTRIBUTE_MAP.get('Weight')
+                    weight_val = getattr(m, weight_attr, None) if weight_attr else getattr(m, 'weight', None)
+                    if weight_val is not None:
+                        try:
+                            val = float(weight_val) / (1.85 ** 2)
+                        except (ValueError, TypeError):
+                            val = None
+
                 # Aggressively standardize date objects to YYYY-MM-DD strings immediately
                 if isinstance(val, date):
                     val = val.isoformat()
                     # Strip out any time/timezone data Garmin might attach
                     if 'T' in val:
                         val = val.split('T')[0]
-                elif isinstance(val, float):
+                elif isinstance(val, (float, np.floating)):
                     if "VO2 Max" in h:
-                        val = round(val, 1)
+                        val = round(float(val), 1)
                     else:
-                        val = round(val, 2)
+                        val = round(float(val), 2)
                 
                 row[h] = val
             data.append(row)
@@ -75,7 +85,8 @@ class GoogleDriveClient:
         if file_id:
             try:
                 content = self.service.files().get_media(fileId=file_id).execute()
-                existing_df = pd.read_csv(io.BytesIO(content))
+                # Read CSV while discarding any legacy '# Context:' header comment lines
+                existing_df = pd.read_csv(io.BytesIO(content), comment='#')
                 existing_df = existing_df.loc[:, ~existing_df.columns.str.contains('^Unnamed')]
                 
                 # === SMART MERGE: PREVENT NA OVERWRITES ===
@@ -109,8 +120,8 @@ class GoogleDriveClient:
                 # 1. Safely parse dates. Try strict YYYY-MM-DD first to prevent ISO day/month flipping
                 combined_df['_temp_date'] = pd.to_datetime(
                     combined_df[sort_date_col], 
-                    format='%Y-%m-%d',
-                    errors='coerce',
+                    format='%Y-%m-%d', 
+                    errors='coerce', 
                     utc=True
                 )
                 
@@ -120,7 +131,7 @@ class GoogleDriveClient:
                     combined_df.loc[missing_mask, '_temp_date'] = pd.to_datetime(
                         combined_df.loc[missing_mask, sort_date_col], 
                         dayfirst=True, 
-                        errors='coerce',
+                        errors='coerce', 
                         utc=True
                     )
                 
