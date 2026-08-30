@@ -65,6 +65,15 @@ class GarminMetrics:
     total_strength_duration: Optional[float] = None
     moderate_intensity_minutes: Optional[Any] = None
     vigorous_intensity_minutes: Optional[Any] = None
+    rest_stress_duration: Optional[float] = None
+    low_stress_duration: Optional[float] = None
+    medium_stress_duration: Optional[float] = None
+    high_stress_duration: Optional[float] = None
+    anaerobic_training_load: Optional[int] = None
+    high_aerobic_training_load: Optional[int] = None
+    low_aerobic_training_load: Optional[int] = None
+    avg_run_pace: Optional[str] = None
+    avg_run_gap_pace: Optional[str] = None
     activities: List[Any] = field(default_factory=list)
 
 # =========================================================
@@ -117,7 +126,16 @@ GENERAL_SUMMARY_HEADERS = [
     "Total Strength Training Duration (min)",
     "Daily Moderate Intensity Minutes",
     "Daily Vigorous Intensity Minutes",
-    "Daily Active Calories"
+    "Daily Active Calories",
+    "Time spent at rest (mins)",
+    "Time spent at low stress (mins)",
+    "Time spent at medium stress (mins)",
+    "Time spent at high stress (mins)",
+    "Anaerobic Training Load (7d sum)",
+    "High Aerobic Training Load (7d sum)",
+    "Low Aerobic Training Load (7d sum)",
+    "Average Pace for that day's runs",
+    "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)"
 ]
 
 ACTIVITY_HEADERS = [
@@ -211,5 +229,14 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Total Strength Training Duration (min)": "total_strength_duration",
     "Daily Moderate Intensity Minutes": "moderate_intensity_minutes",
     "Daily Vigorous Intensity Minutes": "vigorous_intensity_minutes",
-    "Daily Active Calories": "active_calories"
+    "Daily Active Calories": "active_calories",
+    "Time spent at rest (mins)": "rest_stress_duration",
+    "Time spent at low stress (mins)": "low_stress_duration",
+    "Time spent at medium stress (mins)": "medium_stress_duration",
+    "Time spent at high stress (mins)": "high_stress_duration",
+    "Anaerobic Training Load (7d sum)": "anaerobic_training_load",
+    "High Aerobic Training Load (7d sum)": "high_aerobic_training_load",
+    "Low Aerobic Training Load (7d sum)": "low_aerobic_training_load",
+    "Average Pace for that day's runs": "avg_run_pace",
+    "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": "avg_run_gap_pace"
 }
