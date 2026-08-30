@@ -2,8 +2,8 @@ name: Auto Sync - Data
 
 on:
   schedule:
-    # Triggers hourly from 05:00 to 09:00 UTC to cover 06:00-09:00 local time in both GMT (UTC+0) and BST (UTC+1)
-    - cron: '0 5-9 * * *'
+    # Triggers every 30 minutes from 05:00 to 11:30 UTC
+    - cron: '*/30 5-11 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -29,11 +29,11 @@ jobs:
           LOCAL_HOUR=$(TZ="Europe/London" date +%-H)
           echo "Current Europe/London hour: $LOCAL_HOUR"
 
-          if [ "$LOCAL_HOUR" -ge 6 ] && [ "$LOCAL_HOUR" -le 9 ]; then
-            echo "Within 06:00–09:00 local time. Proceeding with sync."
+          if [ "$LOCAL_HOUR" -ge 6 ] && [ "$LOCAL_HOUR" -lt 12 ]; then
+            echo "Within 06:00–12:00 local time. Proceeding with sync."
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
-            echo "Outside 06:00–09:00 local time. Skipping sync."
+            echo "Outside 06:00–12:00 local time. Skipping sync."
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
@@ -45,22 +45,9 @@ jobs:
     
     defaults:
       run:
-        shell: pwsh
+        shell: bash
 
     steps:
-    - name: Set Sync Parameters
-      id: sync-params
-      shell: bash
-      run: |
-        export TZ="Europe/London"
-        
-        # Pull data from a rolling 3-day window up to the current day
-        START_DATE=$(date -d "3 days ago" +%Y-%m-%d)
-        END_DATE=$(date +%Y-%m-%d)
-        
-        echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
-        echo "end_date=$END_DATE" >> $GITHUB_OUTPUT
-
     - name: Checkout code
       uses: actions/checkout@v4
 
@@ -73,7 +60,24 @@ jobs:
       run: |
         pip install -r requirements.txt
 
+    - name: Pre-Flight Check (Google Drive)
+      id: preflight
+      env:
+        GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
+      run: python pre_flight_check.py
+
+    - name: Set Sync Parameters
+      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
+      id: sync-params
+      run: |
+        export TZ="Europe/London"
+        echo "start_date=$(date -d "3 days ago" +%Y-%m-%d)" >> $GITHUB_OUTPUT
+        echo "end_date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
     - name: Connect to Tailscale
+      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
       uses: tailscale/github-action@v3
       with:
         oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
@@ -81,10 +85,9 @@ jobs:
         tags: tag:github-actions
 
     - name: Route Traffic through Exit Node (With Retries)
-      shell: bash
+      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
       run: |
         echo "Attempting to route through Tailscale exit node..."
-        
         for i in {1..3}; do
           if sudo tailscale set --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes --accept-dns=false; then
             echo "Successfully connected to exit node."
@@ -93,12 +96,11 @@ jobs:
           echo "Attempt $i failed. Waiting 15 seconds before retrying..."
           sleep 15
         done
-        
         echo "CRITICAL: Could not connect to the exit node after 3 attempts."
-        echo "Aborting workflow to prevent exposing the GitHub runner IP to Garmin and risking account locks."
         exit 1
 
     - name: Restore Garmin Sessions Cache
+      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
       uses: actions/cache/restore@v4
       with:
         path: ~/.garth_encrypted
@@ -107,38 +109,21 @@ jobs:
           garmin-sessions-
 
     - name: Decrypt Garmin Sessions
+      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
-        $encPath = Join-Path $HOME ".garth_encrypted/sessions.tar.enc"
-        if ($env:GARMIN_SESSION_KEY -and (Test-Path $encPath)) {
-            openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in $encPath -out sessions.tar -k $env:GARMIN_SESSION_KEY
-            $garthDir = Join-Path $HOME ".garth"
-            if (-not (Test-Path $garthDir)) { New-Item -ItemType Directory -Path $garthDir -Force }
-            tar -xf sessions.tar -C $garthDir
-            Write-Host "Session cache restored."
-        }
+        encPath="$HOME/.garth_encrypted/sessions.tar.enc"
+        if [ -n "$GARMIN_SESSION_KEY" ] && [ -f "$encPath" ]; then
+            openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in "$encPath" -out sessions.tar -k "$GARMIN_SESSION_KEY"
+            garthDir="$HOME/.garth"
+            mkdir -p "$garthDir"
+            tar -xf sessions.tar -C "$garthDir"
+            echo "Session cache restored."
+        fi
 
-    - name: Seed Garmin Sessions (Fallback)
-      env:
-        USER1_SESSION: ${{ secrets.USER1_GARMIN_SESSION }}
-        USER2_SESSION: ${{ secrets.USER2_GARMIN_SESSION }}
-      run: |
-        $base = Join-Path $HOME ".garth"
-        if ($env:USER1_SESSION) {
-            $u1 = Join-Path $base "USER1"
-            if (-not (Test-Path $u1)) { New-Item -ItemType Directory -Path $u1 -Force }
-            $tokenFile = Join-Path $u1 "tokens.json"
-            if (-not (Test-Path $tokenFile)) { [System.IO.File]::WriteAllText($tokenFile, $env:USER1_SESSION) }
-        }
-        if ($env:USER2_SESSION) {
-            $u2 = Join-Path $base "USER2"
-            if (-not (Test-Path $u2)) { New-Item -ItemType Directory -Path $u2 -Force }
-            $tokenFile = Join-Path $u2 "tokens.json"
-            if (-not (Test-Path $tokenFile)) { [System.IO.File]::WriteAllText($tokenFile, $env:USER2_SESSION) }
-        }
-
-    - name: Run Sync Script
+    - name: Run Sync Script (USER1)
+      if: steps.preflight.outputs.run_user1 == 'true'
       env:
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
@@ -146,6 +131,15 @@ jobs:
         USER1_NAME: ${{ secrets.USER1_NAME }}
         USER1_DOB: ${{ secrets.USER1_DOB }}
         USER1_GENDER: ${{ secrets.USER1_GENDER }}
+        GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        PYTHONUNBUFFERED: "1"
+        LOG_LEVEL: "INFO"
+      run: |
+        python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile USER1 --output-type drive --data-type "summary"
+
+    - name: Run Sync Script (USER2)
+      if: steps.preflight.outputs.run_user2 == 'true'
+      env:
         USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
         USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
         USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
@@ -153,28 +147,26 @@ jobs:
         USER2_DOB: ${{ secrets.USER2_DOB }}
         USER2_GENDER: ${{ secrets.USER2_GENDER }}
         GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
-        ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "INFO"
       run: |
-        python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile ALL --output-type drive --data-type "summary"
+        python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile USER2 --output-type drive --data-type "summary"
 
     - name: Encrypt Garmin Sessions
-      if: always()
+      if: always() && (steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true')
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
-        $garthDir = Join-Path $HOME ".garth"
-        if ($env:GARMIN_SESSION_KEY -and (Test-Path $garthDir)) {
-            tar -cf sessions.tar -C $garthDir .
-            $encDir = Join-Path $HOME ".garth_encrypted"
-            if (-not (Test-Path $encDir)) { New-Item -ItemType Directory -Path $encDir -Force }
-            $encFile = Join-Path $encDir "sessions.tar.enc"
-            openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out $encFile -k $env:GARMIN_SESSION_KEY
-        }
+        garthDir="$HOME/.garth"
+        if [ -n "$GARMIN_SESSION_KEY" ] && [ -d "$garthDir" ]; then
+            tar -cf sessions.tar -C "$garthDir" .
+            encDir="$HOME/.garth_encrypted"
+            mkdir -p "$encDir"
+            openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out "$encDir/sessions.tar.enc" -k "$GARMIN_SESSION_KEY"
+        fi
 
     - name: Save Garmin Sessions Cache
-      if: always()
+      if: always() && (steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true')
       uses: actions/cache/save@v4
       with:
         path: ~/.garth_encrypted
