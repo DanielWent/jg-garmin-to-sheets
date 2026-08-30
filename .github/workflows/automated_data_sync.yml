@@ -2,8 +2,8 @@ name: Auto Sync - Data
 
 on:
   schedule:
-    - cron: '25 3 * * *'
-      timezone: Europe/London
+    # Triggers hourly from 05:00 to 09:00 UTC to cover 06:00-09:00 local time in both GMT (UTC+0) and BST (UTC+1)
+    - cron: '0 5-9 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -11,8 +11,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sync:
+  check-window:
     runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.gate.outputs.should_run }}
+    steps:
+      - name: Evaluate Europe/London Time
+        id: gate
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Manual execution detected. Proceeding."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          LOCAL_HOUR=$(TZ="Europe/London" date +%-H)
+          echo "Current Europe/London hour: $LOCAL_HOUR"
+
+          if [ "$LOCAL_HOUR" -ge 6 ] && [ "$LOCAL_HOUR" -le 9 ]; then
+            echo "Within 06:00–09:00 local time. Proceeding with sync."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "Outside 06:00–09:00 local time. Skipping sync."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  sync:
+    needs: check-window
+    if: needs.check-window.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     
     defaults:
       run:
