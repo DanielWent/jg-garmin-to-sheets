@@ -113,12 +113,10 @@ def generate_quantified_self_csv(
     if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:
         df_g['Active_Calories'] = df_garmin.iloc[:, 45]
         
-    # Sum Medium Stress (Column AW / 48) and High Stress (Column AX / 49)
-    if 'Garmin_Med_High_Stress_Minutes' not in df_g.columns and df_garmin.shape[1] > 49:
-        df_g['Garmin_Med_High_Stress_Minutes'] = pd.to_numeric(
-            df_garmin.iloc[:, 48], errors='coerce'
-        ).add(
-            pd.to_numeric(df_garmin.iloc[:, 49], errors='coerce'), fill_value=0
+    # Average Awake Hours Garmin Stress Score (Column BD / 55)
+    if 'Garmin_Avg_Awake_Stress_Score' not in df_g.columns and df_garmin.shape[1] > 55:
+        df_g['Garmin_Avg_Awake_Stress_Score'] = pd.to_numeric(
+            df_garmin.iloc[:, 55], errors='coerce'
         )
 
     df_g = df_g.loc[:, ~df_g.columns.duplicated()]
@@ -184,7 +182,7 @@ def generate_quantified_self_csv(
     }
     df_w_daily = df_w_daily.rename(columns=withings_mapping)
 
-    # 4. Process Medical Data (Column A: Date, Column D: Biologically Significant == 1, Column E: Summary)
+    # 4. Process Medical Data
     df_med = df_medical.copy()
     df_med['Date_YYYY_MM_DD'] = parse_to_iso_date(df_med.iloc[:, 0])
 
@@ -370,7 +368,7 @@ def generate_quantified_self_csv(
         'Running_Distance_28d_Total_km',
         'Garmin_Moderate_Intensity_Minutes',
         'Garmin_Vigorous_Intensity_Minutes',
-        'Garmin_Med_High_Stress_Minutes',
+        'Garmin_Avg_Awake_Stress_Score',
         'Net_Active_MET_Minutes',
         'Garmin_7d_Training_Load_Sum',
         'Acute_to_Chronic_Training_Load_Ratio',
@@ -410,7 +408,7 @@ def generate_quantified_self_csv(
         'Garmin_Vigorous_Intensity_Minutes': (
             'Vigorous Intensity Minutes - Garmin (min)'
         ),
-        'Garmin_Med_High_Stress_Minutes': 'Medium & High Stress - Garmin (min)',
+        'Garmin_Avg_Awake_Stress_Score': 'Average Awake Hours Garmin Stress Score (0-100)',
         'Net_Active_MET_Minutes': 'Net Active MET Minutes',
         'Garmin_7d_Training_Load_Sum': 'Training Load - Garmin 7d Sum',
         'Acute_to_Chronic_Training_Load_Ratio': (
@@ -449,7 +447,6 @@ def generate_quantified_self_csv(
         'Step Count - Daily (steps)',
         'Moderate Intensity Minutes - Garmin (min)',
         'Vigorous Intensity Minutes - Garmin (min)',
-        'Medium & High Stress - Garmin (min)',
         'Net Active MET Minutes',
         'Training Load - Garmin 7d Sum',
         'Lactate Threshold HR (bpm)',
@@ -471,6 +468,7 @@ def generate_quantified_self_csv(
         'Time at Work (hours)',
         'VO2 Max - Garmin (ml/kg/min)',
         'Body Fat - 7d Avg (%)',
+        'Average Awake Hours Garmin Stress Score (0-100)',
     ]
     for col in float_1dp_columns:
         if col in df_export.columns:
