@@ -274,6 +274,69 @@ class GarminClient:
                         stack.append(item)
         return None
 
+    def _find_training_load_breakdown(self, data: Any) -> Dict[str, Optional[int]]:
+        result = {'anaerobic': None, 'high_aerobic': None, 'low_aerobic': None}
+        if not data: return result
+        stack = [data]
+        while stack:
+            current = stack.pop()
+            if isinstance(current, dict):
+                for k, v in current.items():
+                    if v is None: continue
+                    k_clean = k.lower().replace('_', '').replace('-', '')
+                    
+                    if result['anaerobic'] is None and 'anaerobic' in k_clean:
+                        if isinstance(v, (int, float)):
+                            result['anaerobic'] = int(round(v))
+                        elif isinstance(v, dict):
+                            for subk in ['actual', 'value', 'load', 'actualValue', 'currentValue']:
+                                if subk in v and v[subk] is not None:
+                                    try: result['anaerobic'] = int(round(float(v[subk])))
+                                    except (ValueError, TypeError): pass
+
+                    if result['high_aerobic'] is None and ('highaerobic' in k_clean or 'aerobichigh' in k_clean):
+                        if isinstance(v, (int, float)):
+                            result['high_aerobic'] = int(round(v))
+                        elif isinstance(v, dict):
+                            for subk in ['actual', 'value', 'load', 'actualValue', 'currentValue']:
+                                if subk in v and v[subk] is not None:
+                                    try: result['high_aerobic'] = int(round(float(v[subk])))
+                                    except (ValueError, TypeError): pass
+
+                    if result['low_aerobic'] is None and ('lowaerobic' in k_clean or 'aerobiclow' in k_clean):
+                        if isinstance(v, (int, float)):
+                            result['low_aerobic'] = int(round(v))
+                        elif isinstance(v, dict):
+                            for subk in ['actual', 'value', 'load', 'actualValue', 'currentValue']:
+                                if subk in v and v[subk] is not None:
+                                    try: result['low_aerobic'] = int(round(float(v[subk])))
+                                    except (ValueError, TypeError): pass
+
+                cat = current.get('category') or current.get('type') or current.get('trainingBalanceCategory') or current.get('loadType')
+                if isinstance(cat, str):
+                    cat_clean = cat.upper().replace('_', '').replace('-', '')
+                    val = current.get('actual') or current.get('value') or current.get('load') or current.get('actualValue') or current.get('currentValue')
+                    if val is not None:
+                        try:
+                            val_int = int(round(float(val)))
+                            if 'ANAEROBIC' in cat_clean and result['anaerobic'] is None:
+                                result['anaerobic'] = val_int
+                            elif ('HIGHAEROBIC' in cat_clean or 'AEROBICHIGH' in cat_clean) and result['high_aerobic'] is None:
+                                result['high_aerobic'] = val_int
+                            elif ('LOWAEROBIC' in cat_clean or 'AEROBICLOW' in cat_clean) and result['low_aerobic'] is None:
+                                result['low_aerobic'] = val_int
+                        except (ValueError, TypeError):
+                            pass
+
+                for value in current.values():
+                    if isinstance(value, (dict, list)):
+                        stack.append(value)
+            elif isinstance(current, list):
+                for item in current:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+        return result
+
     def _find_training_load_focus(self, data: Any) -> Optional[str]:
         if not data: return None
         stack = [data]
@@ -549,13 +612,15 @@ class GarminClient:
                 overnight_hrv_value = hrv_summary.get('lastNightAvg')
                 hrv_status_value = hrv_summary.get('status')
 
-            # --- Calculate new daily activity aggregations ---
+            # --- Calculate daily activity aggregations ---
             total_walking_distance = 0.0
             total_walking_duration = 0.0
             total_running_count = 0
             total_running_distance = 0.0
             total_running_duration = 0.0
             total_strength_duration = 0.0
+            total_run_gap_time_s = 0.0
+            total_run_gap_dist_m = 0.0
 
             if activities:
                 for act in activities:
@@ -563,8 +628,10 @@ class GarminClient:
                     atype = act.get('activityType', {})
                     type_key = atype.get('typeKey', '')
                     
-                    dist_km = (act.get('distance') or 0) / 1000
-                    dur_min = (act.get('duration') or 0) / 60
+                    dist_m = float(act.get('distance') or 0.0)
+                    dur_s = float(act.get('duration') or 0.0)
+                    dist_km = dist_m / 1000.0
+                    dur_min = dur_s / 60.0
                     
                     if 'walk' in type_key:
                         total_walking_distance += dist_km
@@ -573,8 +640,24 @@ class GarminClient:
                         total_running_count += 1
                         total_running_distance += dist_km
                         total_running_duration += dur_min
-                    elif 'strength' in type_key:
-                        total_strength_duration += dur_min
+                        
+                        gap_speed = act.get('avgGradeAdjustedSpeed')
+                        if gap_speed and gap_speed > 0 and dist_m > 0:
+                            total_run_gap_time_s += dist_m / float(gap_speed)
+                            total_run_gap_dist_m += dist_m
+                        elif dur_s > 0 and dist_m > 0:
+                            total_run_gap_time_s += dur_s
+                            total_run_gap_dist_m += dist_m
+
+            avg_run_pace = ""
+            avg_run_gap_pace = ""
+            if total_running_distance > 0 and total_running_duration > 0:
+                avg_run_speed = (total_running_distance * 1000) / (total_running_duration * 60)
+                avg_run_pace = self._calculate_pace(avg_run_speed)
+
+            if total_run_gap_dist_m > 0 and total_run_gap_time_s > 0:
+                avg_run_gap_speed = total_run_gap_dist_m / total_run_gap_time_s
+                avg_run_gap_pace = self._calculate_pace(avg_run_gap_speed)
 
             FORCE_API_WEATHER_TO_CELSIUS = True
 
@@ -780,6 +863,10 @@ class GarminClient:
             vigorous_intensity_min = None
             resting_hr = None
             avg_stress = None
+            rest_stress_min = None
+            low_stress_min = None
+            med_stress_min = None
+            high_stress_min = None
             floors = None
             bb_charged = None
             bb_drained = None
@@ -795,6 +882,15 @@ class GarminClient:
                 vigorous_intensity_min = summary.get('vigorousIntensityMinutes')
                 resting_hr = summary.get('restingHeartRate')
                 avg_stress = summary.get('averageStressLevel')
+
+                if summary.get('restStressDuration') is not None:
+                    rest_stress_min = round(summary['restStressDuration'] / 60, 1)
+                if summary.get('lowStressDuration') is not None:
+                    low_stress_min = round(summary['lowStressDuration'] / 60, 1)
+                if summary.get('mediumStressDuration') is not None:
+                    med_stress_min = round(summary['mediumStressDuration'] / 60, 1)
+                if summary.get('highStressDuration') is not None:
+                    high_stress_min = round(summary['highStressDuration'] / 60, 1)
                 
                 bb_charged = summary.get('bodyBatteryChargedValue')
                 bb_drained = summary.get('bodyBatteryDrainedValue')
@@ -882,6 +978,14 @@ class GarminClient:
                 seven_day_load = self._find_training_load(training_status_std)
             if seven_day_load is None and summary:
                 seven_day_load = self._find_training_load(summary)
+
+            load_breakdown = self._find_training_load_breakdown(training_status_modern)
+            if not any(load_breakdown.values()) and training_status_std:
+                load_breakdown = self._find_training_load_breakdown(training_status_std)
+
+            anaerobic_load = load_breakdown.get('anaerobic')
+            high_aerobic_load = load_breakdown.get('high_aerobic')
+            low_aerobic_load = load_breakdown.get('low_aerobic')
                 
             user_age_at_date = self.user_age
             if self.manual_dob:
@@ -958,6 +1062,15 @@ class GarminClient:
                 vigorous_intensity_minutes=vigorous_intensity_min,
                 steps=steps,
                 floors_climbed=floors,
+                rest_stress_duration=rest_stress_min,
+                low_stress_duration=low_stress_min,
+                medium_stress_duration=med_stress_min,
+                high_stress_duration=high_stress_min,
+                anaerobic_training_load=anaerobic_load,
+                high_aerobic_training_load=high_aerobic_load,
+                low_aerobic_training_load=low_aerobic_load,
+                avg_run_pace=avg_run_pace,
+                avg_run_gap_pace=avg_run_gap_pace,
                 activities=processed_activities
             )
             
