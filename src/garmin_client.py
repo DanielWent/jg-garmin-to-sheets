@@ -131,6 +131,9 @@ class GarminClient:
         self.user_full_name = None
         self.user_age = None
         self.user_gender = None
+        
+        # Cache for sleep endpoints to prevent repeated API calls
+        self._sleep_cache = {}
 
     def save_session(self):
         """Saves current Garth OAuth tokens to disk."""
@@ -250,6 +253,16 @@ class GarminClient:
             _check_for_429(e) # Kill switch check
             logger.debug(f"Error fetching HRV data: {str(e)}")
             return None
+            
+    async def _get_sleep_data_cached(self, target_iso: str):
+        """Fetch sleep data with in-memory caching to reduce redundant API calls."""
+        if target_iso in self._sleep_cache:
+            return self._sleep_cache[target_iso]
+        
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, self.client.get_sleep_data, target_iso)
+        self._sleep_cache[target_iso] = data
+        return data
 
     def _find_training_load(self, data: Any) -> Optional[int]:
         if not data: return None
@@ -428,6 +441,7 @@ class GarminClient:
             summary = stats = sleep_data = hrv_payload = bp_payload = activities = None
             training_status_std = training_status_modern = lactate_data = None
             lactate_range_hr = lactate_range_speed = readiness_data = None
+            stress_data = next_day_sleep_data = None
 
             if fetch_summary:
                 task_lactate_hr_url = f"biometric-service/stats/lactateThresholdHeartRate/range/{target_iso}/{target_iso}"
@@ -437,7 +451,7 @@ class GarminClient:
                 # The requests are spaced out sequentially to bypass Cloudflare
                 summary = await safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
                 stats = await safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
-                sleep_data = await safe_fetch("Sleep", loop.run_in_executor(None, self.client.get_sleep_data, target_iso))
+                sleep_data = await safe_fetch("Sleep", self._get_sleep_data_cached(target_iso))
                 hrv_payload = await safe_fetch("HRV", self._fetch_hrv_data(target_iso))
                 bp_payload = await safe_fetch("Blood Pressure", loop.run_in_executor(None, self.client.get_blood_pressure, target_iso))
                 training_status_std = await safe_fetch("Training Status (Std)", loop.run_in_executor(None, self.client.get_training_status, target_iso))
@@ -456,6 +470,14 @@ class GarminClient:
                 ))
                 
                 readiness_data = await safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
+
+                stress_data = await safe_fetch("Stress", loop.run_in_executor(None, self.client.get_stress_data, target_iso))
+                next_day_iso = (target_date + timedelta(days=1)).isoformat()
+                try:
+                    next_day_sleep_data = await safe_fetch("Next Day Sleep", self._get_sleep_data_cached(next_day_iso))
+                except Exception as e:
+                    logger.debug(f"Failed to fetch next day sleep data for {next_day_iso}: {e}")
+                    next_day_sleep_data = None
 
             # Fetch activities unconditionally because we need them to calculate daily totals 
             # for running, walking, and strength training.
@@ -565,6 +587,7 @@ class GarminClient:
             sleep_awake = None
             overnight_respiration = None
             overnight_pulse_ox = None
+            sleep_dto = None
 
             if sleep_data:
                 sleep_dto = sleep_data.get('dailySleepDTO')
@@ -604,6 +627,39 @@ class GarminClient:
                     if sleep_time_seconds and sleep_time_seconds > 0:
                         awake_sec = sleep_dto.get('awakeSleepSeconds') or 0
                         sleep_efficiency = round(((sleep_time_seconds - awake_sec) / sleep_time_seconds) * 100)
+
+            avg_waking_stress = None
+            if fetch_summary and stress_data and isinstance(stress_data, dict):
+                stress_values = stress_data.get('stressValuesArray', [])
+                
+                wake_ts = 0
+                if sleep_dto:
+                    wake_ts = sleep_dto.get('sleepEndTimestampGMT') or sleep_dto.get('sleepEndTimestampLocal') or 0
+                    
+                bedtime_timestamp = None
+                if next_day_sleep_data:
+                    next_sleep_dto = next_day_sleep_data.get('dailySleepDTO')
+                    if not next_sleep_dto and isinstance(next_day_sleep_data, dict):
+                        next_sleep_dto = next_day_sleep_data
+                    if next_sleep_dto:
+                        bedtime_timestamp = next_sleep_dto.get('sleepStartTimestampGMT') or next_sleep_dto.get('sleepStartTimestampLocal')
+
+                valid_stresses = []
+                for item in stress_values:
+                    if isinstance(item, list) and len(item) >= 2:
+                        ts, val = item[0], item[1]
+                        if val is not None and val >= 0:
+                            if ts >= wake_ts:
+                                if bedtime_timestamp is not None:
+                                    if ts < bedtime_timestamp:
+                                        valid_stresses.append(val)
+                                else:
+                                    valid_stresses.append(val)
+                
+                if valid_stresses:
+                    avg_waking_stress = round(sum(valid_stresses) / len(valid_stresses), 1)
+                else:
+                    avg_waking_stress = None
 
             overnight_hrv_value = None
             hrv_status_value = None
@@ -1033,6 +1089,7 @@ class GarminClient:
                 blood_pressure_diastolic=bp_diastolic,
                 resting_heart_rate=resting_hr,
                 average_stress=avg_stress,
+                average_waking_stress=avg_waking_stress,
                 body_battery_max=bb_max,
                 body_battery_min=bb_min,
                 body_battery_charged=bb_charged,
