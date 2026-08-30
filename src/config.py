@@ -102,7 +102,6 @@ GENERAL_SUMMARY_HEADERS = [
     "Sleep Need (min)",
     "Overnight Average Pulse Ox / SpO2 (%)",
     "Garmin Average Stress Score (0-100)",
-    "Waking Average Stress Score (0-100)",
     "Daily Min Body Battery (0-100)",
     "Daily Max Body Battery (0-100)",
     "Body Battery Charged (0-100)",
@@ -137,7 +136,8 @@ GENERAL_SUMMARY_HEADERS = [
     "High Aerobic Training Load (7d sum)",
     "Low Aerobic Training Load (7d sum)",
     "Average Pace for that day's runs",
-    "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)"
+    "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)",
+    "Waking Average Stress Score (0-100)"
 ]
 
 ACTIVITY_HEADERS = [
@@ -205,7 +205,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Garmin HRV Status (Text Label)": "hrv_status",
     "Overnight Resting HR (bpm)": "resting_heart_rate",
     "Garmin Average Stress Score (0-100)": "average_stress",
-    "Waking Average Stress Score (0-100)": "average_waking_stress",
     "Daily Min Body Battery (0-100)": "body_battery_min",
     "Daily Max Body Battery (0-100)": "body_battery_max",
     "Body Battery Charged (0-100)": "body_battery_charged",
@@ -241,5 +240,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "High Aerobic Training Load (7d sum)": "high_aerobic_training_load",
     "Low Aerobic Training Load (7d sum)": "low_aerobic_training_load",
     "Average Pace for that day's runs": "avg_run_pace",
-    "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": "avg_run_gap_pace"
+    "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": "avg_run_gap_pace",
+    "Waking Average Stress Score (0-100)": "average_waking_stress"
 }
