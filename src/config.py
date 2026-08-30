@@ -35,6 +35,7 @@ class GarminMetrics:
     body_water: Optional[float] = None
     visceral_fat: Optional[float] = None
     average_stress: Optional[Any] = None
+    average_waking_stress: Optional[float] = None
     blood_pressure_systolic: Optional[int] = None
     blood_pressure_diastolic: Optional[int] = None
     active_calories: Optional[int] = None
@@ -101,6 +102,7 @@ GENERAL_SUMMARY_HEADERS = [
     "Sleep Need (min)",
     "Overnight Average Pulse Ox / SpO2 (%)",
     "Garmin Average Stress Score (0-100)",
+    "Waking Average Stress Score (0-100)",
     "Daily Min Body Battery (0-100)",
     "Daily Max Body Battery (0-100)",
     "Body Battery Charged (0-100)",
@@ -203,6 +205,7 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Garmin HRV Status (Text Label)": "hrv_status",
     "Overnight Resting HR (bpm)": "resting_heart_rate",
     "Garmin Average Stress Score (0-100)": "average_stress",
+    "Waking Average Stress Score (0-100)": "average_waking_stress",
     "Daily Min Body Battery (0-100)": "body_battery_min",
     "Daily Max Body Battery (0-100)": "body_battery_max",
     "Body Battery Charged (0-100)": "body_battery_charged",
