@@ -14,7 +14,6 @@ on:
     - cron: '0 18 * * *'
     - cron: '0 21 * * *'
 
-
 jobs:
   generate_and_upload_csv:
     runs-on: ubuntu-latest
@@ -34,8 +33,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           
-      - name: Execute Export Script
+      - name: Execute Export Script (Daniel)
         run: python src/quantified_self_exporter.py
         env:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+
+      - name: Execute Export Script (April)
+        if: always()
+        run: python src/aflw_quantified_self_exporter.py
+        env:
+          USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
           GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
