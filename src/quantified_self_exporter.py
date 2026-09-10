@@ -8,63 +8,6 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import numpy as np
 import pandas as pd
 
-# Demographic profile registry
-USER_PROFILES = {
-    'Daniel': {'dob': '1985-10-25', 'sex': 'male'},
-    'April': {'dob': '1987-05-05', 'sex': 'female'},
-}
-
-
-def calculate_garmin_sleep_coach_need(
-    date_series: pd.Series,
-    dob: str,
-    daily_load_series: pd.Series,
-    daily_steps_series: pd.Series,
-) -> pd.Series:
-    """
-    Calculates physiological sleep need replicating the Garmin Sleep Coach algorithm.
-    
-    Methodology derived from Garmin Health Science documentation and empirical fit:
-    1. Baseline: 8 hours (480 mins) for users under 35. 
-       Decreases by 1 min/year until age 65 (7.5 hours / 450 mins).
-    2. Activity Adjustment: Evaluates the previous day's training load using a 
-       quadratic function to yield an exact physiological minute recovery requirement.
-    3. Formatting: Output is rigidly rounded to 10-minute intervals.
-    4. Boundaries: Recommendations are strictly clamped between 6.5 hours 
-       (390 mins) and 9.5 hours (570 mins).
-    """
-    parsed_dates = pd.to_datetime(date_series, errors='coerce')
-    dob_dt = pd.to_datetime(dob)
-    
-    # Calculate exact fractional age at each record date
-    age_years = (parsed_dates - dob_dt).dt.total_seconds() / (365.2425 * 86400.0)
-
-    # 1. Garmin Age-based Baseline
-    # Penalizes 1 minute per year over the age of 35, up to a max penalty of 30 mins
-    age_penalty = (age_years - 35).clip(lower=0, upper=30)
-    base_need_min = 480.0 - age_penalty
-
-    # Shift training load backwards to evaluate the *previous* day's physical toll
-    prev_day_load = daily_load_series.shift(1).fillna(0)
-
-    # 2. Activity Adjustments (Quadratic Function)
-    # y = 1.7 * (EPOC / 100)^2
-    load_adj_exact = 1.7 * ((prev_day_load / 100.0) ** 2)
-    
-    # Inactive day reduction: -10 mins for days with 0 load and < 5000 steps
-    inactive_adj = pd.Series(0.0, index=date_series.index)
-    inactive_mask = (prev_day_load == 0) & (daily_steps_series.shift(1).fillna(0) < 5000)
-    inactive_adj[inactive_mask] = -10.0
-
-    # Combine metrics for exact raw need
-    raw_need = base_need_min + load_adj_exact + inactive_adj
-
-    # 3. Round to closest 10-minute increment
-    rounded_need = (raw_need / 10.0).round() * 10.0
-
-    # 4. Clamp to Garmin's absolute bounds
-    return rounded_need.clip(lower=390.0, upper=570.0)
-
 
 def parse_to_iso_date(series: pd.Series) -> pd.Series:
     s_str = (
@@ -83,10 +26,7 @@ def parse_to_iso_date(series: pd.Series) -> pd.Series:
     )
     if missing_mask.any():
         s_dt.loc[missing_mask] = pd.to_datetime(
-            series.loc[missing_mask],
-            dayfirst=True,
-            format='mixed',
-            errors='coerce',
+            series.loc[missing_mask], dayfirst=True, format='mixed', errors='coerce'
         )
     return s_dt.dt.strftime('%Y-%m-%d')
 
@@ -115,13 +55,7 @@ def generate_quantified_self_csv(
     df_activities: pd.DataFrame,
     df_zones: pd.DataFrame,
     output_path: str = 'drw_quantified_self.csv',
-    user: str = 'Daniel',
-    custom_dob: str = None,
-    custom_sex: str = None,
 ):
-    # Resolve user demographic parameters
-    profile = USER_PROFILES.get(user, USER_PROFILES['Daniel'])
-    user_dob = custom_dob or profile['dob']
 
     # 1. Process Garmin Daily Data
     garmin_mapping = {
@@ -145,13 +79,12 @@ def generate_quantified_self_csv(
         'Active Calories': 'Active_Calories',
         'Active Calories (kcal)': 'Active_Calories',
         'Sleep Length (min)': 'Overnight_Sleep_Duration_min',
+        'Sleep Need (min)': 'Sleep_Need_min',
         'Sleep Start Time': 'Sleep_Start_Time_HH_MM',
         'Overnight Resting HR (bpm)': 'Overnight_Resting_Heart_Rate_bpm',
         'Overnight HRV (ms)': 'Overnight_Average_HRV_RMSSD_ms',
         'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
-        'Diastolic Blood Pressure (mmHg)': (
-            'Resting_Diastolic_Blood_Pressure_mmHg'
-        ),
+        'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg',
     }
     df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))
 
@@ -179,7 +112,7 @@ def generate_quantified_self_csv(
         df_g['Garmin_Vigorous_Intensity_Minutes'] = df_garmin.iloc[:, 44]
     if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:
         df_g['Active_Calories'] = df_garmin.iloc[:, 45]
-
+        
     # Average Awake Hours Garmin Stress Score (Column BD / 55)
     if 'Garmin_Avg_Awake_Stress_Score' not in df_g.columns and df_garmin.shape[1] > 55:
         df_g['Garmin_Avg_Awake_Stress_Score'] = pd.to_numeric(
@@ -352,18 +285,12 @@ def generate_quantified_self_csv(
         (acute_load / chronic_load).replace([np.inf, -np.inf], np.nan).round(2)
     )
 
-    # Calculate Garmin 10-Minute Increment Sleep Need + Quadratic Activity Adjustment
-    timeline_dates = df.iloc[:, 0]
-    sleep_need_series = calculate_garmin_sleep_coach_need(
-        date_series=timeline_dates, 
-        dob=user_dob,
-        daily_load_series=df['Daily_Activity_Training_Load'],
-        daily_steps_series=df.get('Daily_Steps_Count', pd.Series(0, index=df.index))
-    )
-
-    if 'Overnight_Sleep_Duration_min' in df.columns:
-        daily_sleep_deficit = sleep_need_series - pd.to_numeric(
-            df['Overnight_Sleep_Duration_min'], errors='coerce'
+    if (
+        'Sleep_Need_min' in df.columns
+        and 'Overnight_Sleep_Duration_min' in df.columns
+    ):
+        daily_sleep_deficit = (
+            df['Sleep_Need_min'] - df['Overnight_Sleep_Duration_min']
         )
         df['EWMA_Sleep_Debt_min'] = daily_sleep_deficit.ewm(
             span=7, adjust=False
@@ -419,8 +346,7 @@ def generate_quantified_self_csv(
             .bfill()
         )
         df['Net_Active_MET_Minutes'] = (
-            pd.to_numeric(df['Active_Calories'], errors='coerce')
-            / effective_weight
+            pd.to_numeric(df['Active_Calories'], errors='coerce') / effective_weight
         ) * 60.0
 
     # 8. Filter, Sort Descending, and Select Target Columns
@@ -482,9 +408,7 @@ def generate_quantified_self_csv(
         'Garmin_Vigorous_Intensity_Minutes': (
             'Vigorous Intensity Minutes - Garmin (min)'
         ),
-        'Garmin_Avg_Awake_Stress_Score': (
-            'Average Awake Hours Garmin Stress Score (0-100)'
-        ),
+        'Garmin_Avg_Awake_Stress_Score': 'Average Awake Hours Garmin Stress Score (0-100)',
         'Net_Active_MET_Minutes': 'Net Active MET Minutes',
         'Garmin_7d_Training_Load_Sum': 'Training Load - Garmin 7d Sum',
         'Acute_to_Chronic_Training_Load_Ratio': (
@@ -498,9 +422,7 @@ def generate_quantified_self_csv(
         'Overnight_Sleep_Duration_min': 'Sleep Duration - Overnight (min)',
         'Sleep_Start_Decimal': 'Sleep Start Time (Decimal)',
         'EWMA_Sleep_Debt_min': 'Sleep Debt - 7d EWMA (min)',
-        'Overnight_Resting_Heart_Rate_bpm': (
-            'Resting Heart Rate - Overnight (bpm)'
-        ),
+        'Overnight_Resting_Heart_Rate_bpm': 'Resting Heart Rate - Overnight (bpm)',
         'Overnight_Average_HRV_RMSSD_ms': 'HRV RMSSD - Overnight (ms)',
         'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore': (
             'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline'
@@ -538,9 +460,7 @@ def generate_quantified_self_csv(
     for col in integer_columns:
         if col in df_export.columns:
             df_export[col] = (
-                pd.to_numeric(df_export[col], errors='coerce')
-                .round()
-                .astype('Int64')
+                pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
             )
 
     float_1dp_columns = [
@@ -552,9 +472,7 @@ def generate_quantified_self_csv(
     ]
     for col in float_1dp_columns:
         if col in df_export.columns:
-            df_export[col] = pd.to_numeric(
-                df_export[col], errors='coerce'
-            ).round(1)
+            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(1)
 
     float_2dp_columns = [
         'Running Distance - Daily (km)',
@@ -568,9 +486,7 @@ def generate_quantified_self_csv(
     ]
     for col in float_2dp_columns:
         if col in df_export.columns:
-            df_export[col] = pd.to_numeric(
-                df_export[col], errors='coerce'
-            ).round(2)
+            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(2)
 
     # 10. Write Out Clean CSV
     df_export.to_csv(output_path, header=True, index=False, na_rep='')
@@ -599,8 +515,6 @@ def download_drive_file(service, file_id):
 if __name__ == '__main__':
     FOLDER_ID = os.getenv('DRIVE_FOLDER_ID')
     SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
-    ACTIVE_USER = os.getenv('QUANTIFIED_SELF_USER', 'Daniel')
-
     GARMIN_FILENAME = 'drw_garmin_data.csv'
     ACTIVITIES_FILENAME = 'drw_garmin_activities_list.csv'
     WITHINGS_FILENAME = 'drw_withings_bodyscan_data.csv'
@@ -663,7 +577,7 @@ if __name__ == '__main__':
     df_medical_raw = pd.read_csv(medical_data)
     df_zones_raw = pd.read_csv(ZONES_URL)
 
-    print(f'Processing physiological metrics for user: {ACTIVE_USER}...')
+    print('Processing physiological metrics...')
     generate_quantified_self_csv(
         df_garmin_raw,
         df_withings_raw,
@@ -671,7 +585,6 @@ if __name__ == '__main__':
         df_activities_raw,
         df_zones_raw,
         output_path=TARGET_FILENAME,
-        user=ACTIVE_USER,
     )
 
     print('Uploading updated CSV to Google Drive...')
