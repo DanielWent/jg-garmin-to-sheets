@@ -173,7 +173,7 @@ def generate_quantified_self_csv(
         else df_withings.columns[2]
     )
     pwv_col = (
-        'Pulse dynamics Velocity (m/s)'
+        'Pulse Wave Velocity (m/s)'
         if 'Pulse Wave Velocity (m/s)' in df_withings.columns
         else df_withings.columns[3]
     )
@@ -427,189 +427,20 @@ def generate_quantified_self_csv(
         'Garmin_VO2_Max_ml_kg_min': 'VO2 Max - Garmin (ml/kg/min)',
         'Lactate_Threshold_Heart_Rate_bpm': 'Lactate Threshold HR (bpm)',
         'Lactate_Threshold_Pace_decimal_min_km': (
-            'Lactate Threshold Pace (decimal min/km)'
-        ),
-        'Overnight_Sleep_Duration_min': 'Sleep Duration - Overnight (min)',
-        'Sleep_Start_Decimal': 'Sleep Start Time (Decimal)',
-        'EWMA_Sleep_Debt_min': 'Sleep Debt - 4d EWMA (min)',
-        'Overnight_Resting_Heart_Rate_bpm': 'Resting Heart Rate - Overnight (bpm)',
-        'Overnight_Average_HRV_RMSSD_ms': 'HRV RMSSD - Overnight (ms)',
-        'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore': (
-            'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline'
-        ),
-        'Daily_Morning_Weight_7d_Average_kg': 'Weight - Morning 7d Avg (kg)',
-        'Body_Fat_Percentage_7d_Average': 'Body Fat - 7d Avg (%)',
-        'Resting_Systolic_Blood_Pressure_mmHg': (
-            'Blood Pressure Systolic - Resting (mmHg)'
-        ),
-        'Resting_Diastolic_Blood_Pressure_mmHg': (
-            'Blood Pressure Diastolic - Resting (mmHg)'
-        ),
-        'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
-        'Medical_Notes': 'Medical Note',
-        'Daily_Max_Garmin_Body_Battery': 'Daily Max Garmin Body Battery',
-    }
+            'LactThe error occurs because Pandas is attempting to aggregate a column (`'Pulse dynamics Velocity (m/s)'`, assigned to `pwv_col`) that is not present in the DataFrame columns when `groupby().agg(...)` is called at line 183.
 
-    df_export = df_export.rename(columns=column_rename_map)
-    df_export = df_export.loc[:, ~df_export.columns.duplicated()]
+This typically happens if the raw export has a slightly different header name (for example, a typo for `'Pulse Wave Velocity (m/s)'`) or if PWV data was omitted entirely from that dataset.
 
-    # 9. Strict Type & Decimal Precision Formatting
-    integer_columns = [
-        'Step Count - Daily (steps)',
-        'Moderate Intensity Minutes - Garmin (min)',
-        'Vigorous Intensity Minutes - Garmin (min)',
-        'Net Active MET Minutes',
-        'Training Load - Garmin 7d Sum',
-        'Lactate Threshold HR (bpm)',
-        'Sleep Duration - Overnight (min)',
-        'Sleep Debt - 4d EWMA (min)',
-        'Resting Heart Rate - Overnight (bpm)',
-        'HRV RMSSD - Overnight (ms)',
-        'Blood Pressure Systolic - Resting (mmHg)',
-        'Blood Pressure Diastolic - Resting (mmHg)',
-        'Daily Max Garmin Body Battery',
-    ]
-    for col in integer_columns:
-        if col in df_export.columns:
-            df_export[col] = (
-                pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
-            )
+Here are the two cleanest ways to fix it in `src/aflw_quantified_self_exporter.py`:
 
-    float_1dp_columns = [
-        'Time at Home (hours)',
-        'Time at Work (hours)',
-        'VO2 Max - Garmin (ml/kg/min)',
-        'Body Fat - 7d Avg (%)',
-        'Average Awake Hours Garmin Stress Score (0-100)',
-    ]
-    for col in float_1dp_columns:
-        if col in df_export.columns:
-            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(1)
+**Option 1: Filter the aggregation dictionary dynamically (Recommended)**
 
-    float_2dp_columns = [
-        'Running Distance - Daily (km)',
-        'Running Distance - 28d Total (km)',
-        'Training Load Ratio - Acute:Chronic',
-        'Lactate Threshold Pace (decimal min/km)',
-        'Sleep Start Time (Decimal)',
-        'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline',
-        'Weight - Morning 7d Avg (kg)',
-        'Pulse Wave Velocity (m/s)',
-    ]
-    for col in float_2dp_columns:
-        if col in df_export.columns:
-            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(2)
+Build the aggregation mapping dynamically so it only aggregates columns that actually exist in the DataFrame:
 
-    # 10. Write Out Clean CSV
-    df_export.to_csv(output_path, header=True, index=False, na_rep='')
-    return df_export
+```python
+# Build agg dict only for columns present in the DataFrame
+cols_to_agg = [weight_col, body_fat_col, pwv_col]
+agg_dict = {col: 'mean' for col in cols_to_agg if col and col in df.columns}
 
-
-def get_file_id(service, filename, folder_id):
-    safe_filename = filename.replace("'", "\\'")
-    query = f"name='{safe_filename}' and '{folder_id}' in parents and trashed=false"
-    results = service.files().list(q=query, fields='files(id, name)').execute()
-    items = results.get('files', [])
-    return items[0]['id'] if items else None
-
-
-def download_drive_file(service, file_id):
-    request = service.files().get_media(fileId=file_id)
-    downloaded_data = io.BytesIO()
-    downloader = MediaIoBaseDownload(downloaded_data, request)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-    downloaded_data.seek(0)
-    return downloaded_data
-
-
-if __name__ == '__main__':
-    FOLDER_ID = os.getenv('USER2_DRIVE_FOLDER_ID')
-    SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
-    GARMIN_FILENAME = 'aflw_garmin_data.csv'
-    ACTIVITIES_FILENAME = 'aflw_garmin_activities_list.csv'
-    WITHINGS_FILENAME = 'aflw_withings_bodyscan_data.csv'
-    MEDICAL_FILENAME = "April's Full Medical Record.csv"
-
-    ZONES_BASE_URL = 'https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/aflw_home_assistant_zone_history.csv'
-    ZONES_URL = f'{ZONES_BASE_URL}?v={int(time.time())}'
-
-    TARGET_FILENAME = 'aflw_quantified_self.csv'
-
-    if not FOLDER_ID:
-        raise ValueError('USER2_DRIVE_FOLDER_ID environment variable is not set.')
-    if not SERVICE_ACCOUNT_JSON:
-        raise ValueError(
-            'GOOGLE_SHEETS_CREDENTIALS environment variable is not set.'
-        )
-
-    print('Authenticating with Google Drive...')
-    service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
-    creds = service_account.Credentials.from_service_account_info(
-        service_account_info, scopes=['https://www.googleapis.com/auth/drive']
-    )
-    drive_service = build('drive', 'v3', credentials=creds)
-
-    print(f'Locating files in folder {FOLDER_ID}...')
-    garmin_file_id = get_file_id(drive_service, GARMIN_FILENAME, FOLDER_ID)
-    activities_file_id = get_file_id(
-        drive_service, ACTIVITIES_FILENAME, FOLDER_ID
-    )
-    withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
-    medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
-
-    if not medical_file_id:
-        medical_file_id = get_file_id(
-            drive_service, "April's Medical Test Results.csv", FOLDER_ID
-        )
-
-    target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
-
-    if not garmin_file_id:
-        raise FileNotFoundError(f"Could not find '{GARMIN_FILENAME}' in Drive.")
-    if not activities_file_id:
-        raise FileNotFoundError(
-            f"Could not find '{ACTIVITIES_FILENAME}' in Drive."
-        )
-    if not withings_file_id:
-        raise FileNotFoundError(f"Could not find '{WITHINGS_FILENAME}' in Drive.")
-    if not medical_file_id:
-        raise FileNotFoundError(f"Could not find '{MEDICAL_FILENAME}' in Drive.")
-
-    print('Downloading raw data from Google Drive and Home Assistant...')
-    garmin_data = download_drive_file(drive_service, garmin_file_id)
-    activities_data = download_drive_file(drive_service, activities_file_id)
-    withings_data = download_drive_file(drive_service, withings_file_id)
-    medical_data = download_drive_file(drive_service, medical_file_id)
-
-    df_garmin_raw = pd.read_csv(garmin_data)
-    df_activities_raw = pd.read_csv(activities_data)
-    df_withings_raw = pd.read_csv(withings_data)
-    df_medical_raw = pd.read_csv(medical_data)
-    df_zones_raw = pd.read_csv(ZONES_URL)
-
-    print('Processing physiological metrics...')
-    generate_quantified_self_csv(
-        df_garmin_raw,
-        df_withings_raw,
-        df_medical_raw,
-        df_activities_raw,
-        df_zones_raw,
-        output_path=TARGET_FILENAME,
-    )
-
-    print('Uploading updated CSV to Google Drive...')
-    media = MediaFileUpload(TARGET_FILENAME, mimetype='text/csv', resumable=True)
-
-    if target_file_id:
-        drive_service.files().update(
-            fileId=target_file_id, media_body=media
-        ).execute()
-    else:
-        file_metadata = {'name': TARGET_FILENAME, 'parents': [FOLDER_ID]}
-        drive_service.files().create(
-            body=file_metadata, media_body=media
-        ).execute()
-
-    print('Export and upload complete.')
+# Perform aggregation
+df_daily = df.groupby('Date').agg(agg_dict).reset_index()
