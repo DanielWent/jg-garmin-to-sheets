@@ -119,6 +119,15 @@ def generate_quantified_self_csv(
             df_garmin.iloc[:, 55], errors='coerce'
         )
 
+    # Daily Max Garmin Body Battery (Column V / 21)
+    if (
+        'Daily_Max_Garmin_Body_Battery' not in df_g.columns
+        and df_garmin.shape[1] > 21
+    ):
+        df_g['Daily_Max_Garmin_Body_Battery'] = pd.to_numeric(
+            df_garmin.iloc[:, 21], errors='coerce'
+        )
+
     df_g = df_g.loc[:, ~df_g.columns.duplicated()]
 
     # 2. Process Garmin Activities Data
@@ -164,7 +173,7 @@ def generate_quantified_self_csv(
         else df_withings.columns[2]
     )
     pwv_col = (
-        'Pulse Wave Velocity (m/s)'
+        'Pulse dynamics Velocity (m/s)'
         if 'Pulse Wave Velocity (m/s)' in df_withings.columns
         else df_withings.columns[3]
     )
@@ -293,7 +302,7 @@ def generate_quantified_self_csv(
             df['Sleep_Need_min'] - df['Overnight_Sleep_Duration_min']
         )
         df['EWMA_Sleep_Debt_min'] = daily_sleep_deficit.ewm(
-            span=7, adjust=False
+            halflife=4, adjust=False
         ).mean()
 
     if 'Daily_Running_Distance_km' in df.columns:
@@ -387,6 +396,7 @@ def generate_quantified_self_csv(
         'Resting_Diastolic_Blood_Pressure_mmHg',
         'Pulse_Wave_Velocity_m_s',
         'Medical_Notes',
+        'Daily_Max_Garmin_Body_Battery',
     ]
 
     for col in required_columns:
@@ -421,7 +431,7 @@ def generate_quantified_self_csv(
         ),
         'Overnight_Sleep_Duration_min': 'Sleep Duration - Overnight (min)',
         'Sleep_Start_Decimal': 'Sleep Start Time (Decimal)',
-        'EWMA_Sleep_Debt_min': 'Sleep Debt - 7d EWMA (min)',
+        'EWMA_Sleep_Debt_min': 'Sleep Debt - 4d EWMA (min)',
         'Overnight_Resting_Heart_Rate_bpm': 'Resting Heart Rate - Overnight (bpm)',
         'Overnight_Average_HRV_RMSSD_ms': 'HRV RMSSD - Overnight (ms)',
         'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore': (
@@ -437,6 +447,7 @@ def generate_quantified_self_csv(
         ),
         'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
         'Medical_Notes': 'Medical Note',
+        'Daily_Max_Garmin_Body_Battery': 'Daily Max Garmin Body Battery',
     }
 
     df_export = df_export.rename(columns=column_rename_map)
@@ -451,11 +462,12 @@ def generate_quantified_self_csv(
         'Training Load - Garmin 7d Sum',
         'Lactate Threshold HR (bpm)',
         'Sleep Duration - Overnight (min)',
-        'Sleep Debt - 7d EWMA (min)',
+        'Sleep Debt - 4d EWMA (min)',
         'Resting Heart Rate - Overnight (bpm)',
         'HRV RMSSD - Overnight (ms)',
         'Blood Pressure Systolic - Resting (mmHg)',
         'Blood Pressure Diastolic - Resting (mmHg)',
+        'Daily Max Garmin Body Battery',
     ]
     for col in integer_columns:
         if col in df_export.columns:
