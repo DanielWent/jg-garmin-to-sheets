@@ -431,7 +431,7 @@ def generate_quantified_self_csv(
         ),
         'Overnight_Sleep_Duration_min': 'Sleep Duration - Overnight (min)',
         'Sleep_Start_Decimal': 'Sleep Start Time (Decimal)',
-        'EWMA_Sleep_Debt_min': 'Sleep Debt - 7d EWMA (min)',
+        'EWMA_Sleep_Debt_min': 'Sleep Debt - 4d EWMA (min)',
         'Overnight_Resting_Heart_Rate_bpm': 'Resting Heart Rate - Overnight (bpm)',
         'Overnight_Average_HRV_RMSSD_ms': 'HRV RMSSD - Overnight (ms)',
         'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore': (
@@ -462,7 +462,7 @@ def generate_quantified_self_csv(
         'Training Load - Garmin 7d Sum',
         'Lactate Threshold HR (bpm)',
         'Sleep Duration - Overnight (min)',
-        'Sleep Debt - 7d EWMA (min)',
+        'Sleep Debt - 4d EWMA (min)',
         'Resting Heart Rate - Overnight (bpm)',
         'HRV RMSSD - Overnight (ms)',
         'Blood Pressure Systolic - Resting (mmHg)',
