@@ -112,11 +112,20 @@ def generate_quantified_self_csv(
         df_g['Garmin_Vigorous_Intensity_Minutes'] = df_garmin.iloc[:, 44]
     if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:
         df_g['Active_Calories'] = df_garmin.iloc[:, 45]
-        
+
     # Average Awake Hours Garmin Stress Score (Column BD / 55)
     if 'Garmin_Avg_Awake_Stress_Score' not in df_g.columns and df_garmin.shape[1] > 55:
         df_g['Garmin_Avg_Awake_Stress_Score'] = pd.to_numeric(
             df_garmin.iloc[:, 55], errors='coerce'
+        )
+
+    # Daily Max Garmin Body Battery (Column V / 21)
+    if (
+        'Daily_Max_Garmin_Body_Battery' not in df_g.columns
+        and df_garmin.shape[1] > 21
+    ):
+        df_g['Daily_Max_Garmin_Body_Battery'] = pd.to_numeric(
+            df_garmin.iloc[:, 21], errors='coerce'
         )
 
     df_g = df_g.loc[:, ~df_g.columns.duplicated()]
@@ -293,7 +302,7 @@ def generate_quantified_self_csv(
             df['Sleep_Need_min'] - df['Overnight_Sleep_Duration_min']
         )
         df['EWMA_Sleep_Debt_min'] = daily_sleep_deficit.ewm(
-            span=7, adjust=False
+            halflife=4, adjust=False
         ).mean()
 
     if 'Daily_Running_Distance_km' in df.columns:
@@ -387,6 +396,7 @@ def generate_quantified_self_csv(
         'Resting_Diastolic_Blood_Pressure_mmHg',
         'Pulse_Wave_Velocity_m_s',
         'Medical_Notes',
+        'Daily_Max_Garmin_Body_Battery',
     ]
 
     for col in required_columns:
@@ -437,6 +447,7 @@ def generate_quantified_self_csv(
         ),
         'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
         'Medical_Notes': 'Medical Note',
+        'Daily_Max_Garmin_Body_Battery': 'Daily Max Garmin Body Battery',
     }
 
     df_export = df_export.rename(columns=column_rename_map)
@@ -456,6 +467,7 @@ def generate_quantified_self_csv(
         'HRV RMSSD - Overnight (ms)',
         'Blood Pressure Systolic - Resting (mmHg)',
         'Blood Pressure Diastolic - Resting (mmHg)',
+        'Daily Max Garmin Body Battery',
     ]
     for col in integer_columns:
         if col in df_export.columns:
