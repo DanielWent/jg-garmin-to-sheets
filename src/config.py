@@ -137,7 +137,8 @@ GENERAL_SUMMARY_HEADERS = [
     "Low Aerobic Training Load (7d sum)",
     "Average Pace for that day's runs",
     "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)",
-    "Waking Average Stress Score (0-100)"
+    "Waking Average Stress Score (0-100)",
+    "Overnight Respiration Rate (brpm)"
 ]
 
 ACTIVITY_HEADERS = [
@@ -241,5 +242,6 @@ HEADER_TO_ATTRIBUTE_MAP = {
     "Low Aerobic Training Load (7d sum)": "low_aerobic_training_load",
     "Average Pace for that day's runs": "avg_run_pace",
     "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": "avg_run_gap_pace",
-    "Waking Average Stress Score (0-100)": "average_waking_stress"
+    "Waking Average Stress Score (0-100)": "average_waking_stress",
+    "Overnight Respiration Rate (brpm)": "overnight_respiration"
 }
