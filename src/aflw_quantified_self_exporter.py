@@ -85,6 +85,10 @@ def generate_quantified_self_csv(
         'Overnight HRV (ms)': 'Overnight_Average_HRV_RMSSD_ms',
         'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
         'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg',
+        'Overnight Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
+        'Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
+        'Avg Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
+        'Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
     }
     df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))
 
@@ -119,13 +123,13 @@ def generate_quantified_self_csv(
             df_garmin.iloc[:, 55], errors='coerce'
         )
 
-    # Daily Max Garmin Body Battery (Column V / 21)
+    # Overnight Respiration Rate (brpm) (Column BE / 56)
     if (
-        'Daily_Max_Garmin_Body_Battery' not in df_g.columns
-        and df_garmin.shape[1] > 21
+        'Overnight_Respiration_Rate_brpm' not in df_g.columns
+        and df_garmin.shape[1] > 56
     ):
-        df_g['Daily_Max_Garmin_Body_Battery'] = pd.to_numeric(
-            df_garmin.iloc[:, 21], errors='coerce'
+        df_g['Overnight_Respiration_Rate_brpm'] = pd.to_numeric(
+            df_garmin.iloc[:, 56], errors='coerce'
         )
 
     df_g = df_g.loc[:, ~df_g.columns.duplicated()]
@@ -167,11 +171,6 @@ def generate_quantified_self_csv(
         if 'Weight (kg)' in df_withings.columns
         else df_withings.columns[1]
     )
-    body_fat_col = (
-        'Body Fat (%)'
-        if 'Body Fat (%)' in df_withings.columns
-        else df_withings.columns[2]
-    )
     pwv_col = (
         'Pulse Wave Velocity (m/s)'
         if 'Pulse Wave Velocity (m/s)' in df_withings.columns
@@ -180,13 +179,12 @@ def generate_quantified_self_csv(
 
     df_w_daily = (
         df_withings.groupby('Date_YYYY_MM_DD')
-        .agg({weight_col: 'mean', body_fat_col: 'mean', pwv_col: 'mean'})
+        .agg({weight_col: 'mean', pwv_col: 'mean'})
         .reset_index()
     )
 
     withings_mapping = {
         weight_col: 'Daily_Morning_Weight_kg',
-        body_fat_col: 'Raw_Body_Fat_Percentage',
         pwv_col: 'Pulse_Wave_Velocity_m_s',
     }
     df_w_daily = df_w_daily.rename(columns=withings_mapping)
@@ -283,17 +281,6 @@ def generate_quantified_self_csv(
             time_to_decimal
         )
 
-    acute_load = (
-        df['Daily_Activity_Training_Load'].rolling(window=7, min_periods=1).sum()
-    )
-    chronic_load = (
-        df['Daily_Activity_Training_Load'].rolling(window=28, min_periods=1).sum()
-        / 4
-    )
-    df['Acute_to_Chronic_Training_Load_Ratio'] = (
-        (acute_load / chronic_load).replace([np.inf, -np.inf], np.nan).round(2)
-    )
-
     if (
         'Sleep_Need_min' in df.columns
         and 'Overnight_Sleep_Duration_min' in df.columns
@@ -304,14 +291,6 @@ def generate_quantified_self_csv(
         df['EWMA_Sleep_Debt_min'] = daily_sleep_deficit.ewm(
             halflife=4, adjust=False
         ).mean()
-
-    if 'Daily_Running_Distance_km' in df.columns:
-        df['Running_Distance_28d_Total_km'] = (
-            df['Daily_Running_Distance_km']
-            .rolling(window=28, min_periods=1)
-            .sum()
-            .round(2)
-        )
 
     if 'Overnight_Average_HRV_RMSSD_ms' in df.columns:
         hrv_7d_avg = (
@@ -326,14 +305,6 @@ def generate_quantified_self_csv(
             'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'
         ] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)
 
-    if 'Raw_Body_Fat_Percentage' in df.columns:
-        df['Body_Fat_Percentage_7d_Average'] = (
-            df['Raw_Body_Fat_Percentage']
-            .rolling(window=7, min_periods=1)
-            .mean()
-            .round(1)
-        )
-
     if 'Daily_Morning_Weight_kg' in df.columns:
         df['Daily_Morning_Weight_7d_Average_kg'] = (
             df['Daily_Morning_Weight_kg']
@@ -342,23 +313,7 @@ def generate_quantified_self_csv(
             .round(2)
         )
 
-    if 'Active_Calories' in df.columns and 'Daily_Morning_Weight_kg' in df.columns:
-        effective_weight = (
-            df['Daily_Morning_Weight_kg']
-            .combine_first(
-                df.get(
-                    'Daily_Morning_Weight_7d_Average_kg',
-                    pd.Series(np.nan, index=df.index),
-                )
-            )
-            .ffill()
-            .bfill()
-        )
-        df['Net_Active_MET_Minutes'] = (
-            pd.to_numeric(df['Active_Calories'], errors='coerce') / effective_weight
-        ) * 60.0
-
-    # 8. Filter, Sort Descending, and Select Target Columns
+    # 8. Filter, Sort Descending, and Select Target Columns (Columns A through X)
     df_export = df.tail(730).copy()
     df_export['_sort_date'] = pd.to_datetime(
         df_export['Date_YYYY_MM_DD'], format='%Y-%m-%d', errors='coerce'
@@ -374,13 +329,10 @@ def generate_quantified_self_csv(
         'Time_in_Work_Zone_hours',
         'Daily_Steps_Count',
         'Daily_Running_Distance_km',
-        'Running_Distance_28d_Total_km',
         'Garmin_Moderate_Intensity_Minutes',
         'Garmin_Vigorous_Intensity_Minutes',
         'Garmin_Avg_Awake_Stress_Score',
-        'Net_Active_MET_Minutes',
         'Garmin_7d_Training_Load_Sum',
-        'Acute_to_Chronic_Training_Load_Ratio',
         'Garmin_VO2_Max_ml_kg_min',
         'Lactate_Threshold_Heart_Rate_bpm',
         'Lactate_Threshold_Pace_decimal_min_km',
@@ -391,12 +343,11 @@ def generate_quantified_self_csv(
         'Overnight_Average_HRV_RMSSD_ms',
         'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore',
         'Daily_Morning_Weight_7d_Average_kg',
-        'Body_Fat_Percentage_7d_Average',
         'Resting_Systolic_Blood_Pressure_mmHg',
         'Resting_Diastolic_Blood_Pressure_mmHg',
         'Pulse_Wave_Velocity_m_s',
+        'Overnight_Respiration_Rate_brpm',
         'Medical_Notes',
-        'Daily_Max_Garmin_Body_Battery',
     ]
 
     for col in required_columns:
@@ -411,7 +362,6 @@ def generate_quantified_self_csv(
         'Time_in_Work_Zone_hours': 'Time at Work (hours)',
         'Daily_Steps_Count': 'Step Count - Daily (steps)',
         'Daily_Running_Distance_km': 'Running Distance - Daily (km)',
-        'Running_Distance_28d_Total_km': 'Running Distance - 28d Total (km)',
         'Garmin_Moderate_Intensity_Minutes': (
             'Moderate Intensity Minutes - Garmin (min)'
         ),
@@ -419,11 +369,7 @@ def generate_quantified_self_csv(
             'Vigorous Intensity Minutes - Garmin (min)'
         ),
         'Garmin_Avg_Awake_Stress_Score': 'Average Awake Hours Garmin Stress Score (0-100)',
-        'Net_Active_MET_Minutes': 'Net Active MET Minutes',
         'Garmin_7d_Training_Load_Sum': 'Training Load - Garmin 7d Sum',
-        'Acute_to_Chronic_Training_Load_Ratio': (
-            'Training Load Ratio - Acute:Chronic'
-        ),
         'Garmin_VO2_Max_ml_kg_min': 'VO2 Max - Garmin (ml/kg/min)',
         'Lactate_Threshold_Heart_Rate_bpm': 'Lactate Threshold HR (bpm)',
         'Lactate_Threshold_Pace_decimal_min_km': (
@@ -438,7 +384,6 @@ def generate_quantified_self_csv(
             'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline'
         ),
         'Daily_Morning_Weight_7d_Average_kg': 'Weight - Morning 7d Avg (kg)',
-        'Body_Fat_Percentage_7d_Average': 'Body Fat - 7d Avg (%)',
         'Resting_Systolic_Blood_Pressure_mmHg': (
             'Blood Pressure Systolic - Resting (mmHg)'
         ),
@@ -446,8 +391,8 @@ def generate_quantified_self_csv(
             'Blood Pressure Diastolic - Resting (mmHg)'
         ),
         'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
+        'Overnight_Respiration_Rate_brpm': 'Overnight Respiration Rate (brpm)',
         'Medical_Notes': 'Medical Note',
-        'Daily_Max_Garmin_Body_Battery': 'Daily Max Garmin Body Battery',
     }
 
     df_export = df_export.rename(columns=column_rename_map)
@@ -458,7 +403,6 @@ def generate_quantified_self_csv(
         'Step Count - Daily (steps)',
         'Moderate Intensity Minutes - Garmin (min)',
         'Vigorous Intensity Minutes - Garmin (min)',
-        'Net Active MET Minutes',
         'Training Load - Garmin 7d Sum',
         'Lactate Threshold HR (bpm)',
         'Sleep Duration - Overnight (min)',
@@ -467,7 +411,6 @@ def generate_quantified_self_csv(
         'HRV RMSSD - Overnight (ms)',
         'Blood Pressure Systolic - Resting (mmHg)',
         'Blood Pressure Diastolic - Resting (mmHg)',
-        'Daily Max Garmin Body Battery',
     ]
     for col in integer_columns:
         if col in df_export.columns:
@@ -479,8 +422,8 @@ def generate_quantified_self_csv(
         'Time at Home (hours)',
         'Time at Work (hours)',
         'VO2 Max - Garmin (ml/kg/min)',
-        'Body Fat - 7d Avg (%)',
         'Average Awake Hours Garmin Stress Score (0-100)',
+        'Overnight Respiration Rate (brpm)',
     ]
     for col in float_1dp_columns:
         if col in df_export.columns:
@@ -488,8 +431,6 @@ def generate_quantified_self_csv(
 
     float_2dp_columns = [
         'Running Distance - Daily (km)',
-        'Running Distance - 28d Total (km)',
-        'Training Load Ratio - Acute:Chronic',
         'Lactate Threshold Pace (decimal min/km)',
         'Sleep Start Time (Decimal)',
         'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline',
