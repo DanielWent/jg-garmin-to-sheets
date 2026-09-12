@@ -85,6 +85,10 @@ def generate_quantified_self_csv(
         'Overnight HRV (ms)': 'Overnight_Average_HRV_RMSSD_ms',
         'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
         'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg',
+        'Overnight Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
+        'Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
+        'Avg Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
+        'Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
     }
     df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))
 
@@ -119,13 +123,13 @@ def generate_quantified_self_csv(
             df_garmin.iloc[:, 55], errors='coerce'
         )
 
-    # Daily Max Garmin Body Battery (Column V / 21)
+    # Overnight Respiration Rate (brpm) (Column BE / 56)
     if (
-        'Daily_Max_Garmin_Body_Battery' not in df_g.columns
-        and df_garmin.shape[1] > 21
+        'Overnight_Respiration_Rate_brpm' not in df_g.columns
+        and df_garmin.shape[1] > 56
     ):
-        df_g['Daily_Max_Garmin_Body_Battery'] = pd.to_numeric(
-            df_garmin.iloc[:, 21], errors='coerce'
+        df_g['Overnight_Respiration_Rate_brpm'] = pd.to_numeric(
+            df_garmin.iloc[:, 56], errors='coerce'
         )
 
     df_g = df_g.loc[:, ~df_g.columns.duplicated()]
@@ -358,7 +362,7 @@ def generate_quantified_self_csv(
             pd.to_numeric(df['Active_Calories'], errors='coerce') / effective_weight
         ) * 60.0
 
-    # 8. Filter, Sort Descending, and Select Target Columns
+    # 8. Filter, Sort Descending, and Select Target Columns (Columns A through AB)
     df_export = df.tail(730).copy()
     df_export['_sort_date'] = pd.to_datetime(
         df_export['Date_YYYY_MM_DD'], format='%Y-%m-%d', errors='coerce'
@@ -369,34 +373,34 @@ def generate_quantified_self_csv(
     df_export = df_export.drop(columns=['_sort_date'])
 
     required_columns = [
-        'Date_YYYY_MM_DD',
-        'Time_in_Home_Zone_hours',
-        'Time_in_Work_Zone_hours',
-        'Daily_Steps_Count',
-        'Daily_Running_Distance_km',
-        'Running_Distance_28d_Total_km',
-        'Garmin_Moderate_Intensity_Minutes',
-        'Garmin_Vigorous_Intensity_Minutes',
-        'Garmin_Avg_Awake_Stress_Score',
-        'Net_Active_MET_Minutes',
-        'Garmin_7d_Training_Load_Sum',
-        'Acute_to_Chronic_Training_Load_Ratio',
-        'Garmin_VO2_Max_ml_kg_min',
-        'Lactate_Threshold_Heart_Rate_bpm',
-        'Lactate_Threshold_Pace_decimal_min_km',
-        'Overnight_Sleep_Duration_min',
-        'Sleep_Start_Decimal',
-        'EWMA_Sleep_Debt_min',
-        'Overnight_Resting_Heart_Rate_bpm',
-        'Overnight_Average_HRV_RMSSD_ms',
-        'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore',
-        'Daily_Morning_Weight_7d_Average_kg',
-        'Body_Fat_Percentage_7d_Average',
-        'Resting_Systolic_Blood_Pressure_mmHg',
-        'Resting_Diastolic_Blood_Pressure_mmHg',
-        'Pulse_Wave_Velocity_m_s',
-        'Medical_Notes',
-        'Daily_Max_Garmin_Body_Battery',
+        'Date_YYYY_MM_DD',                                                       # Col A (1)
+        'Time_in_Home_Zone_hours',                                               # Col B (2)
+        'Time_in_Work_Zone_hours',                                               # Col C (3)
+        'Daily_Steps_Count',                                                     # Col D (4)
+        'Daily_Running_Distance_km',                                             # Col E (5)
+        'Running_Distance_28d_Total_km',                                         # Col F (6)
+        'Garmin_Moderate_Intensity_Minutes',                                     # Col G (7)
+        'Garmin_Vigorous_Intensity_Minutes',                                     # Col H (8)
+        'Garmin_Avg_Awake_Stress_Score',                                         # Col I (9)
+        'Net_Active_MET_Minutes',                                                # Col J (10)
+        'Garmin_7d_Training_Load_Sum',                                           # Col K (11)
+        'Acute_to_Chronic_Training_Load_Ratio',                                   # Col L (12)
+        'Garmin_VO2_Max_ml_kg_min',                                              # Col M (13)
+        'Lactate_Threshold_Heart_Rate_bpm',                                      # Col N (14)
+        'Lactate_Threshold_Pace_decimal_min_km',                                 # Col O (15)
+        'Overnight_Sleep_Duration_min',                                          # Col P (16)
+        'Sleep_Start_Decimal',                                                   # Col Q (17)
+        'EWMA_Sleep_Debt_min',                                                   # Col R (18)
+        'Overnight_Resting_Heart_Rate_bpm',                                      # Col S (19)
+        'Overnight_Average_HRV_RMSSD_ms',                                        # Col T (20)
+        'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore',# Col U (21)
+        'Daily_Morning_Weight_7d_Average_kg',                                    # Col V (22)
+        'Body_Fat_Percentage_7d_Average',                                        # Col W (23)
+        'Resting_Systolic_Blood_Pressure_mmHg',                                  # Col X (24)
+        'Resting_Diastolic_Blood_Pressure_mmHg',                                 # Col Y (25)
+        'Pulse_Wave_Velocity_m_s',                                               # Col Z (26)
+        'Overnight_Respiration_Rate_brpm',                                       # Col AA (27)
+        'Medical_Notes',                                                         # Col AB (28)
     ]
 
     for col in required_columns:
@@ -446,8 +450,8 @@ def generate_quantified_self_csv(
             'Blood Pressure Diastolic - Resting (mmHg)'
         ),
         'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
+        'Overnight_Respiration_Rate_brpm': 'Overnight Respiration Rate (brpm)',
         'Medical_Notes': 'Medical Note',
-        'Daily_Max_Garmin_Body_Battery': 'Daily Max Garmin Body Battery',
     }
 
     df_export = df_export.rename(columns=column_rename_map)
@@ -467,7 +471,6 @@ def generate_quantified_self_csv(
         'HRV RMSSD - Overnight (ms)',
         'Blood Pressure Systolic - Resting (mmHg)',
         'Blood Pressure Diastolic - Resting (mmHg)',
-        'Daily Max Garmin Body Battery',
     ]
     for col in integer_columns:
         if col in df_export.columns:
@@ -481,6 +484,7 @@ def generate_quantified_self_csv(
         'VO2 Max - Garmin (ml/kg/min)',
         'Body Fat - 7d Avg (%)',
         'Average Awake Hours Garmin Stress Score (0-100)',
+        'Overnight Respiration Rate (brpm)',
     ]
     for col in float_1dp_columns:
         if col in df_export.columns:
