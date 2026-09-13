@@ -174,18 +174,42 @@ def generate_quantified_self_csv(
     pwv_col = (
         'Pulse Wave Velocity (m/s)'
         if 'Pulse Wave Velocity (m/s)' in df_withings.columns
-        else df_withings.columns[3]
+        else (
+            df_withings.columns[4]
+            if df_withings.shape[1] > 4
+            else df_withings.columns[3]
+        )
+    )
+
+    # Locate Body Fat column (Column D / Index 3 in drw_withings_bodyscan_data.csv)
+    fat_col = (
+        'Fat Ratio (%)'
+        if 'Fat Ratio (%)' in df_withings.columns
+        else (
+            'Body Fat (%)'
+            if 'Body Fat (%)' in df_withings.columns
+            else (
+                'Fat Mass (%)'
+                if 'Fat Mass (%)' in df_withings.columns
+                else (
+                    df_withings.columns[3]
+                    if df_withings.shape[1] > 3
+                    else df_withings.columns[-1]
+                )
+            )
+        )
     )
 
     df_w_daily = (
         df_withings.groupby('Date_YYYY_MM_DD')
-        .agg({weight_col: 'mean', pwv_col: 'mean'})
+        .agg({weight_col: 'mean', pwv_col: 'mean', fat_col: 'mean'})
         .reset_index()
     )
 
     withings_mapping = {
         weight_col: 'Daily_Morning_Weight_kg',
         pwv_col: 'Pulse_Wave_Velocity_m_s',
+        fat_col: 'Daily_Body_Fat_pct',
     }
     df_w_daily = df_w_daily.rename(columns=withings_mapping)
 
@@ -313,6 +337,15 @@ def generate_quantified_self_csv(
             .round(2)
         )
 
+    # Compute 7-day average for Body Fat Percentage
+    if 'Daily_Body_Fat_pct' in df.columns:
+        df['Body_Fat_7d_Average_pct'] = (
+            df['Daily_Body_Fat_pct']
+            .rolling(window=7, min_periods=1)
+            .mean()
+            .round(2)
+        )
+
     # 8. Filter, Sort Descending, and Select Target Columns
     df_export = df.tail(730).copy()
     df_export['_sort_date'] = pd.to_datetime(
@@ -323,6 +356,7 @@ def generate_quantified_self_csv(
     ).reset_index(drop=True)
     df_export = df_export.drop(columns=['_sort_date'])
 
+    # Body_Fat_7d_Average_pct added to penultimate column position (just before Medical_Notes)
     required_columns = [
         'Date_YYYY_MM_DD',
         'Time_in_Home_Zone_hours',
@@ -347,6 +381,7 @@ def generate_quantified_self_csv(
         'Resting_Diastolic_Blood_Pressure_mmHg',
         'Pulse_Wave_Velocity_m_s',
         'Overnight_Respiration_Rate_brpm',
+        'Body_Fat_7d_Average_pct',
         'Medical_Notes',
     ]
 
@@ -392,6 +427,7 @@ def generate_quantified_self_csv(
         ),
         'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
         'Overnight_Respiration_Rate_brpm': 'Overnight Respiration Rate (brpm)',
+        'Body_Fat_7d_Average_pct': 'Body Fat % - Withings Body Scan US Army Calibrated 7d Avg',
         'Medical_Notes': 'Medical Note',
     }
 
@@ -436,6 +472,7 @@ def generate_quantified_self_csv(
         'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline',
         'Weight - Morning 7d Avg (kg)',
         'Pulse Wave Velocity (m/s)',
+        'Body Fat % - Withings Body Scan US Army Calibrated 7d Avg',
     ]
     for col in float_2dp_columns:
         if col in df_export.columns:
