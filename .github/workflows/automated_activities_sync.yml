@@ -13,7 +13,8 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 20
+
     defaults:
       run:
         shell: pwsh
@@ -50,6 +51,7 @@ jobs:
         oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
         oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
         tags: tag:github-actions
+        args: --accept-dns=false
 
     - name: Route Traffic through Exit Node (With Retries)
       shell: bash
