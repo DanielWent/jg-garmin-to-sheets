@@ -117,13 +117,11 @@ def generate_quantified_self_csv(
     if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:
         df_g['Active_Calories'] = df_garmin.iloc[:, 45]
 
-    # Average Awake Hours Garmin Stress Score (Column BD / 55)
     if 'Garmin_Avg_Awake_Stress_Score' not in df_g.columns and df_garmin.shape[1] > 55:
         df_g['Garmin_Avg_Awake_Stress_Score'] = pd.to_numeric(
             df_garmin.iloc[:, 55], errors='coerce'
         )
 
-    # Overnight Respiration Rate (brpm) (Column BE / 56)
     if (
         'Overnight_Respiration_Rate_brpm' not in df_g.columns
         and df_garmin.shape[1] > 56
@@ -180,8 +178,6 @@ def generate_quantified_self_csv(
             else df_withings.columns[3]
         )
     )
-
-    # Locate Body Fat column (Column D / Index 3 in drw_withings_bodyscan_data.csv)
     fat_col = (
         'Fat Ratio (%)'
         if 'Fat Ratio (%)' in df_withings.columns
@@ -283,6 +279,9 @@ def generate_quantified_self_csv(
         'Daily_Activity_Training_Load'
     ].fillna(0)
 
+    # Convert date for accurate time-aware EWMAs
+    df['Date_Datetime'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
+
     # 7. Derived Metrics & Precision
     if 'Lactate_Threshold_Pace' in df.columns:
         df['Lactate_Threshold_Pace_decimal_min_km'] = df[
@@ -305,15 +304,16 @@ def generate_quantified_self_csv(
             time_to_decimal
         )
 
-    if (
-        'Sleep_Need_min' in df.columns
-        and 'Overnight_Sleep_Duration_min' in df.columns
-    ):
-        daily_sleep_deficit = (
-            df['Sleep_Need_min'] - df['Overnight_Sleep_Duration_min']
-        )
+    # Structural Fix 1: Independent physiological baseline (avoids Garmin circularity)
+    if 'Overnight_Sleep_Duration_min' in df.columns:
+        TARGET_SLEEP_MIN = 480
+        # Prevent infinite "sleep banking" via .clip(lower=0)
+        daily_sleep_deficit = (TARGET_SLEEP_MIN - df['Overnight_Sleep_Duration_min']).clip(lower=0)
+        
+        # Structural Fix 4: Time-aware EWMA calculation (avoids gap leakage)
         df['EWMA_Sleep_Debt_min'] = daily_sleep_deficit.ewm(
-            halflife=4, adjust=False
+            halflife=pd.Timedelta(days=4), 
+            times=df['Date_Datetime']
         ).mean()
 
     if 'Overnight_Average_HRV_RMSSD_ms' in df.columns:
@@ -322,12 +322,20 @@ def generate_quantified_self_csv(
             .rolling(window=7, min_periods=1)
             .mean()
         )
+        # Structural Fix: Shift window by 7 to isolate recent historical norm
         shifted_hrv = df['Overnight_Average_HRV_RMSSD_ms'].shift(7)
         shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
         shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
         df[
             'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'
         ] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)
+
+        # Recovery Component: Daily HRV Z-Score and time-aware 2-Day EWMA
+        df['Daily_HRV_ZScore'] = (df['Overnight_Average_HRV_RMSSD_ms'] - shifted_60d_mean) / shifted_60d_std
+        df['EWMA_HRV_ZScore'] = df['Daily_HRV_ZScore'].ewm(
+            halflife=pd.Timedelta(days=2), 
+            times=df['Date_Datetime']
+        ).mean()
 
     if 'Daily_Morning_Weight_kg' in df.columns:
         df['Daily_Morning_Weight_7d_Average_kg'] = (
@@ -337,7 +345,6 @@ def generate_quantified_self_csv(
             .round(2)
         )
 
-    # Compute 7-day average for Body Fat Percentage
     if 'Daily_Body_Fat_pct' in df.columns:
         df['Body_Fat_7d_Average_pct'] = (
             df['Daily_Body_Fat_pct']
@@ -345,6 +352,65 @@ def generate_quantified_self_csv(
             .mean()
             .round(2)
         )
+
+    # Structural Fix 3: Circadian Alignment without reference leakage
+    if 'Sleep_Start_Decimal' in df.columns:
+        # Shift 1 prevents the current night from determining its own reference median
+        df['Sleep_Start_14d_Median'] = df['Sleep_Start_Decimal'].rolling(window=14, min_periods=7).median().shift(1)
+        df['Circadian_Difference_hours'] = (df['Sleep_Start_Decimal'] - df['Sleep_Start_14d_Median']).abs()
+
+    # Composite Recovery Score Construction
+    if (
+        'EWMA_HRV_ZScore' in df.columns
+        and 'EWMA_Sleep_Debt_min' in df.columns
+        and 'Circadian_Difference_hours' in df.columns
+    ):
+        # Structural Fix 2: HRV Raw (0.0 to 1.0) - Recalibrated so normal HRV = 0.90
+        h_raw = np.where(
+            pd.isna(df['EWMA_HRV_ZScore']), np.nan,
+            np.where(
+                df['EWMA_HRV_ZScore'] >= 1.0, 1.0,
+                np.where(
+                    df['EWMA_HRV_ZScore'] >= 0, 0.90 + (df['EWMA_HRV_ZScore'] / 1.0) * 0.10,
+                    np.where(
+                        df['EWMA_HRV_ZScore'] <= -1.5, 0.0,
+                        (df['EWMA_HRV_ZScore'] + 1.5) / 1.5 * 0.90
+                    )
+                )
+            )
+        )
+
+        # 2. Sleep Debt Raw (0.0 to 1.0)
+        d_raw = np.where(
+            pd.isna(df['EWMA_Sleep_Debt_min']), np.nan,
+            np.where(
+                df['EWMA_Sleep_Debt_min'] <= 0, 1.0,
+                np.where(
+                    df['EWMA_Sleep_Debt_min'] >= 90, 0.0,
+                    (90 - df['EWMA_Sleep_Debt_min']) / 90.0
+                )
+            )
+        )
+
+        # 3. Circadian Raw (0.0 to 1.0)
+        c_raw = np.where(
+            pd.isna(df['Circadian_Difference_hours']), np.nan,
+            np.where(
+                df['Circadian_Difference_hours'] <= 0.5, 1.0,
+                np.where(
+                    df['Circadian_Difference_hours'] >= 1.5, 0.0,
+                    (1.5 - df['Circadian_Difference_hours']) / 1.0
+                )
+            )
+        )
+
+        # Apply Decoupled Floors
+        h_floored = 0.25 + (0.75 * h_raw)
+        d_floored = 0.09 + (0.91 * d_raw)
+        c_floored = 0.03 + (0.97 * c_raw)
+
+        # Weighted Geometric Mean Calculation
+        df['Composite_Recovery_Score'] = 100 * (h_floored ** 0.5) * (d_floored ** 0.3) * (c_floored ** 0.2)
 
     # 8. Filter, Sort Descending, and Select Target Columns
     df_export = df.tail(730).copy()
@@ -356,7 +422,6 @@ def generate_quantified_self_csv(
     ).reset_index(drop=True)
     df_export = df_export.drop(columns=['_sort_date'])
 
-    # Body_Fat_7d_Average_pct added to penultimate column position (just before Medical_Notes)
     required_columns = [
         'Date_YYYY_MM_DD',
         'Time_in_Home_Zone_hours',
@@ -382,6 +447,7 @@ def generate_quantified_self_csv(
         'Pulse_Wave_Velocity_m_s',
         'Overnight_Respiration_Rate_brpm',
         'Body_Fat_7d_Average_pct',
+        'Composite_Recovery_Score',
         'Medical_Notes',
     ]
 
@@ -428,6 +494,7 @@ def generate_quantified_self_csv(
         'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
         'Overnight_Respiration_Rate_brpm': 'Overnight Respiration Rate (brpm)',
         'Body_Fat_7d_Average_pct': 'Body Fat % - Withings Body Scan US Army Calibrated 7d Avg',
+        'Composite_Recovery_Score': 'Composite Recovery Score (0-100)',
         'Medical_Notes': 'Medical Note',
     }
 
@@ -447,6 +514,7 @@ def generate_quantified_self_csv(
         'HRV RMSSD - Overnight (ms)',
         'Blood Pressure Systolic - Resting (mmHg)',
         'Blood Pressure Diastolic - Resting (mmHg)',
+        'Composite Recovery Score (0-100)',
     ]
     for col in integer_columns:
         if col in df_export.columns:
