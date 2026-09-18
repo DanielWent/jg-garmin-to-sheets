@@ -306,26 +306,22 @@ def generate_quantified_self_csv(
             time_to_decimal
         )
 
-    # Architectural Pillar 1: Accumulated Sleep History (EWMA Sleep Debt)
-    # Uses dynamic Sleep Need rather than fixed 480 minutes
+    # Architectural Pillar 1: Accumulated Sleep Deficit (EWMA)
     if 'Overnight_Sleep_Duration_min' in df.columns and 'Sleep_Need_min' in df.columns:
-        # Fill missing Sleep Need with 480 as a fallback
         sleep_target = df['Sleep_Need_min'].fillna(480)
         daily_sleep_deficit = (sleep_target - df['Overnight_Sleep_Duration_min']).clip(lower=0)
         
-        df['EWMA_Sleep_Debt_min'] = daily_sleep_deficit.ewm(
+        df['EWMA_Sleep_Deficit_min'] = daily_sleep_deficit.ewm(
             halflife=pd.Timedelta(days=4), 
             times=df['Date_Datetime']
         ).mean()
 
     # Resting Heart Rate Baseline and Z-Score Calculation
     if 'Overnight_Resting_Heart_Rate_bpm' in df.columns:
-        # Shift 7 prevents current anomalous values from skewing the recent historical norm
         shifted_rhr = df['Overnight_Resting_Heart_Rate_bpm'].shift(7)
         shifted_60d_rhr_mean = shifted_rhr.rolling(window=60, min_periods=30).mean()
         shifted_60d_rhr_std = shifted_rhr.rolling(window=60, min_periods=30).std()
         
-        # Z-Score (Note: High Z-score = High RHR = Worse Recovery)
         df['Daily_RHR_ZScore'] = (df['Overnight_Resting_Heart_Rate_bpm'] - shifted_60d_rhr_mean) / shifted_60d_rhr_std
         df['EWMA_RHR_ZScore'] = df['Daily_RHR_ZScore'].ewm(
             halflife=pd.Timedelta(days=2), 
@@ -376,14 +372,14 @@ def generate_quantified_self_csv(
     if (
         'EWMA_HRV_ZScore' in df.columns
         and 'EWMA_RHR_ZScore' in df.columns
-        and 'EWMA_Sleep_Debt_min' in df.columns
+        and 'EWMA_Sleep_Deficit_min' in df.columns
         and 'Garmin_Sleep_Score' in df.columns
         and 'Morning_Max_Body_Battery' in df.columns
         and 'Circadian_Difference_hours' in df.columns
     ):
         # --- Accumulated State Variables (60% Weight) ---
         
-        # 1. Autonomic/CV History (HRV + RHR EWMA)
+        # 1. Autonomic/CV History (HRV + RHR EWMA) combined geometrically 
         h_raw = np.where(pd.isna(df['EWMA_HRV_ZScore']), np.nan, 
                          np.where(df['EWMA_HRV_ZScore'] >= 1.0, 1.0, 
                          np.where(df['EWMA_HRV_ZScore'] >= 0, 0.90 + (df['EWMA_HRV_ZScore'] / 1.0) * 0.10, 
@@ -394,13 +390,11 @@ def generate_quantified_self_csv(
                            np.where(df['EWMA_RHR_ZScore'] >= 2.0, 0.0, 
                            (2.0 - df['EWMA_RHR_ZScore']) / 1.5)))
         
-        a_history_raw = (h_raw * 0.6) + (rhr_raw * 0.4)
+        a_history_raw = (h_raw ** 0.6) * (rhr_raw ** 0.4)
 
-        # 2. Sleep Debt History (EWMA Sleep Debt)
-        s_history_raw = np.where(pd.isna(df['EWMA_Sleep_Debt_min']), np.nan,
-                                 np.where(df['EWMA_Sleep_Debt_min'] <= 0, 1.0,
-                                 np.where(df['EWMA_Sleep_Debt_min'] >= 90, 0.0,
-                                 (90 - df['EWMA_Sleep_Debt_min']) / 90.0)))
+        # 2. Sleep Deficit History (Exponential Decay Penalty)
+        s_history_raw = np.where(pd.isna(df['EWMA_Sleep_Deficit_min']), np.nan,
+                                 np.exp(-df['EWMA_Sleep_Deficit_min'] / 90.0))
 
 
         # --- Acute State Variables (35% Weight) ---
@@ -458,7 +452,7 @@ def generate_quantified_self_csv(
         'Overnight_Sleep_Duration_min',
         'Garmin_Sleep_Score',
         'Sleep_Start_Decimal',
-        'EWMA_Sleep_Debt_min',
+        'EWMA_Sleep_Deficit_min',
         'Overnight_Resting_Heart_Rate_bpm',
         'EWMA_RHR_ZScore',
         'Overnight_Average_HRV_RMSSD_ms',
@@ -502,7 +496,7 @@ def generate_quantified_self_csv(
         'Overnight_Sleep_Duration_min': 'Sleep Duration - Overnight (min)',
         'Garmin_Sleep_Score': 'Sleep Score - Garmin (0-100)',
         'Sleep_Start_Decimal': 'Sleep Start Time (Decimal)',
-        'EWMA_Sleep_Debt_min': 'Sleep Debt - 4d EWMA (min)',
+        'EWMA_Sleep_Deficit_min': 'Sleep Deficit - 4d EWMA (min)',
         'Overnight_Resting_Heart_Rate_bpm': 'Resting Heart Rate - Overnight (bpm)',
         'EWMA_RHR_ZScore': 'Resting HR Z-Score - 2d EWMA vs 60d Baseline',
         'Overnight_Average_HRV_RMSSD_ms': 'HRV RMSSD - Overnight (ms)',
@@ -536,7 +530,7 @@ def generate_quantified_self_csv(
         'Lactate Threshold HR (bpm)',
         'Sleep Duration - Overnight (min)',
         'Sleep Score - Garmin (0-100)',
-        'Sleep Debt - 4d EWMA (min)',
+        'Sleep Deficit - 4d EWMA (min)',
         'Resting Heart Rate - Overnight (bpm)',
         'HRV RMSSD - Overnight (ms)',
         'Morning Max Body Battery (0-100)',
