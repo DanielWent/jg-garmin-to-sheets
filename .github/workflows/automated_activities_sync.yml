@@ -2,8 +2,8 @@ name: Auto Sync - Activities
 
 on:
   schedule:
+    # 02:55 UTC (02:55 GMT in winter, 03:55 BST in summer)
     - cron: '55 2 * * *'
-      timezone: Europe/London
   workflow_dispatch:
 
 concurrency:
@@ -25,11 +25,8 @@ jobs:
       shell: bash
       run: |
         export TZ="Europe/London"
-        
-        # Pull data from a rolling 3-day window up to the current day
         START_DATE=$(date -d "3 days ago" +%Y-%m-%d)
         END_DATE=$(date +%Y-%m-%d)
-        
         echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
         echo "end_date=$END_DATE" >> $GITHUB_OUTPUT
 
@@ -53,22 +50,26 @@ jobs:
         tags: tag:github-actions
         args: --accept-dns=false
 
-    - name: Route Traffic through Exit Node (With Retries)
+    - name: Route Traffic through Exit Node (With Verification)
       shell: bash
       run: |
         echo "Attempting to route through Tailscale exit node..."
         
         for i in {1..3}; do
           if sudo tailscale set --exit-node=${{ secrets.TAILSCALE_EXIT_NODE }} --exit-node-allow-lan-access=true --accept-routes --accept-dns=false; then
-            echo "Successfully connected to exit node."
-            exit 0
+            # Verify that external traffic actually routes out through the node
+            EXIT_IP=$(curl -s --max-time 5 https://api.ipify.org || true)
+            if [ -n "$EXIT_IP" ]; then
+              echo "Successfully routing traffic via exit node (Egress IP: $EXIT_IP)."
+              exit 0
+            fi
           fi
-          echo "Attempt $i failed. Waiting 15 seconds before retrying..."
+          echo "Attempt $i failed or traffic not routing. Retrying in 15s..."
           sleep 15
         done
         
-        echo "CRITICAL: Could not connect to the exit node after 3 attempts."
-        echo "Aborting workflow to prevent exposing the GitHub runner IP to Garmin and risking account locks."
+        echo "CRITICAL: Could not verify connectivity via exit node after 3 attempts."
+        echo "Aborting to avoid exposing GitHub runner IP to Garmin."
         exit 1
 
     - name: Restore Garmin Sessions Cache
@@ -89,6 +90,7 @@ jobs:
             $garthDir = Join-Path $HOME ".garth"
             if (-not (Test-Path $garthDir)) { New-Item -ItemType Directory -Path $garthDir -Force }
             tar -xf sessions.tar -C $garthDir
+            Remove-Item sessions.tar -ErrorAction SilentlyContinue
             Write-Host "Session cache restored."
         }
 
@@ -133,7 +135,7 @@ jobs:
         python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile ALL --output-type drive --data-type "activities"
 
     - name: Encrypt Garmin Sessions
-      if: always()
+      if: success()
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
@@ -144,10 +146,11 @@ jobs:
             if (-not (Test-Path $encDir)) { New-Item -ItemType Directory -Path $encDir -Force }
             $encFile = Join-Path $encDir "sessions.tar.enc"
             openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in sessions.tar -out $encFile -k $env:GARMIN_SESSION_KEY
+            Remove-Item sessions.tar -ErrorAction SilentlyContinue
         }
 
     - name: Save Garmin Sessions Cache
-      if: always()
+      if: success()
       uses: actions/cache/save@v4
       with:
         path: ~/.garth_encrypted
