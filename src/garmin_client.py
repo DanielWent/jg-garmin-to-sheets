@@ -259,6 +259,32 @@ class GarminClient:
         self._sleep_cache[target_iso] = data
         return data
 
+    async def _fetch_web_stress_data(self, target_iso: str) -> Optional[Dict[str, Any]]:
+        """Fetches untruncated historical stress data via the modern Garmin Web API gateway."""
+        loop = asyncio.get_event_loop()
+        def call_gc_api():
+            try:
+                resp = self.client.garth.get(
+                    "connect.garmin.com", 
+                    f"/gc-api/wellness-service/wellness/dailyStress/{target_iso}"
+                )
+                if hasattr(resp, "status_code"):
+                    if resp.status_code == 429:
+                        _check_for_429("429 Too Many Requests")
+                    if resp.status_code == 200:
+                        return resp.json()
+                    logger.warning(f"[{target_iso}] gc-api stress returned status {resp.status_code}")
+                    return None
+                elif isinstance(resp, dict):
+                    return resp
+                return None
+            except Exception as e:
+                _check_for_429(e)
+                logger.warning(f"[{target_iso}] Failed fetching gc-api stress: {e}")
+                return None
+
+        return await loop.run_in_executor(None, call_gc_api)
+
     def _find_training_load(self, data: Any) -> Optional[int]:
         if not data: return None
         stack = [data]
@@ -465,7 +491,20 @@ class GarminClient:
                 
                 readiness_data = await safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
 
+                # Primary fetch via standard client
                 stress_data = await safe_fetch("Stress", loop.run_in_executor(None, self.client.get_stress_data, target_iso))
+
+                # If standard mobile gateway returned empty stressValuesArray, query modern web gateway (/gc-api)
+                if not stress_data or not stress_data.get('stressValuesArray'):
+                    logger.info(f"[{target_iso}] Mobile gateway stressValuesArray was empty; querying web gateway (/gc-api)...")
+                    web_stress = await self._fetch_web_stress_data(target_iso)
+                    if web_stress and web_stress.get('stressValuesArray'):
+                        stress_data = web_stress
+                        logger.info(f"[{target_iso}] Successfully retrieved {len(web_stress['stressValuesArray'])} epochs via gc-api!")
+                    elif web_stress and (web_stress.get('avgStressLevel') is not None or web_stress.get('overallStressLevel') is not None):
+                        stress_data = web_stress
+                        logger.info(f"[{target_iso}] Retrieved stress summary via gc-api (avg: {web_stress.get('avgStressLevel') or web_stress.get('overallStressLevel')}).")
+
                 next_day_iso = (target_date + timedelta(days=1)).isoformat()
                 try:
                     next_day_sleep_data = await safe_fetch("Next Day Sleep", self._get_sleep_data_cached(next_day_iso))
@@ -991,7 +1030,7 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
 
-            # Fallback for All-Day Stress and durations (Archived/Older Records)
+            # Fallback for All-Day Stress and durations from stress_data if missing in user summary
             if stress_data and isinstance(stress_data, dict):
                 if avg_stress is None:
                     raw_stress = stress_data.get('avgStressLevel') or stress_data.get('overallStressLevel')
