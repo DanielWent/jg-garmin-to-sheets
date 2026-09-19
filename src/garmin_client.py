@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional, List
 import asyncio
 import logging
 import json
-import sys  # <-- ADDED for the kill switch
+import sys
 import garminconnect
 import garth
 from pathlib import Path
@@ -14,7 +14,7 @@ from functools import partial
 
 logger = logging.getLogger(__name__)
 
-# --- NEW: Kill Switch Helper ---
+# --- Kill Switch Helper ---
 def _check_for_429(e):
     """Helper to instantly kill the script if a 429 Too Many Requests is detected."""
     error_str = str(e).lower()
@@ -23,7 +23,6 @@ def _check_for_429(e):
         print("🚨 RATE LIMIT (429) DETECTED! 🚨")
         print("Stopping script immediately to prevent extending the ban.")
         
-        # Attempt to extract response headers if garminconnect exposes them
         response = getattr(e, 'response', getattr(getattr(e, '__cause__', None), 'response', None))
         
         if response is not None:
@@ -36,7 +35,6 @@ def _check_for_429(e):
             print("Default to waiting 24 hours to be safe.")
         print("="*60 + "\n")
         sys.exit(1)
-# -------------------------------
 
 # Full 21-point percentile scale provided by the ACSM guidelines
 PERCENTILES = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 99]
@@ -121,7 +119,6 @@ class GarminClient:
         self.token_file = self.session_dir / "tokens.json"
         
         self.client = garminconnect.Garmin(email, password)
-        # FIX: Instantiate an isolated garth client for each profile to prevent session leakage
         self.client.garth = garth.Client(domain="garmin.com")
         
         self._authenticated = False
@@ -132,7 +129,6 @@ class GarminClient:
         self.user_age = None
         self.user_gender = None
         
-        # Cache for sleep endpoints to prevent repeated API calls
         self._sleep_cache = {}
 
     def save_session(self):
@@ -146,7 +142,6 @@ class GarminClient:
 
     async def authenticate(self):
         loop = asyncio.get_event_loop()
-        # Removed global garth.configure() call here to ensure isolation is maintained.
 
         if self.token_file.exists():
             try:
@@ -160,7 +155,7 @@ class GarminClient:
                 await self._fetch_user_profile_info()
                 return
             except Exception as e:
-                _check_for_429(e) # Kill switch check
+                _check_for_429(e)
                 logger.warning(f"Failed to resume session for {self.profile_name}: {e}")
 
         try:
@@ -190,7 +185,7 @@ class GarminClient:
                     raise MFARequiredException(message="MFA code is required.", mfa_data=self.mfa_ticket_dict)
             raise
         except Exception as e:
-            _check_for_429(e) # Kill switch check
+            _check_for_429(e)
             logger.error(f"Authentication error: {str(e)}")
             raise garminconnect.GarminConnectAuthenticationError(f"Authentication error: {str(e)}") from e
 
@@ -205,7 +200,7 @@ class GarminClient:
                     self.client.display_name = sp["displayName"]
                     logger.info(f"[{self.profile_name}] Successfully locked in display name: {self.client.display_name}")
             except Exception as e:
-                _check_for_429(e) # Kill switch check
+                _check_for_429(e)
                 logger.debug(f"[{self.profile_name}] Could not force-fetch display name: {e}")
 
         if self.manual_name:
@@ -241,7 +236,7 @@ class GarminClient:
                         self.user_age = round((today - dob).days / 365.25, 1)
                     
         except Exception as e:
-            _check_for_429(e) # Kill switch check
+            _check_for_429(e)
             logger.warning(f"Error in _fetch_user_profile_info (fallback): {e}")
 
     async def _fetch_hrv_data(self, target_date_iso: str) -> Optional[Dict[str, Any]]:
@@ -250,7 +245,7 @@ class GarminClient:
                 None, self.client.get_hrv_data, target_date_iso
             )
         except Exception as e:
-            _check_for_429(e) # Kill switch check
+            _check_for_429(e)
             logger.debug(f"Error fetching HRV data: {str(e)}")
             return None
             
@@ -418,7 +413,7 @@ class GarminClient:
                 await asyncio.sleep(0.5)
                 return await coro
             except Exception as e:
-                _check_for_429(e) # Kill switch check
+                _check_for_429(e)
                 logger.warning(f"Failed to fetch {name} for {target_date}: {e}")
                 return None
 
@@ -427,7 +422,7 @@ class GarminClient:
                 await asyncio.sleep(0.5)
                 return await asyncio.get_event_loop().run_in_executor(None, self.client.connectapi, endpoint)
             except Exception as e:
-                _check_for_429(e) # Kill switch check
+                _check_for_429(e)
                 logger.debug(f"Direct fetch for {name} failed: {e}")
                 return None
 
@@ -448,7 +443,6 @@ class GarminClient:
                 task_lactate_speed_url = f"biometric-service/stats/lactateThresholdSpeed/range/{target_iso}/{target_iso}"
                 lactate_params = {'aggregationStrategy': 'LATEST', 'sport': 'RUNNING'}
 
-                # The requests are spaced out sequentially to bypass Cloudflare
                 summary = await safe_fetch("User Summary", loop.run_in_executor(None, self.client.get_user_summary, target_iso))
                 stats = await safe_fetch("Stats", loop.run_in_executor(None, self.client.get_body_composition, target_iso, target_iso))
                 sleep_data = await safe_fetch("Sleep", self._get_sleep_data_cached(target_iso))
@@ -479,8 +473,6 @@ class GarminClient:
                     logger.debug(f"Failed to fetch next day sleep data for {next_day_iso}: {e}")
                     next_day_sleep_data = None
 
-            # Fetch activities unconditionally because we need them to calculate daily totals 
-            # for running, walking, and strength training.
             activities = await safe_fetch("Activities", loop.run_in_executor(None, self.client.get_activities_by_date, target_iso, target_iso))
 
             summary = summary or {}
@@ -628,38 +620,79 @@ class GarminClient:
                         awake_sec = sleep_dto.get('awakeSleepSeconds') or 0
                         sleep_efficiency = round(((sleep_time_seconds - awake_sec) / sleep_time_seconds) * 100)
 
-            avg_waking_stress = None
-            if fetch_summary and stress_data and isinstance(stress_data, dict):
-                stress_values = stress_data.get('stressValuesArray', [])
-                
-                wake_ts = 0
-                if sleep_dto:
-                    wake_ts = sleep_dto.get('sleepEndTimestampGMT') or sleep_dto.get('sleepEndTimestampLocal') or 0
-                    
-                bedtime_timestamp = None
-                if next_day_sleep_data:
-                    next_sleep_dto = next_day_sleep_data.get('dailySleepDTO')
-                    if not next_sleep_dto and isinstance(next_day_sleep_data, dict):
-                        next_sleep_dto = next_day_sleep_data
-                    if next_sleep_dto:
-                        bedtime_timestamp = next_sleep_dto.get('sleepStartTimestampGMT') or next_sleep_dto.get('sleepStartTimestampLocal')
-
-                valid_stresses = []
-                for item in stress_values:
-                    if isinstance(item, list) and len(item) >= 2:
-                        ts, val = item[0], item[1]
-                        if val is not None and val >= 0:
-                            if ts >= wake_ts:
-                                if bedtime_timestamp is not None:
-                                    if ts < bedtime_timestamp:
-                                        valid_stresses.append(val)
-                                else:
-                                    valid_stresses.append(val)
-                
-                if valid_stresses:
-                    avg_waking_stress = round(sum(valid_stresses) / len(valid_stresses), 1)
+            # Diagnostic logging for Sleep Score
+            if sleep_score is None:
+                if not sleep_data:
+                    logger.warning(f"[{target_date}] Sleep Score: sleep_data payload is empty/null from Garmin API.")
+                elif not sleep_dto:
+                    logger.warning(f"[{target_date}] Sleep Score: 'dailySleepDTO' structure missing in sleep_data.")
                 else:
-                    avg_waking_stress = None
+                    logger.warning(f"[{target_date}] Sleep Score: sleep_dto present, but sleepScores.overall.value is null.")
+            else:
+                logger.info(f"[{target_date}] Sleep Score populated: {sleep_score}")
+
+            # Diagnostic logging & Calculation for Waking Average Stress
+            avg_waking_stress = None
+            if fetch_summary:
+                if not stress_data or not isinstance(stress_data, dict):
+                    logger.warning(f"[{target_date}] Waking Stress: stress_data endpoint returned empty or non-dict.")
+                else:
+                    stress_values = stress_data.get('stressValuesArray', [])
+                    if not stress_values:
+                        logger.warning(f"[{target_date}] Waking Stress: 'stressValuesArray' is empty in stress_data.")
+                    else:
+                        wake_ts = 0
+                        if sleep_dto:
+                            wake_ts = sleep_dto.get('sleepEndTimestampGMT') or sleep_dto.get('sleepEndTimestampLocal') or 0
+                            if not wake_ts:
+                                logger.debug(f"[{target_date}] Waking Stress: sleep_dto present but wake timestamp is 0.")
+
+                        bedtime_timestamp = None
+                        if next_day_sleep_data:
+                            next_sleep_dto = next_day_sleep_data.get('dailySleepDTO')
+                            if not next_sleep_dto and isinstance(next_day_sleep_data, dict):
+                                next_sleep_dto = next_day_sleep_data
+                            if next_sleep_dto:
+                                bedtime_timestamp = next_sleep_dto.get('sleepStartTimestampGMT') or next_sleep_dto.get('sleepStartTimestampLocal')
+
+                        if bedtime_timestamp is not None and wake_ts > 0 and bedtime_timestamp <= wake_ts:
+                            logger.warning(
+                                f"[{target_date}] Waking Stress: bedtime_timestamp ({bedtime_timestamp}) <= wake_ts ({wake_ts}). Ignoring bedtime constraint to prevent zero epochs."
+                            )
+                            bedtime_timestamp = None
+
+                        valid_stresses = []
+                        skipped_negative = 0
+                        skipped_before_wake = 0
+                        skipped_after_bed = 0
+
+                        for item in stress_values:
+                            if isinstance(item, list) and len(item) >= 2:
+                                ts, val = item[0], item[1]
+                                if val is None or val < 0:
+                                    skipped_negative += 1
+                                    continue
+                                if wake_ts > 0 and ts < wake_ts:
+                                    skipped_before_wake += 1
+                                    continue
+                                if bedtime_timestamp is not None and ts >= bedtime_timestamp:
+                                    skipped_after_bed += 1
+                                    continue
+                                valid_stresses.append(val)
+
+                        if valid_stresses:
+                            avg_waking_stress = round(sum(valid_stresses) / len(valid_stresses), 1)
+                            logger.info(
+                                f"[{target_date}] Waking Stress populated: {avg_waking_stress} "
+                                f"(valid: {len(valid_stresses)}, unmeasurable/negative: {skipped_negative}, "
+                                f"before wake: {skipped_before_wake}, after bedtime: {skipped_after_bed})"
+                            )
+                        else:
+                            logger.warning(
+                                f"[{target_date}] Waking Stress evaluated to None! "
+                                f"Total epochs: {len(stress_values)}, Unmeasurable/Active: {skipped_negative}, "
+                                f"Before wake ({wake_ts}): {skipped_before_wake}, After bedtime ({bedtime_timestamp}): {skipped_after_bed}"
+                            )
 
             overnight_hrv_value = None
             hrv_status_value = None
@@ -958,6 +991,23 @@ class GarminClient:
                     except (ValueError, TypeError):
                         floors = raw_floors
 
+            # Fallback for All-Day Stress and durations (Archived/Older Records)
+            if stress_data and isinstance(stress_data, dict):
+                if avg_stress is None:
+                    raw_stress = stress_data.get('avgStressLevel') or stress_data.get('overallStressLevel')
+                    if raw_stress is not None and raw_stress >= 0:
+                        avg_stress = raw_stress
+                        logger.info(f"[{target_date}] Populated avg_stress from stress_data fallback: {avg_stress}")
+
+                if rest_stress_min is None and stress_data.get('restStressDuration') is not None:
+                    rest_stress_min = round(stress_data['restStressDuration'] / 60, 1)
+                if low_stress_min is None and stress_data.get('lowStressDuration') is not None:
+                    low_stress_min = round(stress_data['lowStressDuration'] / 60, 1)
+                if med_stress_min is None and stress_data.get('mediumStressDuration') is not None:
+                    med_stress_min = round(stress_data['mediumStressDuration'] / 60, 1)
+                if high_stress_min is None and stress_data.get('highStressDuration') is not None:
+                    high_stress_min = round(stress_data['highStressDuration'] / 60, 1)
+
             vo2_run = None
             vo2_cycle = None
             train_phrase = None
@@ -1131,9 +1181,7 @@ class GarminClient:
                 activities=processed_activities
             )
             
-            # Save token to ensure auto-refreshed tokens are written back to disk securely
             self.save_session()
-            
             return metrics
 
         except Exception as e:
