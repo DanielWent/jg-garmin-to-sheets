@@ -264,8 +264,9 @@ class GarminClient:
         loop = asyncio.get_event_loop()
         def call_gc_api():
             try:
+                # Pass 'connect' so Garth constructs https://connect.garmin.com properly
                 resp = self.client.garth.get(
-                    "connect.garmin.com", 
+                    "connect", 
                     f"/gc-api/wellness-service/wellness/dailyStress/{target_iso}"
                 )
                 if hasattr(resp, "status_code"):
@@ -491,7 +492,7 @@ class GarminClient:
                 
                 readiness_data = await safe_fetch("Training Readiness", loop.run_in_executor(None, self.client.get_training_readiness, target_iso))
 
-                # Primary fetch via standard client
+                # Primary fetch via standard mobile gateway
                 stress_data = await safe_fetch("Stress", loop.run_in_executor(None, self.client.get_stress_data, target_iso))
 
                 # If standard mobile gateway returned empty stressValuesArray, query modern web gateway (/gc-api)
