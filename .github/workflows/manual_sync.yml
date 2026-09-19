@@ -107,6 +107,7 @@ jobs:
         ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "DEBUG"
+        ACTIONS_STEP_DEBUG: "true"
       run: |
         $startDate = "${{ inputs.start_date }}"
         $endDate = "${{ inputs.end_date }}"
@@ -179,6 +180,7 @@ jobs:
         ENABLE_SHEETS_UPDATE: ${{ secrets.ENABLE_SHEETS_UPDATE }}
         PYTHONUNBUFFERED: "1"
         LOG_LEVEL: "DEBUG"
+        ACTIONS_STEP_DEBUG: "true"
       run: |
         $startDate = "${{ inputs.start_date }}"
         $endDate = "${{ inputs.end_date }}"
