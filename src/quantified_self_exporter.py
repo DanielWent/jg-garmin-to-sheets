@@ -348,8 +348,19 @@ def generate_quantified_self_csv(
         df['Sleep_Start_Decimal'] = df['Sleep_Start_Time_HH_MM'].apply(
             time_to_decimal
         )
+        
+    # EWMAs for Sleep Score
+    if 'Garmin_Sleep_Score' in df.columns:
+        df['EWMA_2d_Sleep_Score'] = df['Garmin_Sleep_Score'].ewm(
+            halflife=pd.Timedelta(days=2), 
+            times=df['Date_Datetime']
+        ).mean()
+        df['EWMA_7d_Sleep_Score'] = df['Garmin_Sleep_Score'].ewm(
+            halflife=pd.Timedelta(days=7), 
+            times=df['Date_Datetime']
+        ).mean()
 
-    # Architectural Pillar 1: Accumulated Sleep Deficit (EWMA)
+    # Architectural Pillar 1: Accumulated Sleep Deficit (EWMA) based on Dynamic Need
     if 'Overnight_Sleep_Duration_min' in df.columns and 'Sleep_Need_min' in df.columns:
         sleep_target = df['Sleep_Need_min'].fillna(480)
         daily_sleep_deficit = (sleep_target - df['Overnight_Sleep_Duration_min']).clip(lower=0)
@@ -359,7 +370,7 @@ def generate_quantified_self_csv(
             times=df['Date_Datetime']
         ).mean()
 
-    # Clean Sleep Deficit (14d EWMA)
+    # Clean Sleep Deficit (14d EWMA) based on Static 8h (480 min) Need
     if 'Overnight_Sleep_Duration_min' in df.columns:
         df['Daily_Clean_Sleep_Deficit'] = (480 - df['Overnight_Sleep_Duration_min']).clip(lower=0)
         df['EWMA_14d_Clean_Sleep_Deficit_min'] = df['Daily_Clean_Sleep_Deficit'].ewm(
@@ -478,7 +489,6 @@ def generate_quantified_self_csv(
         c_floored = 0.05 + (0.95 * c_raw)
 
         # Weighted Geometric Mean
-        # S_history (30%), A_history (30%), S_acute (25%), Body Battery (10%), Timing (5%)
         df['Composite_Recovery_Score'] = 100 * (s_history_floored ** 0.30) * (a_history_floored ** 0.30) * (s_acute_floored ** 0.25) * (bb_floored ** 0.10) * (c_floored ** 0.05)
 
     # 8. Filter, Sort Descending, and Select Target Columns
@@ -513,6 +523,8 @@ def generate_quantified_self_csv(
         'Lactate_Threshold_Pace_decimal_min_km',
         'Overnight_Sleep_Duration_min',
         'Garmin_Sleep_Score',
+        'EWMA_2d_Sleep_Score',
+        'EWMA_7d_Sleep_Score',
         'Sleep_Start_Decimal',
         'Sleep_Start_7d_Variance',
         'EWMA_Sleep_Deficit_min',
@@ -544,49 +556,39 @@ def generate_quantified_self_csv(
         'Time_in_Work_Zone_hours': 'Time at Work (hours)',
         'Daily_Steps_Count': 'Step Count - Daily (steps)',
         'Daily_Running_Distance_km': 'Running Distance - Daily (km)',
-        'Garmin_Moderate_Intensity_Minutes': (
-            'Moderate Intensity Minutes - Garmin (min)'
-        ),
-        'Garmin_Vigorous_Intensity_Minutes': (
-            'Vigorous Intensity Minutes - Garmin (min)'
-        ),
+        'Garmin_Moderate_Intensity_Minutes': 'Moderate Intensity Minutes - Garmin (min)',
+        'Garmin_Vigorous_Intensity_Minutes': 'Vigorous Intensity Minutes - Garmin (min)',
         'Garmin_Avg_Awake_Stress_Score': 'Average Awake Hours Garmin Stress Score (0-100)',
-        'Daily_Activity_Training_Load': 'Exercise Load - Daily Sum',
-        'Garmin_7d_Training_Load_Sum': 'Training Load - Garmin 7d Sum',
-        'Garmin_28d_Training_Load_Sum': 'Chronic Training Load (28-Day Sum)',
-        'ACWR': 'Acute-to-Chronic Workload Ratio (ACWR)',
+        'Daily_Activity_Training_Load': 'Exercise Load - Daily Sum (Score)',
+        'Garmin_7d_Training_Load_Sum': 'Training Load - Garmin 7d Sum (Score)',
+        'Garmin_28d_Training_Load_Sum': 'Chronic Training Load - 28-Day Sum (Score)',
+        'ACWR': 'Acute-to-Chronic Workload Ratio - ACWR (7d Acute / 28d Chronic Load Ratio)',
         'Garmin_VO2_Max_ml_kg_min': 'VO2 Max - Garmin (ml/kg/min)',
         'Daily_Avg_Run_HR_bpm': 'Average Heart Rate for Runs (bpm)',
-        'Aerobic_Efficiency_Factor': 'Aerobic Efficiency Factor (Pace/HR)',
+        'Aerobic_Efficiency_Factor': 'Aerobic Efficiency Factor (decimal min/km per bpm)',
         'HR_Zone_2_min': 'Time in HR Zone 2 - Low Aerobic (min)',
         'High_Aerobic_Anaerobic_min': 'Time in HR Zones 3-5 - High Aerobic/Anaerobic (min)',
         'Lactate_Threshold_Heart_Rate_bpm': 'Lactate Threshold HR (bpm)',
-        'Lactate_Threshold_Pace_decimal_min_km': (
-            'Lactate Threshold Pace (decimal min/km)'
-        ),
+        'Lactate_Threshold_Pace_decimal_min_km': 'Lactate Threshold Pace (decimal min/km)',
         'Overnight_Sleep_Duration_min': 'Sleep Duration - Overnight (min)',
         'Garmin_Sleep_Score': 'Sleep Score - Garmin (0-100)',
-        'Sleep_Start_Decimal': 'Sleep Start Time (Decimal)',
-        'Sleep_Start_7d_Variance': 'Sleep Start Time Variance (7d Rolling Std Dev)',
-        'EWMA_Sleep_Deficit_min': 'Sleep Deficit - 4d EWMA (min)',
-        'EWMA_14d_Clean_Sleep_Deficit_min': 'Clean Sleep Deficit - 14d EWMA (min)',
+        'EWMA_2d_Sleep_Score': 'Sleep Score - 2d EWMA (0-100)',
+        'EWMA_7d_Sleep_Score': 'Sleep Score - 7d EWMA (0-100)',
+        'Sleep_Start_Decimal': 'Sleep Start Time (decimal hours)',
+        'Sleep_Start_7d_Variance': 'Sleep Start Time Variance - 7d Rolling Std Dev (hours)',
+        'EWMA_Sleep_Deficit_min': 'Sleep Deficit (Dynamic Garmin Need) - 4d EWMA (min)',
+        'EWMA_14d_Clean_Sleep_Deficit_min': 'Sleep Deficit (Static 8h Need) - 14d EWMA (min)',
         'Overnight_Resting_Heart_Rate_bpm': 'Resting Heart Rate - Overnight (bpm)',
-        'EWMA_RHR_ZScore': 'Resting HR Z-Score - 2d EWMA vs 60d Baseline',
+        'EWMA_RHR_ZScore': 'Resting HR Z-Score - 2d EWMA vs 60d Baseline (SD)',
         'Overnight_Average_HRV_RMSSD_ms': 'HRV RMSSD - Overnight (ms)',
-        'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore': (
-            'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline'
-        ),
+        'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore': 'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline (SD)',
         'Morning_Max_Body_Battery': 'Morning Max Body Battery (0-100)',
         'Daily_Morning_Weight_7d_Average_kg': 'Weight - Morning 7d Avg (kg)',
-        'Resting_Systolic_Blood_Pressure_mmHg': (
-            'Blood Pressure Systolic - Resting (mmHg)'
-        ),
-        'Resting_Diastolic_Blood_Pressure_mmHg': (
-            'Blood Pressure Diastolic - Resting (mmHg)'
-        ),
+        'Resting_Systolic_Blood_Pressure_mmHg': 'Blood Pressure Systolic - Resting (mmHg)',
+        'Resting_Diastolic_Blood_Pressure_mmHg': 'Blood Pressure Diastolic - Resting (mmHg)',
         'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
-        'Overnight_Respiration_Rate_brpm': 'Overnight Respiration Rate (brpm)',
-        'Body_Fat_7d_Average_pct': 'Body Fat % - Withings Body Scan US Army Calibrated 7d Avg',
+        'Overnight_Respiration_Rate_brpm': 'Overnight Respiration Rate (breaths/min)',
+        'Body_Fat_7d_Average_pct': 'Body Fat - Withings Body Scan US Army Calibrated 7d Avg (%)',
         'Composite_Recovery_Score': 'Composite Recovery Score (0-100)',
         'Medical_Notes': 'Medical Note',
     }
@@ -599,17 +601,17 @@ def generate_quantified_self_csv(
         'Step Count - Daily (steps)',
         'Moderate Intensity Minutes - Garmin (min)',
         'Vigorous Intensity Minutes - Garmin (min)',
-        'Exercise Load - Daily Sum',
-        'Training Load - Garmin 7d Sum',
-        'Chronic Training Load (28-Day Sum)',
+        'Exercise Load - Daily Sum (Score)',
+        'Training Load - Garmin 7d Sum (Score)',
+        'Chronic Training Load - 28-Day Sum (Score)',
         'Average Heart Rate for Runs (bpm)',
         'Time in HR Zone 2 - Low Aerobic (min)',
         'Time in HR Zones 3-5 - High Aerobic/Anaerobic (min)',
         'Lactate Threshold HR (bpm)',
         'Sleep Duration - Overnight (min)',
         'Sleep Score - Garmin (0-100)',
-        'Sleep Deficit - 4d EWMA (min)',
-        'Clean Sleep Deficit - 14d EWMA (min)',
+        'Sleep Deficit (Dynamic Garmin Need) - 4d EWMA (min)',
+        'Sleep Deficit (Static 8h Need) - 14d EWMA (min)',
         'Resting Heart Rate - Overnight (bpm)',
         'HRV RMSSD - Overnight (ms)',
         'Morning Max Body Battery (0-100)',
@@ -628,7 +630,9 @@ def generate_quantified_self_csv(
         'Time at Work (hours)',
         'VO2 Max - Garmin (ml/kg/min)',
         'Average Awake Hours Garmin Stress Score (0-100)',
-        'Overnight Respiration Rate (brpm)',
+        'Overnight Respiration Rate (breaths/min)',
+        'Sleep Score - 2d EWMA (0-100)',
+        'Sleep Score - 7d EWMA (0-100)',
     ]
     for col in float_1dp_columns:
         if col in df_export.columns:
@@ -636,16 +640,16 @@ def generate_quantified_self_csv(
 
     float_2dp_columns = [
         'Running Distance - Daily (km)',
-        'Acute-to-Chronic Workload Ratio (ACWR)',
-        'Aerobic Efficiency Factor (Pace/HR)',
+        'Acute-to-Chronic Workload Ratio - ACWR (7d Acute / 28d Chronic Load Ratio)',
+        'Aerobic Efficiency Factor (decimal min/km per bpm)',
         'Lactate Threshold Pace (decimal min/km)',
-        'Sleep Start Time (Decimal)',
-        'Sleep Start Time Variance (7d Rolling Std Dev)',
-        'Resting HR Z-Score - 2d EWMA vs 60d Baseline',
-        'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline',
+        'Sleep Start Time (decimal hours)',
+        'Sleep Start Time Variance - 7d Rolling Std Dev (hours)',
+        'Resting HR Z-Score - 2d EWMA vs 60d Baseline (SD)',
+        'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline (SD)',
         'Weight - Morning 7d Avg (kg)',
         'Pulse Wave Velocity (m/s)',
-        'Body Fat % - Withings Body Scan US Army Calibrated 7d Avg',
+        'Body Fat - Withings Body Scan US Army Calibrated 7d Avg (%)',
     ]
     for col in float_2dp_columns:
         if col in df_export.columns:
