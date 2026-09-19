@@ -146,14 +146,42 @@ def generate_quantified_self_csv(
     df_activities['Date_YYYY_MM_DD'] = parse_to_iso_date(
         df_activities[act_date_col]
     )
-    df_a_daily = (
-        df_activities.groupby('Date_YYYY_MM_DD')
-        .agg({'Activity Training Load': 'sum'})
-        .reset_index()
-    )
-    df_a_daily = df_a_daily.rename(
-        columns={'Activity Training Load': 'Daily_Activity_Training_Load'}
-    )
+    
+    # Calculate High Aerobic / Anaerobic Minutes
+    hr_cols = [c for c in ['HR Zone 3 (min)', 'HR Zone 4 (min)', 'HR Zone 5 (min)'] if c in df_activities.columns]
+    df_activities['High_Aerobic_Anaerobic_min'] = df_activities[hr_cols].sum(axis=1) if hr_cols else np.nan
+    zone2_col = 'HR Zone 2 (min)' if 'HR Zone 2 (min)' in df_activities.columns else None
+
+    # Filter for Running activities to calculate HR and Pace averages
+    runs_mask = df_activities['Activity Type'].astype(str).str.contains('running', case=False, na=False)
+    df_runs = df_activities[runs_mask].copy()
+    
+    if 'Avg Pace (min/km)' in df_runs.columns:
+        df_runs['Run_Pace_Decimal'] = df_runs['Avg Pace (min/km)'].apply(convert_pace_to_decimal)
+    else:
+        df_runs['Run_Pace_Decimal'] = np.nan
+        
+    avg_hr_col = 'Avg HR (bpm)' if 'Avg HR (bpm)' in df_runs.columns else None
+    
+    df_runs_daily = df_runs.groupby('Date_YYYY_MM_DD').agg({
+        avg_hr_col: 'mean' if avg_hr_col else lambda x: np.nan,
+        'Run_Pace_Decimal': 'mean'
+    }).reset_index().rename(columns={
+        avg_hr_col: 'Daily_Avg_Run_HR_bpm',
+        'Run_Pace_Decimal': 'Daily_Avg_Run_Pace_decimal'
+    })
+
+    agg_dict = {'Activity Training Load': 'sum', 'High_Aerobic_Anaerobic_min': 'sum'}
+    if zone2_col:
+        agg_dict[zone2_col] = 'sum'
+
+    df_a_daily = df_activities.groupby('Date_YYYY_MM_DD').agg(agg_dict).reset_index()
+    df_a_daily = df_a_daily.rename(columns={
+        'Activity Training Load': 'Daily_Activity_Training_Load',
+        zone2_col: 'HR_Zone_2_min'
+    })
+    
+    df_a_daily = pd.merge(df_a_daily, df_runs_daily, on='Date_YYYY_MM_DD', how='left')
 
     # 3. Process Withings Data
     date_col_w = next(
@@ -259,9 +287,14 @@ def generate_quantified_self_csv(
     df_z_daily = df_zones.rename(columns=zone_mapping)[avail_zone_cols]
 
     # 6. Merge All Datasets
+    cols_to_merge = ['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load']
+    for col in ['HR_Zone_2_min', 'High_Aerobic_Anaerobic_min', 'Daily_Avg_Run_HR_bpm', 'Daily_Avg_Run_Pace_decimal']:
+        if col in df_a_daily.columns:
+            cols_to_merge.append(col)
+            
     df = pd.merge(
         df_g,
-        df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load']],
+        df_a_daily[cols_to_merge],
         on='Date_YYYY_MM_DD',
         how='outer',
     )
@@ -285,6 +318,16 @@ def generate_quantified_self_csv(
     df['Date_Datetime'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
 
     # 7. Derived Metrics & Precision
+    
+    # 28-Day Load and ACWR
+    df['Garmin_28d_Training_Load_Sum'] = df['Daily_Activity_Training_Load'].rolling(window=28, min_periods=7).sum()
+    if 'Garmin_7d_Training_Load_Sum' in df.columns:
+        df['ACWR'] = df['Garmin_7d_Training_Load_Sum'] / df['Garmin_28d_Training_Load_Sum']
+        
+    # Aerobic Efficiency Factor
+    if 'Daily_Avg_Run_Pace_decimal' in df.columns and 'Daily_Avg_Run_HR_bpm' in df.columns:
+        df['Aerobic_Efficiency_Factor'] = df['Daily_Avg_Run_Pace_decimal'] / df['Daily_Avg_Run_HR_bpm']
+        
     if 'Lactate_Threshold_Pace' in df.columns:
         df['Lactate_Threshold_Pace_decimal_min_km'] = df[
             'Lactate_Threshold_Pace'
@@ -315,6 +358,18 @@ def generate_quantified_self_csv(
             halflife=pd.Timedelta(days=4), 
             times=df['Date_Datetime']
         ).mean()
+
+    # Clean Sleep Deficit (14d EWMA)
+    if 'Overnight_Sleep_Duration_min' in df.columns:
+        df['Daily_Clean_Sleep_Deficit'] = (480 - df['Overnight_Sleep_Duration_min']).clip(lower=0)
+        df['EWMA_14d_Clean_Sleep_Deficit_min'] = df['Daily_Clean_Sleep_Deficit'].ewm(
+            halflife=pd.Timedelta(days=14), 
+            times=df['Date_Datetime']
+        ).mean()
+
+    # Sleep Start Time Variance (7d Rolling Std Dev)
+    if 'Sleep_Start_Decimal' in df.columns:
+        df['Sleep_Start_7d_Variance'] = df['Sleep_Start_Decimal'].rolling(window=7, min_periods=3).std()
 
     # Resting Heart Rate Baseline and Z-Score Calculation
     if 'Overnight_Resting_Heart_Rate_bpm' in df.columns:
@@ -445,14 +500,23 @@ def generate_quantified_self_csv(
         'Garmin_Moderate_Intensity_Minutes',
         'Garmin_Vigorous_Intensity_Minutes',
         'Garmin_Avg_Awake_Stress_Score',
+        'Daily_Activity_Training_Load',
         'Garmin_7d_Training_Load_Sum',
+        'Garmin_28d_Training_Load_Sum',
+        'ACWR',
         'Garmin_VO2_Max_ml_kg_min',
+        'Daily_Avg_Run_HR_bpm',
+        'Aerobic_Efficiency_Factor',
+        'HR_Zone_2_min',
+        'High_Aerobic_Anaerobic_min',
         'Lactate_Threshold_Heart_Rate_bpm',
         'Lactate_Threshold_Pace_decimal_min_km',
         'Overnight_Sleep_Duration_min',
         'Garmin_Sleep_Score',
         'Sleep_Start_Decimal',
+        'Sleep_Start_7d_Variance',
         'EWMA_Sleep_Deficit_min',
+        'EWMA_14d_Clean_Sleep_Deficit_min',
         'Overnight_Resting_Heart_Rate_bpm',
         'EWMA_RHR_ZScore',
         'Overnight_Average_HRV_RMSSD_ms',
@@ -487,8 +551,15 @@ def generate_quantified_self_csv(
             'Vigorous Intensity Minutes - Garmin (min)'
         ),
         'Garmin_Avg_Awake_Stress_Score': 'Average Awake Hours Garmin Stress Score (0-100)',
+        'Daily_Activity_Training_Load': 'Exercise Load - Daily Sum',
         'Garmin_7d_Training_Load_Sum': 'Training Load - Garmin 7d Sum',
+        'Garmin_28d_Training_Load_Sum': 'Chronic Training Load (28-Day Sum)',
+        'ACWR': 'Acute-to-Chronic Workload Ratio (ACWR)',
         'Garmin_VO2_Max_ml_kg_min': 'VO2 Max - Garmin (ml/kg/min)',
+        'Daily_Avg_Run_HR_bpm': 'Average Heart Rate for Runs (bpm)',
+        'Aerobic_Efficiency_Factor': 'Aerobic Efficiency Factor (Pace/HR)',
+        'HR_Zone_2_min': 'Time in HR Zone 2 - Low Aerobic (min)',
+        'High_Aerobic_Anaerobic_min': 'Time in HR Zones 3-5 - High Aerobic/Anaerobic (min)',
         'Lactate_Threshold_Heart_Rate_bpm': 'Lactate Threshold HR (bpm)',
         'Lactate_Threshold_Pace_decimal_min_km': (
             'Lactate Threshold Pace (decimal min/km)'
@@ -496,7 +567,9 @@ def generate_quantified_self_csv(
         'Overnight_Sleep_Duration_min': 'Sleep Duration - Overnight (min)',
         'Garmin_Sleep_Score': 'Sleep Score - Garmin (0-100)',
         'Sleep_Start_Decimal': 'Sleep Start Time (Decimal)',
+        'Sleep_Start_7d_Variance': 'Sleep Start Time Variance (7d Rolling Std Dev)',
         'EWMA_Sleep_Deficit_min': 'Sleep Deficit - 4d EWMA (min)',
+        'EWMA_14d_Clean_Sleep_Deficit_min': 'Clean Sleep Deficit - 14d EWMA (min)',
         'Overnight_Resting_Heart_Rate_bpm': 'Resting Heart Rate - Overnight (bpm)',
         'EWMA_RHR_ZScore': 'Resting HR Z-Score - 2d EWMA vs 60d Baseline',
         'Overnight_Average_HRV_RMSSD_ms': 'HRV RMSSD - Overnight (ms)',
@@ -526,11 +599,17 @@ def generate_quantified_self_csv(
         'Step Count - Daily (steps)',
         'Moderate Intensity Minutes - Garmin (min)',
         'Vigorous Intensity Minutes - Garmin (min)',
+        'Exercise Load - Daily Sum',
         'Training Load - Garmin 7d Sum',
+        'Chronic Training Load (28-Day Sum)',
+        'Average Heart Rate for Runs (bpm)',
+        'Time in HR Zone 2 - Low Aerobic (min)',
+        'Time in HR Zones 3-5 - High Aerobic/Anaerobic (min)',
         'Lactate Threshold HR (bpm)',
         'Sleep Duration - Overnight (min)',
         'Sleep Score - Garmin (0-100)',
         'Sleep Deficit - 4d EWMA (min)',
+        'Clean Sleep Deficit - 14d EWMA (min)',
         'Resting Heart Rate - Overnight (bpm)',
         'HRV RMSSD - Overnight (ms)',
         'Morning Max Body Battery (0-100)',
@@ -557,8 +636,11 @@ def generate_quantified_self_csv(
 
     float_2dp_columns = [
         'Running Distance - Daily (km)',
+        'Acute-to-Chronic Workload Ratio (ACWR)',
+        'Aerobic Efficiency Factor (Pace/HR)',
         'Lactate Threshold Pace (decimal min/km)',
         'Sleep Start Time (Decimal)',
+        'Sleep Start Time Variance (7d Rolling Std Dev)',
         'Resting HR Z-Score - 2d EWMA vs 60d Baseline',
         'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline',
         'Weight - Morning 7d Avg (kg)',
