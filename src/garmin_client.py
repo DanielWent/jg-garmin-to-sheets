@@ -260,14 +260,16 @@ class GarminClient:
         return data
 
     async def _fetch_web_stress_data(self, target_iso: str) -> Optional[Dict[str, Any]]:
-        """Fetches untruncated historical stress data via the modern Garmin Web API gateway."""
+        """Fetches untruncated historical stress data via the modern Garmin Web API gateway, forcing intraday reload."""
         loop = asyncio.get_event_loop()
         def call_gc_api():
             try:
-                # Pass 'connect' so Garth constructs https://connect.garmin.com properly
+                # Pass 'connect' so Garth constructs https://connect.garmin.com properly.
+                # Include request_reload=true parameter to retrieve archived intraday epochs.
                 resp = self.client.garth.get(
                     "connect", 
-                    f"/gc-api/wellness-service/wellness/dailyStress/{target_iso}"
+                    f"/gc-api/wellness-service/wellness/dailyStress/{target_iso}",
+                    params={"request_reload": "true"}
                 )
                 if hasattr(resp, "status_code"):
                     if resp.status_code == 429:
@@ -495,7 +497,7 @@ class GarminClient:
                 # Primary fetch via standard mobile gateway
                 stress_data = await safe_fetch("Stress", loop.run_in_executor(None, self.client.get_stress_data, target_iso))
 
-                # If standard mobile gateway returned empty stressValuesArray, query modern web gateway (/gc-api)
+                # If standard mobile gateway returned empty stressValuesArray, query modern web gateway (/gc-api) with request_reload=true
                 if not stress_data or not stress_data.get('stressValuesArray'):
                     logger.info(f"[{target_iso}] Mobile gateway stressValuesArray was empty; querying web gateway (/gc-api)...")
                     web_stress = await self._fetch_web_stress_data(target_iso)
