@@ -67,17 +67,28 @@ def generate_quantified_self_csv(
         'VO2 Max (ml/kg/min)': 'Garmin_VO2_Max_ml_kg_min',
         'Lactate Threshold Pace (min/km)': 'Lactate_Threshold_Pace',
         'Lactate Threshold Heart Rate (bpm)': 'Lactate_Threshold_Heart_Rate_bpm',
+        
+        # Mappings updated to match actual CSV headers
+        'Daily Moderate Intensity Minutes': 'Garmin_Moderate_Intensity_Minutes',
         'Moderate Intensity Minutes': 'Garmin_Moderate_Intensity_Minutes',
         'Moderate Intensity Minutes (min)': 'Garmin_Moderate_Intensity_Minutes',
         'Garmin Moderate Intensity Minutes': 'Garmin_Moderate_Intensity_Minutes',
+        
+        'Daily Vigorous Intensity Minutes': 'Garmin_Vigorous_Intensity_Minutes',
         'Vigorous Intensity Minutes': 'Garmin_Vigorous_Intensity_Minutes',
         'Vigorous Intensity Minutes (min)': 'Garmin_Vigorous_Intensity_Minutes',
         'Garmin Vigorous Intensity Minutes': 'Garmin_Vigorous_Intensity_Minutes',
-        'Total Calories': 'Total_Calories',
+        
+        'Waking Average Stress Score (0-100)': 'Garmin_Avg_Awake_Stress_Score',
+        
         'Total Calories (kcal)': 'Total_Calories',
+        'Total Calories': 'Total_Calories',
         'Calories': 'Total_Calories',
+        
+        'Daily Active Calories': 'Active_Calories',
         'Active Calories': 'Active_Calories',
         'Active Calories (kcal)': 'Active_Calories',
+        
         'Sleep Length (min)': 'Overnight_Sleep_Duration_min',
         'Sleep Need (min)': 'Sleep_Need_min',
         'Sleep Start Time': 'Sleep_Start_Time_HH_MM',
@@ -104,6 +115,7 @@ def generate_quantified_self_csv(
     )
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
 
+    # Preserved positional fallbacks for backwards compatibility
     if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:
         df_g['Total_Calories'] = df_garmin.iloc[:, 27]
     if (
@@ -180,12 +192,13 @@ def generate_quantified_self_csv(
             else df_withings.columns[3]
         )
     )
+    # Updated to prioritize finding exactly 'Body Fat (%)'
     fat_col = (
-        'Fat Ratio (%)'
-        if 'Fat Ratio (%)' in df_withings.columns
+        'Body Fat (%)'
+        if 'Body Fat (%)' in df_withings.columns
         else (
-            'Body Fat (%)'
-            if 'Body Fat (%)' in df_withings.columns
+            'Fat Ratio (%)'
+            if 'Fat Ratio (%)' in df_withings.columns
             else (
                 'Fat Mass (%)'
                 if 'Fat Mass (%)' in df_withings.columns
@@ -309,7 +322,7 @@ def generate_quantified_self_csv(
     if 'Overnight_Sleep_Duration_min' in df.columns and 'Sleep_Need_min' in df.columns:
         sleep_target = df['Sleep_Need_min'].fillna(480)
         daily_sleep_deficit = (sleep_target - df['Overnight_Sleep_Duration_min']).clip(lower=0)
-        
+
         df['EWMA_Sleep_Deficit_min'] = daily_sleep_deficit.ewm(
             halflife=pd.Timedelta(days=4), 
             times=df['Date_Datetime']
@@ -319,7 +332,7 @@ def generate_quantified_self_csv(
         shifted_rhr = df['Overnight_Resting_Heart_Rate_bpm'].shift(7)
         shifted_60d_rhr_mean = shifted_rhr.rolling(window=60, min_periods=30).mean()
         shifted_60d_rhr_std = shifted_rhr.rolling(window=60, min_periods=30).std()
-        
+
         df['Daily_RHR_ZScore'] = (df['Overnight_Resting_Heart_Rate_bpm'] - shifted_60d_rhr_mean) / shifted_60d_rhr_std
         df['EWMA_RHR_ZScore'] = df['Daily_RHR_ZScore'].ewm(
             halflife=pd.Timedelta(days=2), 
@@ -377,12 +390,12 @@ def generate_quantified_self_csv(
                          np.where(df['EWMA_HRV_ZScore'] >= 1.0, 1.0, 
                          np.where(df['EWMA_HRV_ZScore'] >= 0, 0.90 + (df['EWMA_HRV_ZScore'] / 1.0) * 0.10, 
                          np.where(df['EWMA_HRV_ZScore'] <= -1.5, 0.0, (df['EWMA_HRV_ZScore'] + 1.5) / 1.5 * 0.90))))
-        
+
         rhr_raw = np.where(pd.isna(df['EWMA_RHR_ZScore']), np.nan,
                            np.where(df['EWMA_RHR_ZScore'] <= 0.5, 1.0, 
                            np.where(df['EWMA_RHR_ZScore'] >= 2.0, 0.0, 
                            (2.0 - df['EWMA_RHR_ZScore']) / 1.5)))
-        
+
         a_history_raw = (h_raw ** 0.6) * (rhr_raw ** 0.4)
         s_history_raw = np.where(pd.isna(df['EWMA_Sleep_Deficit_min']), np.nan,
                                  np.exp(-df['EWMA_Sleep_Deficit_min'] / 90.0))
