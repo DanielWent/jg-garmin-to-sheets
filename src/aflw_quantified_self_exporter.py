@@ -10,42 +10,41 @@ import pandas as pd
 
 
 def parse_to_iso_date(series: pd.Series) -> pd.Series:
-    s_str = (
-        series.astype(str)
-        .str.strip()
-        .str.split('T')
-        .str[0]
-        .str.split(' ')
-        .str[0]
-    )
+    s_str = series.astype(str).str.strip().str.split('T').str[0].str.split(' ').str[0]
     s_dt = pd.to_datetime(s_str, format='%Y-%m-%d', errors='coerce')
-    missing_mask = (
-        s_dt.isna()
-        & series.notna()
-        & ~series.astype(str).str.lower().isin(['nan', 'none', '', 'null'])
-    )
+    missing_mask = s_dt.isna() & series.notna() & ~series.astype(str).str.lower().isin(['nan', 'none', '', 'null'])
     if missing_mask.any():
-        s_dt.loc[missing_mask] = pd.to_datetime(
-            series.loc[missing_mask], dayfirst=True, format='mixed', errors='coerce'
-        )
+        s_dt.loc[missing_mask] = pd.to_datetime(series.loc[missing_mask], dayfirst=True, format='mixed', errors='coerce')
     return s_dt.dt.strftime('%Y-%m-%d')
 
 
-def convert_pace_to_decimal(pace_val):
-    if pd.isna(pace_val):
+def time_to_decimal(time_str):
+    if pd.isna(time_str):
         return np.nan
-    if isinstance(pace_val, (int, float)):
-        return round(float(pace_val), 2)
-    if isinstance(pace_val, str) and ':' in pace_val:
-        try:
-            minutes, seconds = pace_val.split(':')
-            return round(float(minutes) + (float(seconds) / 60.0), 2)
-        except ValueError:
-            return np.nan
     try:
-        return round(float(pace_val), 2)
+        h, m = map(int, str(time_str).split(':'))
+        return h + (m / 60.0)
     except ValueError:
         return np.nan
+
+
+def pace_to_decimal(pace_str):
+    if pd.isna(pace_str):
+        return np.nan
+    try:
+        m, s = map(int, str(pace_str).split(':'))
+        return m + (s / 60.0)
+    except ValueError:
+        return np.nan
+
+
+def adjust_for_midnight(val):
+    """Shifts decimal sleep times < 12:00 PM to the next day for accurate std dev math"""
+    if pd.isna(val):
+        return np.nan
+    if val < 12.0:
+        return val + 24.0
+    return val
 
 
 def generate_quantified_self_csv(
@@ -58,521 +57,259 @@ def generate_quantified_self_csv(
 ):
 
     # 1. Process Garmin Daily Data
-    garmin_mapping = {
-        'Date (YYYY-MM-DD)': 'Date_YYYY_MM_DD',
-        'Date': 'Date_YYYY_MM_DD',
-        'Total Running Distance (km)': 'Daily_Running_Distance_km',
-        'Daily Steps': 'Daily_Steps_Count',
-        'Garmin Training Load (7 Day Sum)': 'Garmin_7d_Training_Load_Sum',
-        'VO2 Max (ml/kg/min)': 'Garmin_VO2_Max_ml_kg_min',
-        'Lactate Threshold Pace (min/km)': 'Lactate_Threshold_Pace',
-        'Lactate Threshold Heart Rate (bpm)': 'Lactate_Threshold_Heart_Rate_bpm',
-        'Moderate Intensity Minutes': 'Garmin_Moderate_Intensity_Minutes',
-        'Moderate Intensity Minutes (min)': 'Garmin_Moderate_Intensity_Minutes',
-        'Garmin Moderate Intensity Minutes': 'Garmin_Moderate_Intensity_Minutes',
-        'Vigorous Intensity Minutes': 'Garmin_Vigorous_Intensity_Minutes',
-        'Vigorous Intensity Minutes (min)': 'Garmin_Vigorous_Intensity_Minutes',
-        'Garmin Vigorous Intensity Minutes': 'Garmin_Vigorous_Intensity_Minutes',
-        'Total Calories': 'Total_Calories',
-        'Total Calories (kcal)': 'Total_Calories',
-        'Calories': 'Total_Calories',
-        'Active Calories': 'Active_Calories',
-        'Active Calories (kcal)': 'Active_Calories',
-        'Sleep Length (min)': 'Overnight_Sleep_Duration_min',
-        'Sleep Need (min)': 'Sleep_Need_min',
-        'Sleep Start Time': 'Sleep_Start_Time_HH_MM',
-        'Garmin Sleep Score (0-100)': 'Garmin_Sleep_Score',
-        'Daily Max Body Battery (0-100)': 'Morning_Max_Body_Battery',
-        'Overnight Resting HR (bpm)': 'Overnight_Resting_Heart_Rate_bpm',
-        'Overnight HRV (ms)': 'Overnight_Average_HRV_RMSSD_ms',
-        'Systolic Blood Pressure (mmHg)': 'Resting_Systolic_Blood_Pressure_mmHg',
-        'Diastolic Blood Pressure (mmHg)': 'Resting_Diastolic_Blood_Pressure_mmHg',
-        'Overnight Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
-        'Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
-        'Avg Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
-        'Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
-    }
-    df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x))
-
-    date_col_g = next(
-        (
-            c
-            for c in ['Date_YYYY_MM_DD', 'Date (YYYY-MM-DD)', 'Date']
-            if c in df_g.columns
-        ),
-        df_g.columns[0],
-    )
+    df_g = df_garmin.copy()
+    date_col_g = next((c for c in ['Date (YYYY-MM-DD)', 'Date'] if c in df_g.columns), df_g.columns[0])
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
+    
+    # Drop the original date column to strictly prevent duplicate date columns in the output
+    if date_col_g != 'Date_YYYY_MM_DD':
+        df_g = df_g.drop(columns=[date_col_g])
 
-    if 'Total_Calories' not in df_g.columns and df_garmin.shape[1] > 27:
-        df_g['Total_Calories'] = df_garmin.iloc[:, 27]
-    if (
-        'Garmin_Moderate_Intensity_Minutes' not in df_g.columns
-        and df_garmin.shape[1] > 43
-    ):
-        df_g['Garmin_Moderate_Intensity_Minutes'] = df_garmin.iloc[:, 43]
-    if (
-        'Garmin_Vigorous_Intensity_Minutes' not in df_g.columns
-        and df_garmin.shape[1] > 44
-    ):
-        df_g['Garmin_Vigorous_Intensity_Minutes'] = df_garmin.iloc[:, 44]
-    if 'Active_Calories' not in df_g.columns and df_garmin.shape[1] > 45:
-        df_g['Active_Calories'] = df_garmin.iloc[:, 45]
+    # 2. Process Garmin Activities Data 
+    df_a = df_activities.copy()
+    act_date_col = next((c for c in ['Date (YYYY-MM-DD)', 'Date'] if c in df_a.columns), df_a.columns[1])
+    df_a['Date_YYYY_MM_DD'] = parse_to_iso_date(df_a[act_date_col])
 
-    # Average Awake Hours Garmin Stress Score (Column BD / 55)
-    if 'Garmin_Avg_Awake_Stress_Score' not in df_g.columns and df_garmin.shape[1] > 55:
-        df_g['Garmin_Avg_Awake_Stress_Score'] = pd.to_numeric(
-            df_garmin.iloc[:, 55], errors='coerce'
-        )
+    # Base CTL/ATL Training Load Sum
+    df_a_daily = df_a.groupby('Date_YYYY_MM_DD')['Activity Training Load'].sum().reset_index()
+    df_a_daily.rename(columns={'Activity Training Load': 'Daily_Activity_Training_Load'}, inplace=True)
 
-    # Overnight Respiration Rate (brpm) (Column BE / 56)
-    if (
-        'Overnight_Respiration_Rate_brpm' not in df_g.columns
-        and df_garmin.shape[1] > 56
-    ):
-        df_g['Overnight_Respiration_Rate_brpm'] = pd.to_numeric(
-            df_garmin.iloc[:, 56], errors='coerce'
-        )
-
-    df_g = df_g.loc[:, ~df_g.columns.duplicated()]
-
-    # 2. Process Garmin Activities Data
-    act_date_col = next(
-        (
-            c
-            for c in ['Date (YYYY-MM-DD)', 'Date', 'Date_YYYY_MM_DD']
-            if c in df_activities.columns
-        ),
-        df_activities.columns[0],
-    )
-    df_activities['Date_YYYY_MM_DD'] = parse_to_iso_date(
-        df_activities[act_date_col]
-    )
-    df_a_daily = (
-        df_activities.groupby('Date_YYYY_MM_DD')
-        .agg({'Activity Training Load': 'sum'})
-        .reset_index()
-    )
-    df_a_daily = df_a_daily.rename(
-        columns={'Activity Training Load': 'Daily_Activity_Training_Load'}
-    )
-
-    # 3. Process Withings Data
-    date_col_w = next(
-        (
-            c
-            for c in ['date', 'Date', 'Date (YYYY-MM-DD)']
-            if c in df_withings.columns
-        ),
-        df_withings.columns[0],
-    )
-    df_withings['Date_YYYY_MM_DD'] = parse_to_iso_date(df_withings[date_col_w])
-
-    weight_col = (
-        'Weight (kg)'
-        if 'Weight (kg)' in df_withings.columns
-        else df_withings.columns[1]
-    )
-    pwv_col = (
-        'Pulse Wave Velocity (m/s)'
-        if 'Pulse Wave Velocity (m/s)' in df_withings.columns
-        else (
-            df_withings.columns[4]
-            if df_withings.shape[1] > 4
-            else df_withings.columns[3]
-        )
-    )
-    fat_col = (
-        'Fat Ratio (%)'
-        if 'Fat Ratio (%)' in df_withings.columns
-        else (
-            'Body Fat (%)'
-            if 'Body Fat (%)' in df_withings.columns
-            else (
-                'Fat Mass (%)'
-                if 'Fat Mass (%)' in df_withings.columns
-                else (
-                    df_withings.columns[3]
-                    if df_withings.shape[1] > 3
-                    else df_withings.columns[-1]
-                )
+    # Process Running-Specific Metrics (Highest Load Start Time & Easy % calculations)
+    runs = df_a[df_a['Activity Type'].astype(str).str.lower() == 'running'].copy()
+    if not runs.empty:
+        # Get start time of highest load run per day
+        highest_load_runs = runs.sort_values('Activity Training Load', ascending=False).drop_duplicates('Date_YYYY_MM_DD')
+        highest_load_runs = highest_load_runs[['Date_YYYY_MM_DD', 'Start Time (HH:MM)']]
+        highest_load_runs.rename(columns={'Start Time (HH:MM)': 'Highest Load Run Start Time'}, inplace=True)
+        
+        # Determine Pace-Based Fallback using VO2 Max (if available)
+        vo2_col = 'VO2 Max (ml/kg/min)' if 'VO2 Max (ml/kg/min)' in df_g.columns else next((c for c in df_g.columns if 'VO2 Max' in c), None)
+        if vo2_col:
+            vo2_df = df_g[['Date_YYYY_MM_DD', vo2_col]].dropna()
+            runs = pd.merge(runs, vo2_df, on='Date_YYYY_MM_DD', how='left')
+            runs[vo2_col] = runs[vo2_col].ffill().bfill()
+            
+            runs['Avg Pace (decimal)'] = runs['Avg Pace (min/km)'].apply(pace_to_decimal)
+            
+            # Approximate LT Pace from VO2 Max (e.g. VO2 50 = ~4.4 min/km or 4:24 min/km)
+            runs['Calculated LT Pace (decimal)'] = 220.0 / runs[vo2_col]
+            fallback_is_easy = runs['Avg Pace (decimal)'] > runs['Calculated LT Pace (decimal)']
+        else:
+            fallback_is_easy = pd.Series(True, index=runs.index) # Default to easy if pace data doesn't exist
+            
+        # Parse Primary Training Effect Labels
+        if 'Garmin Training Effect Label' in runs.columns:
+            labels = runs['Garmin Training Effect Label'].astype(str).str.strip().str.upper()
+        else:
+            labels = pd.Series('UNKNOWN', index=runs.index)
+            
+        easy_labels = {'AEROBIC_BASE', 'BASE', 'RECOVERY', 'LOW_AEROBIC', 'NO_BENEFIT', 'NONE'}
+        hard_labels = {'TEMPO', 'LACTATE_THRESHOLD', 'THRESHOLD', 'VO2MAX', 'VO2_MAX', 'ANAEROBIC_CAPACITY', 'ANAEROBIC', 'SPEED', 'SPRINT', 'HIGH_AEROBIC'}
+        
+        # Categorize run intensity (Priority 1: Label, Priority 2: Pace vs LT Pace)
+        runs['Is Easy'] = np.where(
+            labels.isin(easy_labels), True,
+            np.where(
+                labels.isin(hard_labels), False,
+                fallback_is_easy
             )
         )
-    )
+        
+        # Calculate daily aggregate durations
+        runs['Easy Duration'] = np.where(runs['Is Easy'], runs['Duration (min)'], 0)
+        runs['Total Duration'] = runs['Duration (min)']
+        
+        daily_dur = runs.groupby('Date_YYYY_MM_DD')[['Easy Duration', 'Total Duration']].sum().reset_index()
+        
+        df_a_daily = pd.merge(df_a_daily, highest_load_runs, on='Date_YYYY_MM_DD', how='left')
+        df_a_daily = pd.merge(df_a_daily, daily_dur, on='Date_YYYY_MM_DD', how='left')
+    else:
+        df_a_daily['Highest Load Run Start Time'] = np.nan
+        df_a_daily['Easy Duration'] = np.nan
+        df_a_daily['Total Duration'] = np.nan
 
-    df_w_daily = (
-        df_withings.groupby('Date_YYYY_MM_DD')
-        .agg({weight_col: 'mean', pwv_col: 'mean', fat_col: 'mean'})
-        .reset_index()
-    )
+    # 3. Process Withings Data
+    df_w = df_withings.copy()
+    date_col_w = next((c for c in ['date', 'Date', 'Date (YYYY-MM-DD)'] if c in df_w.columns), df_w.columns[0])
+    df_w['Date_YYYY_MM_DD'] = parse_to_iso_date(df_w[date_col_w])
 
-    withings_mapping = {
-        weight_col: 'Daily_Morning_Weight_kg',
-        pwv_col: 'Pulse_Wave_Velocity_m_s',
-        fat_col: 'Daily_Body_Fat_pct',
-    }
-    df_w_daily = df_w_daily.rename(columns=withings_mapping)
+    weight_col = 'Weight (kg)' if 'Weight (kg)' in df_w.columns else df_w.columns[1]
+    pwv_col = 'Pulse Wave Velocity (m/s)' if 'Pulse Wave Velocity (m/s)' in df_w.columns else next((c for c in df_w.columns if 'Pulse Wave' in c), None)
+    fat_col = 'Body Fat (%)' if 'Body Fat (%)' in df_w.columns else next((c for c in df_w.columns if 'Fat' in c), None)
+
+    agg_dict = {weight_col: 'mean'}
+    if pwv_col: agg_dict[pwv_col] = 'mean'
+    if fat_col: agg_dict[fat_col] = 'mean'
+
+    df_w_daily = df_w.groupby('Date_YYYY_MM_DD').agg(agg_dict).reset_index()
+    w_rename = {weight_col: 'Daily_Morning_Weight_kg'}
+    if pwv_col: w_rename[pwv_col] = 'Pulse_Wave_Velocity_m_s'
+    if fat_col: w_rename[fat_col] = 'Daily_Body_Fat_pct'
+    df_w_daily.rename(columns=w_rename, inplace=True)
 
     # 4. Process Medical Data
     df_med = df_medical.copy()
     df_med['Date_YYYY_MM_DD'] = parse_to_iso_date(df_med.iloc[:, 0])
-
     sig_col = df_med.iloc[:, 3]
-    is_significant = (pd.to_numeric(sig_col, errors='coerce') == 1) | (
-        sig_col.astype(str).str.strip().isin(['1', '1.0', 'True', 'true'])
-    )
+    is_significant = (pd.to_numeric(sig_col, errors='coerce') == 1) | (sig_col.astype(str).str.strip().str.lower().isin(['1', '1.0', 'true']))
     df_med_filtered = df_med[is_significant].copy()
 
     if not df_med_filtered.empty:
-        df_med_filtered['Medical_Notes'] = (
-            df_med_filtered.iloc[:, 4].astype(str).str.strip()
-        )
-        df_med_filtered = df_med_filtered[
-            ~df_med_filtered['Medical_Notes']
-            .str.lower()
-            .isin(['nan', 'none', '', 'null'])
-        ]
-        df_m_daily = (
-            df_med_filtered.groupby('Date_YYYY_MM_DD')['Medical_Notes']
-            .apply(lambda x: ' | '.join(x))
-            .reset_index()
-        )
+        df_med_filtered['Medical_Notes'] = df_med_filtered.iloc[:, 4].astype(str).str.strip()
+        df_med_filtered = df_med_filtered[~df_med_filtered['Medical_Notes'].str.lower().isin(['nan', 'none', '', 'null'])]
+        df_m_daily = df_med_filtered.groupby('Date_YYYY_MM_DD')['Medical_Notes'].apply(lambda x: ' | '.join(x)).reset_index()
     else:
         df_m_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Medical_Notes'])
 
     # 5. Process Home Assistant Zone Data
-    zone_date_col = next(
-        (
-            c
-            for c in ['Date', 'date', 'Date (YYYY-MM-DD)']
-            if c in df_zones.columns
-        ),
-        df_zones.columns[0],
-    )
-    df_zones['Date_YYYY_MM_DD'] = parse_to_iso_date(df_zones[zone_date_col])
+    df_z = df_zones.copy()
+    zone_date_col = next((c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_z.columns), df_z.columns[0])
+    df_z['Date_YYYY_MM_DD'] = parse_to_iso_date(df_z[zone_date_col])
+    if 'Time in Work Zone (hours)' in df_z.columns:
+        df_z_daily = df_z[['Date_YYYY_MM_DD', 'Time in Work Zone (hours)']].rename(columns={'Time in Work Zone (hours)': 'Time at Work (hours)'})
+    else:
+        df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time at Work (hours)'])
 
-    zone_mapping = {
-        'Time in Home Zone (hours)': 'Time_in_Home_Zone_hours',
-        'Time in Work Zone (hours)': 'Time_in_Work_Zone_hours',
-    }
-    avail_zone_cols = ['Date_YYYY_MM_DD'] + [
-        v for k, v in zone_mapping.items() if k in df_zones.columns
-    ]
-    df_z_daily = df_zones.rename(columns=zone_mapping)[avail_zone_cols]
-
-    # 6. Merge All Datasets
-    df = pd.merge(
-        df_g,
-        df_a_daily[['Date_YYYY_MM_DD', 'Daily_Activity_Training_Load']],
-        on='Date_YYYY_MM_DD',
-        how='outer',
-    )
+    # 6. Merge Datasets
+    df = df_g.copy()
+    df = pd.merge(df, df_a_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
 
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
-    df['_sort_date'] = pd.to_datetime(
-        df['Date_YYYY_MM_DD'], format='%Y-%m-%d', errors='coerce'
-    )
-    df = df.dropna(subset=['_sort_date'])
-    df = df.sort_values(by='_sort_date', ascending=True).reset_index(drop=True)
-    df = df.drop(columns=['_sort_date'])
-    df = df.loc[:, ~df.columns.duplicated()]
-    df['Daily_Activity_Training_Load'] = df[
-        'Daily_Activity_Training_Load'
-    ].fillna(0)
+    df['_sort_date'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
+    df = df.sort_values('_sort_date').reset_index(drop=True)
 
-    # Convert date for accurate time-aware EWMAs
-    df['Date_Datetime'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
+    # 7. EWMA, Rolling, and Derived Calculations
+    df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
+    df['Chronic Training Load - CTL (28d EWMA)'] = df['Daily_Activity_Training_Load'].ewm(span=28, adjust=False).mean()
+    df['ATL_7d'] = df['Daily_Activity_Training_Load'].ewm(span=7, adjust=False).mean()
+    df['Acute-to-Chronic Workload Ratio - ACWR'] = df['ATL_7d'] / df['Chronic Training Load - CTL (28d EWMA)']
 
-    # 7. Derived Metrics & Precision
-    if 'Lactate_Threshold_Pace' in df.columns:
-        df['Lactate_Threshold_Pace_decimal_min_km'] = df[
-            'Lactate_Threshold_Pace'
-        ].apply(convert_pace_to_decimal)
+    if 'Easy Duration' in df.columns and 'Total Duration' in df.columns:
+        df['Easy Duration'] = df['Easy Duration'].fillna(0)
+        df['Total Duration'] = df['Total Duration'].fillna(0)
+        df['Rolling 28d Easy Minutes'] = df.rolling('28D', on='_sort_date')['Easy Duration'].sum()
+        df['Rolling 28d Total Minutes'] = df.rolling('28D', on='_sort_date')['Total Duration'].sum()
+        df['% Easy Runs (28d Rolling)'] = (df['Rolling 28d Easy Minutes'] / df['Rolling 28d Total Minutes']) * 100
 
-    def time_to_decimal(time_str):
-        if pd.isna(time_str):
-            return np.nan
-        try:
-            h, m = map(int, str(time_str).split(':'))
-            if h < 12:
-                h += 24
-            return round(h + (m / 60.0), 2)
-        except ValueError:
-            return np.nan
+    if 'Sleep Start Time' in df.columns:
+        df['Sleep Start Time (decimal hours)'] = df['Sleep Start Time'].apply(time_to_decimal)
+        sleep_adj = df['Sleep Start Time (decimal hours)'].apply(adjust_for_midnight)
+        df['Sleep Start Time Variance - 7d Rolling Std Dev (hours)'] = sleep_adj.rolling(window=7, min_periods=3).std()
 
-    if 'Sleep_Start_Time_HH_MM' in df.columns:
-        df['Sleep_Start_Decimal'] = df['Sleep_Start_Time_HH_MM'].apply(
-            time_to_decimal
-        )
+    if 'Sleep Need (min)' in df.columns and 'Sleep Length (min)' in df.columns:
+        sleep_deficit = (df['Sleep Need (min)'] - df['Sleep Length (min)']).clip(lower=0)
+        df['Sleep Deficit EWMA (min)'] = sleep_deficit.ewm(span=4, adjust=False).mean()
 
-    # Architectural Pillar 1: Accumulated Sleep Deficit (EWMA)
-    if 'Overnight_Sleep_Duration_min' in df.columns and 'Sleep_Need_min' in df.columns:
-        sleep_target = df['Sleep_Need_min'].fillna(480)
-        daily_sleep_deficit = (sleep_target - df['Overnight_Sleep_Duration_min']).clip(lower=0)
-        
-        df['EWMA_Sleep_Deficit_min'] = daily_sleep_deficit.ewm(
-            halflife=pd.Timedelta(days=4), 
-            times=df['Date_Datetime']
-        ).mean()
+    # Z-scores computed against a backward-shifted 60d baseline to prevent data leakage
+    if 'Overnight Resting HR (bpm)' in df.columns:
+        shifted_rhr = df['Overnight Resting HR (bpm)'].shift(7)
+        rhr_mean = shifted_rhr.rolling(60, min_periods=30).mean()
+        rhr_std = shifted_rhr.rolling(60, min_periods=30).std()
+        daily_rhr_z = (df['Overnight Resting HR (bpm)'] - rhr_mean) / rhr_std
+        df['Resting HR Z-Score - 3d EWMA (SD)'] = daily_rhr_z.ewm(span=3, adjust=False).mean()
 
-    # Resting Heart Rate Baseline and Z-Score Calculation
-    if 'Overnight_Resting_Heart_Rate_bpm' in df.columns:
-        shifted_rhr = df['Overnight_Resting_Heart_Rate_bpm'].shift(7)
-        shifted_60d_rhr_mean = shifted_rhr.rolling(window=60, min_periods=30).mean()
-        shifted_60d_rhr_std = shifted_rhr.rolling(window=60, min_periods=30).std()
-        
-        df['Daily_RHR_ZScore'] = (df['Overnight_Resting_Heart_Rate_bpm'] - shifted_60d_rhr_mean) / shifted_60d_rhr_std
-        df['EWMA_RHR_ZScore'] = df['Daily_RHR_ZScore'].ewm(
-            halflife=pd.Timedelta(days=2), 
-            times=df['Date_Datetime']
-        ).mean()
-
-    # HRV Baseline and Z-Score Calculation
-    if 'Overnight_Average_HRV_RMSSD_ms' in df.columns:
-        hrv_7d_avg = (
-            df['Overnight_Average_HRV_RMSSD_ms']
-            .rolling(window=7, min_periods=1)
-            .mean()
-        )
-        shifted_hrv = df['Overnight_Average_HRV_RMSSD_ms'].shift(7)
-        shifted_60d_mean = shifted_hrv.rolling(window=60, min_periods=30).mean()
-        shifted_60d_std = shifted_hrv.rolling(window=60, min_periods=30).std()
-        df[
-            'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore'
-        ] = ((hrv_7d_avg - shifted_60d_mean) / shifted_60d_std).round(2)
-
-        df['Daily_HRV_ZScore'] = (df['Overnight_Average_HRV_RMSSD_ms'] - shifted_60d_mean) / shifted_60d_std
-        df['EWMA_HRV_ZScore'] = df['Daily_HRV_ZScore'].ewm(
-            halflife=pd.Timedelta(days=2), 
-            times=df['Date_Datetime']
-        ).mean()
+    if 'Overnight HRV (ms)' in df.columns:
+        shifted_hrv = df['Overnight HRV (ms)'].shift(7)
+        hrv_mean = shifted_hrv.rolling(60, min_periods=30).mean()
+        hrv_std = shifted_hrv.rolling(60, min_periods=30).std()
+        daily_hrv_z = (df['Overnight HRV (ms)'] - hrv_mean) / hrv_std
+        df['HRV RMSSD Z-Score - 3d EWMA (SD)'] = daily_hrv_z.ewm(span=3, adjust=False).mean()
 
     if 'Daily_Morning_Weight_kg' in df.columns:
-        df['Daily_Morning_Weight_7d_Average_kg'] = (
-            df['Daily_Morning_Weight_kg']
-            .rolling(window=7, min_periods=1)
-            .mean()
-            .round(2)
-        )
+        df['Weight - Morning 7d Avg (kg)'] = df['Daily_Morning_Weight_kg'].rolling(window=7, min_periods=1).mean()
 
     if 'Daily_Body_Fat_pct' in df.columns:
-        df['Body_Fat_7d_Average_pct'] = (
-            df['Daily_Body_Fat_pct']
-            .rolling(window=7, min_periods=1)
-            .mean()
-            .round(2)
-        )
+        df['Body Fat - US Army Calibrated 7d Avg (%)'] = df['Daily_Body_Fat_pct'].rolling(window=7, min_periods=1).mean()
 
-    if 'Sleep_Start_Decimal' in df.columns:
-        df['Sleep_Start_14d_Median'] = df['Sleep_Start_Decimal'].rolling(window=14, min_periods=7).median().shift(1)
-        df['Circadian_Difference_hours'] = (df['Sleep_Start_Decimal'] - df['Sleep_Start_14d_Median']).abs()
-
-    # Integrated Dual-Timescale Morning State Composite Recovery Score
-    if (
-        'EWMA_HRV_ZScore' in df.columns
-        and 'EWMA_RHR_ZScore' in df.columns
-        and 'EWMA_Sleep_Deficit_min' in df.columns
-        and 'Garmin_Sleep_Score' in df.columns
-        and 'Morning_Max_Body_Battery' in df.columns
-        and 'Circadian_Difference_hours' in df.columns
-    ):
-        # --- Accumulated State Variables (60% Weight) ---
-        
-        # 1. Autonomic/CV History (HRV + RHR EWMA) combined geometrically 
-        h_raw = np.where(pd.isna(df['EWMA_HRV_ZScore']), np.nan, 
-                         np.where(df['EWMA_HRV_ZScore'] >= 1.0, 1.0, 
-                         np.where(df['EWMA_HRV_ZScore'] >= 0, 0.90 + (df['EWMA_HRV_ZScore'] / 1.0) * 0.10, 
-                         np.where(df['EWMA_HRV_ZScore'] <= -1.5, 0.0, (df['EWMA_HRV_ZScore'] + 1.5) / 1.5 * 0.90))))
-        
-        rhr_raw = np.where(pd.isna(df['EWMA_RHR_ZScore']), np.nan,
-                           np.where(df['EWMA_RHR_ZScore'] <= 0.5, 1.0, 
-                           np.where(df['EWMA_RHR_ZScore'] >= 2.0, 0.0, 
-                           (2.0 - df['EWMA_RHR_ZScore']) / 1.5)))
-        
-        a_history_raw = (h_raw ** 0.6) * (rhr_raw ** 0.4)
-
-        # 2. Sleep Deficit History (Exponential Decay Penalty)
-        s_history_raw = np.where(pd.isna(df['EWMA_Sleep_Deficit_min']), np.nan,
-                                 np.exp(-df['EWMA_Sleep_Deficit_min'] / 90.0))
-
-
-        # --- Acute State Variables (35% Weight) ---
-        
-        # 3. Acute Sleep Restoration
-        s_acute_raw = df['Garmin_Sleep_Score'] / 100.0
-
-        # 4. Morning Energy
-        bb_raw = df['Morning_Max_Body_Battery'] / 100.0
-
-
-        # --- Context Variable (5% Weight) ---
-        
-        # 5. Circadian Regularity
-        c_raw = np.where(pd.isna(df['Circadian_Difference_hours']), np.nan,
-                         np.where(df['Circadian_Difference_hours'] <= 0.5, 1.0,
-                         np.where(df['Circadian_Difference_hours'] >= 1.5, 0.0,
-                         (1.5 - df['Circadian_Difference_hours']) / 1.0)))
-
-
-        # Apply Floors to prevent single zeros from collapsing the geometric multiplication
-        a_history_floored = 0.25 + (0.75 * a_history_raw)
-        s_history_floored = 0.15 + (0.85 * s_history_raw)
-        s_acute_floored = 0.15 + (0.85 * s_acute_raw)
-        bb_floored = 0.10 + (0.90 * bb_raw)
-        c_floored = 0.05 + (0.95 * c_raw)
-
-        # Weighted Geometric Mean
-        # S_history (30%), A_history (30%), S_acute (25%), Body Battery (10%), Timing (5%)
-        df['Composite_Recovery_Score'] = 100 * (s_history_floored ** 0.30) * (a_history_floored ** 0.30) * (s_acute_floored ** 0.25) * (bb_floored ** 0.10) * (c_floored ** 0.05)
-
-
-    # 8. Filter, Sort Descending, and Select Target Columns
-    df_export = df.tail(730).copy()
-    df_export['_sort_date'] = pd.to_datetime(
-        df_export['Date_YYYY_MM_DD'], format='%Y-%m-%d', errors='coerce'
-    )
-    df_export = df_export.sort_values(
-        by='_sort_date', ascending=False
-    ).reset_index(drop=True)
-    df_export = df_export.drop(columns=['_sort_date'])
-
-    required_columns = [
-        'Date_YYYY_MM_DD',
-        'Time_in_Home_Zone_hours',
-        'Time_in_Work_Zone_hours',
-        'Daily_Steps_Count',
-        'Daily_Running_Distance_km',
-        'Garmin_Moderate_Intensity_Minutes',
-        'Garmin_Vigorous_Intensity_Minutes',
-        'Garmin_Avg_Awake_Stress_Score',
-        'Garmin_7d_Training_Load_Sum',
-        'Garmin_VO2_Max_ml_kg_min',
-        'Lactate_Threshold_Heart_Rate_bpm',
-        'Lactate_Threshold_Pace_decimal_min_km',
-        'Overnight_Sleep_Duration_min',
-        'Garmin_Sleep_Score',
-        'Sleep_Start_Decimal',
-        'EWMA_Sleep_Deficit_min',
-        'Overnight_Resting_Heart_Rate_bpm',
-        'EWMA_RHR_ZScore',
-        'Overnight_Average_HRV_RMSSD_ms',
-        'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore',
-        'Morning_Max_Body_Battery',
-        'Daily_Morning_Weight_7d_Average_kg',
-        'Resting_Systolic_Blood_Pressure_mmHg',
-        'Resting_Diastolic_Blood_Pressure_mmHg',
-        'Pulse_Wave_Velocity_m_s',
-        'Overnight_Respiration_Rate_brpm',
-        'Body_Fat_7d_Average_pct',
-        'Composite_Recovery_Score',
-        'Medical_Notes',
+    # 8. Column Mapping & Selecting Exact User Structure
+    target_columns = [
+        'Date (YYYY-MM-DD)',
+        'Time at Work (hours)',
+        'Weight - Morning 7d Avg (kg)',
+        'Sleep Length (min)',
+        'Sleep Start Time (decimal hours)',
+        'Sleep Start Time Variance - 7d Rolling Std Dev (hours)',
+        'Sleep Deficit EWMA (min)',
+        'Garmin Sleep Score (raw 0–100)',
+        'Overnight Respiration Rate (breaths/min)',
+        'Overnight Resting HR (raw bpm)',
+        'Resting HR Z-Score - 3d EWMA (SD)',
+        'HRV RMSSD Z-Score - 3d EWMA (SD)',
+        'Garmin Waking Average Stress Score (raw 0–100)',
+        'Daily Steps',
+        'Daily Moderate Intensity Minutes',
+        'Daily Vigorous Intensity Minutes',
+        'Chronic Training Load - CTL (28d EWMA)',
+        'Acute-to-Chronic Workload Ratio - ACWR',
+        'Daily Running Distance (km)',
+        'Highest Load Run Start Time',
+        '% Easy Runs (28d Rolling)',
+        'Average Grade Adjusted Pace - GAP (min/km)',
+        'Total Strength Training Duration (min)',
+        'VO2 Max (ml/kg/min)',
+        'Lactate Threshold Pace (min/km)',
+        'Body Fat - US Army Calibrated 7d Avg (%)',
+        'Withings Pulse Wave Velocity (m/s)',
+        'Systolic Blood Pressure (mmHg)',
+        'Diastolic Blood Pressure (mmHg)',
+        'Medical Note'
     ]
 
-    for col in required_columns:
-        if col not in df_export.columns:
-            df_export[col] = np.nan
-
-    df_export = df_export[required_columns]
-
-    column_rename_map = {
+    rename_map = {
         'Date_YYYY_MM_DD': 'Date (YYYY-MM-DD)',
-        'Time_in_Home_Zone_hours': 'Time at Home (hours)',
-        'Time_in_Work_Zone_hours': 'Time at Work (hours)',
-        'Daily_Steps_Count': 'Step Count - Daily (steps)',
-        'Daily_Running_Distance_km': 'Running Distance - Daily (km)',
-        'Garmin_Moderate_Intensity_Minutes': (
-            'Moderate Intensity Minutes - Garmin (min)'
-        ),
-        'Garmin_Vigorous_Intensity_Minutes': (
-            'Vigorous Intensity Minutes - Garmin (min)'
-        ),
-        'Garmin_Avg_Awake_Stress_Score': 'Average Awake Hours Garmin Stress Score (0-100)',
-        'Garmin_7d_Training_Load_Sum': 'Training Load - Garmin 7d Sum',
-        'Garmin_VO2_Max_ml_kg_min': 'VO2 Max - Garmin (ml/kg/min)',
-        'Lactate_Threshold_Heart_Rate_bpm': 'Lactate Threshold HR (bpm)',
-        'Lactate_Threshold_Pace_decimal_min_km': (
-            'Lactate Threshold Pace (decimal min/km)'
-        ),
-        'Overnight_Sleep_Duration_min': 'Sleep Duration - Overnight (min)',
-        'Garmin_Sleep_Score': 'Sleep Score - Garmin (0-100)',
-        'Sleep_Start_Decimal': 'Sleep Start Time (Decimal)',
-        'EWMA_Sleep_Deficit_min': 'Sleep Deficit - 4d EWMA (min)',
-        'Overnight_Resting_Heart_Rate_bpm': 'Resting Heart Rate - Overnight (bpm)',
-        'EWMA_RHR_ZScore': 'Resting HR Z-Score - 2d EWMA vs 60d Baseline',
-        'Overnight_Average_HRV_RMSSD_ms': 'HRV RMSSD - Overnight (ms)',
-        'Overnight_Average_HRV_RMSSD_7d_Average_vs_Previous_60d_Baseline_ZScore': (
-            'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline'
-        ),
-        'Morning_Max_Body_Battery': 'Morning Max Body Battery (0-100)',
-        'Daily_Morning_Weight_7d_Average_kg': 'Weight - Morning 7d Avg (kg)',
-        'Resting_Systolic_Blood_Pressure_mmHg': (
-            'Blood Pressure Systolic - Resting (mmHg)'
-        ),
-        'Resting_Diastolic_Blood_Pressure_mmHg': (
-            'Blood Pressure Diastolic - Resting (mmHg)'
-        ),
-        'Pulse_Wave_Velocity_m_s': 'Pulse Wave Velocity (m/s)',
-        'Overnight_Respiration_Rate_brpm': 'Overnight Respiration Rate (brpm)',
-        'Body_Fat_7d_Average_pct': 'Body Fat % - Withings Body Scan US Army Calibrated 7d Avg',
-        'Composite_Recovery_Score': 'Composite Recovery Score (0-100)',
-        'Medical_Notes': 'Medical Note',
+        'Garmin Sleep Score (0-100)': 'Garmin Sleep Score (raw 0–100)',
+        'Overnight Respiration Rate (brpm)': 'Overnight Respiration Rate (breaths/min)',
+        'Overnight Resting HR (bpm)': 'Overnight Resting HR (raw bpm)',
+        'Waking Average Stress Score (0-100)': 'Garmin Waking Average Stress Score (raw 0–100)',
+        'Total Running Distance (km)': 'Daily Running Distance (km)',
+        "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": 'Average Grade Adjusted Pace - GAP (min/km)',
+        'Pulse_Wave_Velocity_m_s': 'Withings Pulse Wave Velocity (m/s)',
+        'Medical_Notes': 'Medical Note'
     }
 
-    df_export = df_export.rename(columns=column_rename_map)
-    df_export = df_export.loc[:, ~df_export.columns.duplicated()]
+    df.rename(columns=rename_map, inplace=True)
 
-    # 9. Strict Type & Decimal Precision Formatting
-    integer_columns = [
-        'Step Count - Daily (steps)',
-        'Moderate Intensity Minutes - Garmin (min)',
-        'Vigorous Intensity Minutes - Garmin (min)',
-        'Training Load - Garmin 7d Sum',
-        'Lactate Threshold HR (bpm)',
-        'Sleep Duration - Overnight (min)',
-        'Sleep Score - Garmin (0-100)',
-        'Sleep Deficit - 4d EWMA (min)',
-        'Resting Heart Rate - Overnight (bpm)',
-        'HRV RMSSD - Overnight (ms)',
-        'Morning Max Body Battery (0-100)',
-        'Blood Pressure Systolic - Resting (mmHg)',
-        'Blood Pressure Diastolic - Resting (mmHg)',
-        'Composite Recovery Score (0-100)',
-    ]
-    for col in integer_columns:
-        if col in df_export.columns:
-            df_export[col] = (
-                pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
-            )
+    for col in target_columns:
+        if col not in df.columns:
+            df[col] = np.nan
 
-    float_1dp_columns = [
-        'Time at Home (hours)',
-        'Time at Work (hours)',
-        'VO2 Max - Garmin (ml/kg/min)',
-        'Average Awake Hours Garmin Stress Score (0-100)',
-        'Overnight Respiration Rate (brpm)',
+    df_export = df.sort_values('_sort_date', ascending=False).reset_index(drop=True)
+    df_export = df_export[target_columns]
+
+    # 9. Strict Type & Decimal Formatting
+    float_1dp = [
+        'Time at Work (hours)', 'Garmin Waking Average Stress Score (raw 0–100)', 
+        'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)', '% Easy Runs (28d Rolling)'
     ]
-    for col in float_1dp_columns:
+    float_2dp = [
+        'Weight - Morning 7d Avg (kg)', 'Sleep Start Time (decimal hours)', 
+        'Sleep Start Time Variance - 7d Rolling Std Dev (hours)', 'Sleep Deficit EWMA (min)', 
+        'Resting HR Z-Score - 3d EWMA (SD)', 'HRV RMSSD Z-Score - 3d EWMA (SD)', 
+        'Chronic Training Load - CTL (28d EWMA)', 'Acute-to-Chronic Workload Ratio - ACWR', 
+        'Daily Running Distance (km)', 'Body Fat - US Army Calibrated 7d Avg (%)', 
+        'Withings Pulse Wave Velocity (m/s)'
+    ]
+    int_cols = [
+        'Sleep Length (min)', 'Garmin Sleep Score (raw 0–100)', 'Overnight Resting HR (raw bpm)', 
+        'Daily Steps', 'Daily Moderate Intensity Minutes', 'Daily Vigorous Intensity Minutes', 
+        'Total Strength Training Duration (min)', 'Systolic Blood Pressure (mmHg)', 
+        'Diastolic Blood Pressure (mmHg)'
+    ]
+
+    for col in float_1dp:
         if col in df_export.columns:
             df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(1)
-
-    float_2dp_columns = [
-        'Running Distance - Daily (km)',
-        'Lactate Threshold Pace (decimal min/km)',
-        'Sleep Start Time (Decimal)',
-        'Resting HR Z-Score - 2d EWMA vs 60d Baseline',
-        'HRV RMSSD Z-Score - 7d Avg vs 60d Baseline',
-        'Weight - Morning 7d Avg (kg)',
-        'Pulse Wave Velocity (m/s)',
-        'Body Fat % - Withings Body Scan US Army Calibrated 7d Avg',
-    ]
-    for col in float_2dp_columns:
+    for col in float_2dp:
         if col in df_export.columns:
             df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(2)
+    for col in int_cols:
+        if col in df_export.columns:
+            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
 
-    # 10. Write Out Clean CSV
+    # 10. Output Clean CSV
     df_export.to_csv(output_path, header=True, index=False, na_rep='')
     return df_export
 
