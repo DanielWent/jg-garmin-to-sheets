@@ -28,6 +28,16 @@ def time_to_decimal(time_str):
         return np.nan
 
 
+def pace_to_decimal(pace_str):
+    if pd.isna(pace_str):
+        return np.nan
+    try:
+        m, s = map(int, str(pace_str).split(':'))
+        return m + (s / 60.0)
+    except ValueError:
+        return np.nan
+
+
 def adjust_for_midnight(val):
     """Shifts decimal sleep times < 12:00 PM to the next day for accurate std dev math"""
     if pd.isna(val):
@@ -50,14 +60,57 @@ def generate_quantified_self_csv(
     df_g = df_garmin.copy()
     date_col_g = next((c for c in ['Date (YYYY-MM-DD)', 'Date'] if c in df_g.columns), df_g.columns[0])
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
+    
+    # Drop the original date column to strictly prevent duplicate date columns in the output
+    if date_col_g != 'Date_YYYY_MM_DD':
+        df_g = df_g.drop(columns=[date_col_g])
 
-    # 2. Process Garmin Activities Data (Sum training loads per day for CTL/ATL)
+    # 2. Process Garmin Activities Data 
     df_a = df_activities.copy()
     act_date_col = next((c for c in ['Date (YYYY-MM-DD)', 'Date'] if c in df_a.columns), df_a.columns[1])
     df_a['Date_YYYY_MM_DD'] = parse_to_iso_date(df_a[act_date_col])
-        
+
+    # Base CTL/ATL Training Load Sum
     df_a_daily = df_a.groupby('Date_YYYY_MM_DD')['Activity Training Load'].sum().reset_index()
     df_a_daily.rename(columns={'Activity Training Load': 'Daily_Activity_Training_Load'}, inplace=True)
+
+    # Process Running-Specific Metrics (Highest Load Start Time & Easy % calculations)
+    runs = df_a[df_a['Activity Type'].astype(str).str.lower() == 'running'].copy()
+    if not runs.empty:
+        # Get start time of highest load run per day
+        highest_load_runs = runs.sort_values('Activity Training Load', ascending=False).drop_duplicates('Date_YYYY_MM_DD')
+        highest_load_runs = highest_load_runs[['Date_YYYY_MM_DD', 'Start Time (HH:MM)']]
+        highest_load_runs.rename(columns={'Start Time (HH:MM)': 'Highest Load Run Start Time'}, inplace=True)
+        
+        # Calculate daily easy running duration based on VO2 Max
+        vo2_col = 'VO2 Max (ml/kg/min)' if 'VO2 Max (ml/kg/min)' in df_g.columns else next((c for c in df_g.columns if 'VO2 Max' in c), None)
+        if vo2_col:
+            vo2_df = df_g[['Date_YYYY_MM_DD', vo2_col]].dropna()
+            runs = pd.merge(runs, vo2_df, on='Date_YYYY_MM_DD', how='left')
+            runs[vo2_col] = runs[vo2_col].ffill().bfill()
+            
+            runs['Avg Pace (decimal)'] = runs['Avg Pace (min/km)'].apply(pace_to_decimal)
+            
+            # Approximate LT Pace from VO2 Max (e.g. VO2 50 = ~4.4 min/km or 4:24 min/km)
+            runs['Calculated LT Pace (decimal)'] = 220.0 / runs[vo2_col]
+            
+            # Categorize as easy if pace is slower (numerically higher) than threshold pace
+            runs['Is Easy'] = runs['Avg Pace (decimal)'] > runs['Calculated LT Pace (decimal)']
+            runs['Easy Duration'] = np.where(runs['Is Easy'], runs['Duration (min)'], 0)
+            runs['Total Duration'] = runs['Duration (min)']
+            
+            daily_dur = runs.groupby('Date_YYYY_MM_DD')[['Easy Duration', 'Total Duration']].sum().reset_index()
+            
+            df_a_daily = pd.merge(df_a_daily, highest_load_runs, on='Date_YYYY_MM_DD', how='left')
+            df_a_daily = pd.merge(df_a_daily, daily_dur, on='Date_YYYY_MM_DD', how='left')
+        else:
+            df_a_daily = pd.merge(df_a_daily, highest_load_runs, on='Date_YYYY_MM_DD', how='left')
+            df_a_daily['Easy Duration'] = np.nan
+            df_a_daily['Total Duration'] = np.nan
+    else:
+        df_a_daily['Highest Load Run Start Time'] = np.nan
+        df_a_daily['Easy Duration'] = np.nan
+        df_a_daily['Total Duration'] = np.nan
 
     # 3. Process Withings Data
     df_w = df_withings.copy()
@@ -71,7 +124,7 @@ def generate_quantified_self_csv(
     agg_dict = {weight_col: 'mean'}
     if pwv_col: agg_dict[pwv_col] = 'mean'
     if fat_col: agg_dict[fat_col] = 'mean'
-    
+
     df_w_daily = df_w.groupby('Date_YYYY_MM_DD').agg(agg_dict).reset_index()
     w_rename = {weight_col: 'Daily_Morning_Weight_kg'}
     if pwv_col: w_rename[pwv_col] = 'Pulse_Wave_Velocity_m_s'
@@ -111,18 +164,25 @@ def generate_quantified_self_csv(
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
     df['_sort_date'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
     df = df.sort_values('_sort_date').reset_index(drop=True)
-    
+
     # 7. EWMA, Rolling, and Derived Calculations
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
     df['Chronic Training Load - CTL (28d EWMA)'] = df['Daily_Activity_Training_Load'].ewm(span=28, adjust=False).mean()
     df['ATL_7d'] = df['Daily_Activity_Training_Load'].ewm(span=7, adjust=False).mean()
     df['Acute-to-Chronic Workload Ratio - ACWR'] = df['ATL_7d'] / df['Chronic Training Load - CTL (28d EWMA)']
 
+    if 'Easy Duration' in df.columns and 'Total Duration' in df.columns:
+        df['Easy Duration'] = df['Easy Duration'].fillna(0)
+        df['Total Duration'] = df['Total Duration'].fillna(0)
+        df['Rolling 28d Easy Minutes'] = df.rolling('28D', on='_sort_date')['Easy Duration'].sum()
+        df['Rolling 28d Total Minutes'] = df.rolling('28D', on='_sort_date')['Total Duration'].sum()
+        df['% Easy Runs (28d Rolling)'] = (df['Rolling 28d Easy Minutes'] / df['Rolling 28d Total Minutes']) * 100
+
     if 'Sleep Start Time' in df.columns:
         df['Sleep Start Time (decimal hours)'] = df['Sleep Start Time'].apply(time_to_decimal)
         sleep_adj = df['Sleep Start Time (decimal hours)'].apply(adjust_for_midnight)
         df['Sleep Start Time Variance - 7d Rolling Std Dev (hours)'] = sleep_adj.rolling(window=7, min_periods=3).std()
-    
+
     if 'Sleep Need (min)' in df.columns and 'Sleep Length (min)' in df.columns:
         sleep_deficit = (df['Sleep Need (min)'] - df['Sleep Length (min)']).clip(lower=0)
         df['Sleep Deficit EWMA (min)'] = sleep_deficit.ewm(span=4, adjust=False).mean()
@@ -169,12 +229,11 @@ def generate_quantified_self_csv(
         'Chronic Training Load - CTL (28d EWMA)',
         'Acute-to-Chronic Workload Ratio - ACWR',
         'Daily Running Distance (km)',
+        'Highest Load Run Start Time',
+        '% Easy Runs (28d Rolling)',
         'Average Grade Adjusted Pace - GAP (min/km)',
         'Total Strength Training Duration (min)',
         'VO2 Max (ml/kg/min)',
-        'Garmin Low Aerobic Exercise Load',
-        'Garmin High Aerobic Exercise Load',
-        'Garmin Anaerobic Exercise Load',
         'Lactate Threshold Pace (min/km)',
         'Body Fat - US Army Calibrated 7d Avg (%)',
         'Withings Pulse Wave Velocity (m/s)',
@@ -191,15 +250,12 @@ def generate_quantified_self_csv(
         'Waking Average Stress Score (0-100)': 'Garmin Waking Average Stress Score (raw 0–100)',
         'Total Running Distance (km)': 'Daily Running Distance (km)',
         "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": 'Average Grade Adjusted Pace - GAP (min/km)',
-        'Low Aerobic Training Load (7d sum)': 'Garmin Low Aerobic Exercise Load',
-        'High Aerobic Training Load (7d sum)': 'Garmin High Aerobic Exercise Load',
-        'Anaerobic Training Load (7d sum)': 'Garmin Anaerobic Exercise Load',
         'Pulse_Wave_Velocity_m_s': 'Withings Pulse Wave Velocity (m/s)',
         'Medical_Notes': 'Medical Note'
     }
 
     df.rename(columns=rename_map, inplace=True)
-    
+
     for col in target_columns:
         if col not in df.columns:
             df[col] = np.nan
@@ -210,7 +266,7 @@ def generate_quantified_self_csv(
     # 9. Strict Type & Decimal Formatting
     float_1dp = [
         'Time at Work (hours)', 'Garmin Waking Average Stress Score (raw 0–100)', 
-        'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)'
+        'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)', '% Easy Runs (28d Rolling)'
     ]
     float_2dp = [
         'Weight - Morning 7d Avg (kg)', 'Sleep Start Time (decimal hours)', 
@@ -223,9 +279,8 @@ def generate_quantified_self_csv(
     int_cols = [
         'Sleep Length (min)', 'Garmin Sleep Score (raw 0–100)', 'Overnight Resting HR (raw bpm)', 
         'Daily Steps', 'Daily Moderate Intensity Minutes', 'Daily Vigorous Intensity Minutes', 
-        'Total Strength Training Duration (min)', 'Garmin Low Aerobic Exercise Load', 
-        'Garmin High Aerobic Exercise Load', 'Garmin Anaerobic Exercise Load',
-        'Systolic Blood Pressure (mmHg)', 'Diastolic Blood Pressure (mmHg)'
+        'Total Strength Training Duration (min)', 'Systolic Blood Pressure (mmHg)', 
+        'Diastolic Blood Pressure (mmHg)'
     ]
 
     for col in float_1dp:
