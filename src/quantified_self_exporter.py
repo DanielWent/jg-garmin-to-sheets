@@ -82,7 +82,7 @@ def generate_quantified_self_csv(
         highest_load_runs = highest_load_runs[['Date_YYYY_MM_DD', 'Start Time (HH:MM)']]
         highest_load_runs.rename(columns={'Start Time (HH:MM)': 'Highest Load Run Start Time'}, inplace=True)
         
-        # Calculate daily easy running duration based on VO2 Max
+        # Determine Pace-Based Fallback using VO2 Max (if available)
         vo2_col = 'VO2 Max (ml/kg/min)' if 'VO2 Max (ml/kg/min)' in df_g.columns else next((c for c in df_g.columns if 'VO2 Max' in c), None)
         if vo2_col:
             vo2_df = df_g[['Date_YYYY_MM_DD', vo2_col]].dropna()
@@ -93,20 +93,36 @@ def generate_quantified_self_csv(
             
             # Approximate LT Pace from VO2 Max (e.g. VO2 50 = ~4.4 min/km or 4:24 min/km)
             runs['Calculated LT Pace (decimal)'] = 220.0 / runs[vo2_col]
-            
-            # Categorize as easy if pace is slower (numerically higher) than threshold pace
-            runs['Is Easy'] = runs['Avg Pace (decimal)'] > runs['Calculated LT Pace (decimal)']
-            runs['Easy Duration'] = np.where(runs['Is Easy'], runs['Duration (min)'], 0)
-            runs['Total Duration'] = runs['Duration (min)']
-            
-            daily_dur = runs.groupby('Date_YYYY_MM_DD')[['Easy Duration', 'Total Duration']].sum().reset_index()
-            
-            df_a_daily = pd.merge(df_a_daily, highest_load_runs, on='Date_YYYY_MM_DD', how='left')
-            df_a_daily = pd.merge(df_a_daily, daily_dur, on='Date_YYYY_MM_DD', how='left')
+            fallback_is_easy = runs['Avg Pace (decimal)'] > runs['Calculated LT Pace (decimal)']
         else:
-            df_a_daily = pd.merge(df_a_daily, highest_load_runs, on='Date_YYYY_MM_DD', how='left')
-            df_a_daily['Easy Duration'] = np.nan
-            df_a_daily['Total Duration'] = np.nan
+            fallback_is_easy = pd.Series(True, index=runs.index) # Default to easy if pace data doesn't exist
+            
+        # Parse Primary Training Effect Labels
+        if 'Garmin Training Effect Label' in runs.columns:
+            labels = runs['Garmin Training Effect Label'].astype(str).str.strip().str.upper()
+        else:
+            labels = pd.Series('UNKNOWN', index=runs.index)
+            
+        easy_labels = {'AEROBIC_BASE', 'BASE', 'RECOVERY', 'LOW_AEROBIC', 'NO_BENEFIT', 'NONE'}
+        hard_labels = {'TEMPO', 'LACTATE_THRESHOLD', 'THRESHOLD', 'VO2MAX', 'VO2_MAX', 'ANAEROBIC_CAPACITY', 'ANAEROBIC', 'SPEED', 'SPRINT', 'HIGH_AEROBIC'}
+        
+        # Categorize run intensity (Priority 1: Label, Priority 2: Pace vs LT Pace)
+        runs['Is Easy'] = np.where(
+            labels.isin(easy_labels), True,
+            np.where(
+                labels.isin(hard_labels), False,
+                fallback_is_easy
+            )
+        )
+        
+        # Calculate daily aggregate durations
+        runs['Easy Duration'] = np.where(runs['Is Easy'], runs['Duration (min)'], 0)
+        runs['Total Duration'] = runs['Duration (min)']
+        
+        daily_dur = runs.groupby('Date_YYYY_MM_DD')[['Easy Duration', 'Total Duration']].sum().reset_index()
+        
+        df_a_daily = pd.merge(df_a_daily, highest_load_runs, on='Date_YYYY_MM_DD', how='left')
+        df_a_daily = pd.merge(df_a_daily, daily_dur, on='Date_YYYY_MM_DD', how='left')
     else:
         df_a_daily['Highest Load Run Start Time'] = np.nan
         df_a_daily['Easy Duration'] = np.nan
