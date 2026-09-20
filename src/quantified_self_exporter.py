@@ -336,6 +336,10 @@ def download_drive_file(service, file_id):
 if __name__ == '__main__':
     FOLDER_ID = os.getenv('DRIVE_FOLDER_ID')
     SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
+    
+    # New output folder variable
+    drw_quantified_self_folder = '0B06ZX4hUnMRtT2VLR2pNYnJEVkE'
+    
     GARMIN_FILENAME = 'drw_garmin_data.csv'
     ACTIVITIES_FILENAME = 'drw_garmin_activities_list.csv'
     WITHINGS_FILENAME = 'drw_withings_bodyscan_data.csv'
@@ -365,7 +369,8 @@ if __name__ == '__main__':
     if not medical_file_id:
         medical_file_id = get_file_id(drive_service, "Daniel's Medical Test Results.csv", FOLDER_ID)
 
-    target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
+    # Use the new target folder for the upload
+    target_file_id = get_file_id(drive_service, TARGET_FILENAME, drw_quantified_self_folder)
 
     for name, f_id in zip(
         [GARMIN_FILENAME, ACTIVITIES_FILENAME, WITHINGS_FILENAME, MEDICAL_FILENAME],
@@ -394,7 +399,8 @@ if __name__ == '__main__':
             fileId=target_file_id, media_body=media, fields='id, modifiedTime'
         ).execute()
     else:
-        file_metadata = {'name': TARGET_FILENAME, 'parents': [FOLDER_ID], 'mimeType': 'text/csv'}
+        # Save into the new output folder
+        file_metadata = {'name': TARGET_FILENAME, 'parents': [drw_quantified_self_folder], 'mimeType': 'text/csv'}
         drive_service.files().create(
             body=file_metadata, media_body=media, fields='id, modifiedTime'
         ).execute()
