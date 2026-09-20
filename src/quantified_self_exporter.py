@@ -91,13 +91,13 @@ def load_zones_data(url: str) -> pd.DataFrame:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as response:
             if response.status != 200:
-                print(f"Warning: HTTP status {response.status} when fetching zone history. Proceeding with empty zone data.")
+                print(f"Warning: HTTP status {response.status} when fetching zone history.")
                 return fallback_df
             raw_bytes = response.read()
 
         preview = raw_bytes[:300].decode('utf-8', errors='ignore').strip().lower()
         if preview.startswith('<!doctype') or '<html' in preview:
-            print("Warning: Zone endpoint returned HTML instead of CSV. Proceeding with empty zone data.")
+            print("Warning: Zone endpoint returned HTML instead of CSV.")
             return fallback_df
 
         df = pd.read_csv(
@@ -107,7 +107,7 @@ def load_zones_data(url: str) -> pd.DataFrame:
         )
         return df
     except Exception as e:
-        print(f"Warning: Failed to retrieve or parse Home Assistant zone data ({e}). Proceeding without zone data.")
+        print(f"Warning: Failed to retrieve Home Assistant zone data ({e}).")
         return fallback_df
 
 
@@ -147,7 +147,18 @@ def generate_quantified_self_csv(
         'Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
         'Avg Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
         'Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
+        # Direct daily aerobic & anaerobic training load mapping
+        'Garmin Low Aerobic Exercise Load - Daily Sum (Score)': 'Garmin_Low_Aerobic_Daily_Sum',
+        'Garmin High Aerobic Exercise Load - Daily Sum (Score)': 'Garmin_High_Aerobic_Daily_Sum',
+        'Garmin Anaerobic Exercise Load - Daily Sum (Score)': 'Garmin_Anaerobic_Daily_Sum',
+        'Low Aerobic Load': 'Garmin_Low_Aerobic_Daily_Sum',
+        'High Aerobic Load': 'Garmin_High_Aerobic_Daily_Sum',
+        'Anaerobic Load': 'Garmin_Anaerobic_Daily_Sum',
+        'Low Aerobic Training Load': 'Garmin_Low_Aerobic_Daily_Sum',
+        'High Aerobic Training Load': 'Garmin_High_Aerobic_Daily_Sum',
+        'Anaerobic Training Load': 'Garmin_Anaerobic_Daily_Sum',
     }
+
     df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x)).copy()
     date_col_g = next(
         (c for c in ['Date_YYYY_MM_DD', 'Date (YYYY-MM-DD)', 'Date'] if c in df_g.columns),
@@ -191,25 +202,32 @@ def generate_quantified_self_csv(
     else:
         df_act['Activity_Load_Numeric'] = 0.0
 
-    low_col = find_column_by_keywords(df_act, ['low', 'aerobic'])
-    high_col = find_column_by_keywords(df_act, ['high', 'aerobic'])
+    # Independent column lookup for training loads
+    low_col = find_column_by_keywords(df_act, ['low', 'aerobic']) or find_column_by_keywords(df_act, ['low_aerobic'])
+    high_col = find_column_by_keywords(df_act, ['high', 'aerobic']) or find_column_by_keywords(df_act, ['high_aerobic'])
     anaerobic_col = find_column_by_keywords(df_act, ['anaerobic'], exclude_keywords=['high', 'low'])
 
-    if low_col and high_col and anaerobic_col:
+    if low_col:
         df_act['Low_Aerobic_Load'] = pd.to_numeric(df_act[low_col], errors='coerce').fillna(0)
+    if high_col:
         df_act['High_Aerobic_Load'] = pd.to_numeric(df_act[high_col], errors='coerce').fillna(0)
+    if anaerobic_col:
         df_act['Anaerobic_Load'] = pd.to_numeric(df_act[anaerobic_col], errors='coerce').fillna(0)
-    else:
-        benefit_col = next((c for c in df_act.columns if 'benefit' in c.lower() or 'training effect' in c.lower()), None)
-        if benefit_col:
-            b_str = df_act[benefit_col].astype(str).str.lower()
+
+    # Fallback using benefit descriptor if individual load columns do not exist
+    benefit_col = next((c for c in df_act.columns if 'benefit' in c.lower() or 'training effect' in c.lower()), None)
+    if benefit_col:
+        b_str = df_act[benefit_col].astype(str).str.lower()
+        if 'Low_Aerobic_Load' not in df_act.columns:
             df_act['Low_Aerobic_Load'] = np.where(b_str.str.contains('recovery|base|low aerobic'), df_act['Activity_Load_Numeric'], 0.0)
+        if 'High_Aerobic_Load' not in df_act.columns:
             df_act['High_Aerobic_Load'] = np.where(b_str.str.contains('tempo|threshold|vo2|high aerobic'), df_act['Activity_Load_Numeric'], 0.0)
+        if 'Anaerobic_Load' not in df_act.columns:
             df_act['Anaerobic_Load'] = np.where(b_str.str.contains('sprint|anaerobic'), df_act['Activity_Load_Numeric'], 0.0)
-        else:
-            df_act['Low_Aerobic_Load'] = 0.0
-            df_act['High_Aerobic_Load'] = 0.0
-            df_act['Anaerobic_Load'] = 0.0
+
+    for col in ['Low_Aerobic_Load', 'High_Aerobic_Load', 'Anaerobic_Load']:
+        if col not in df_act.columns:
+            df_act[col] = 0.0
 
     duration_col = next(
         (c for c in df_act.columns if any(k in c.lower() for k in ['duration', 'elapsed time', 'time']) and 'zone' not in c.lower() and 'work' not in c.lower()),
@@ -266,6 +284,14 @@ def generate_quantified_self_csv(
         })
     )
     df_a_daily = pd.merge(df_a_daily, df_runs_daily, on='Date_YYYY_MM_DD', how='left')
+
+    # Avoid merge suffix conflicts with df_g
+    for load_metric in ['Garmin_Low_Aerobic_Daily_Sum', 'Garmin_High_Aerobic_Daily_Sum', 'Garmin_Anaerobic_Daily_Sum']:
+        if load_metric in df_g.columns:
+            df_g[load_metric] = pd.to_numeric(df_g[load_metric], errors='coerce')
+            df_a_daily[load_metric] = pd.to_numeric(df_a_daily[load_metric], errors='coerce')
+            df_g[load_metric] = df_g[load_metric].fillna(df_a_daily.set_index('Date_YYYY_MM_DD')[load_metric].reindex(df_g['Date_YYYY_MM_DD']).values)
+            df_a_daily = df_a_daily.drop(columns=[load_metric])
 
     # ---------------------------------------------------------
     # 3. Process Withings Data
@@ -384,7 +410,11 @@ def generate_quantified_self_csv(
     # ---------------------------------------------------------
     # 7. Derived Metrics & Mathematical Formulations
     # ---------------------------------------------------------
-    df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0.0)
+    if 'Daily_Activity_Training_Load' not in df.columns:
+        df['Daily_Activity_Training_Load'] = 0.0
+    else:
+        df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0.0)
+
     df['Date_Datetime'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
 
     df['Chronic_Training_Load_28d_EWMA'] = df['Daily_Activity_Training_Load'].ewm(
@@ -561,96 +591,3 @@ def generate_quantified_self_csv(
     # ---------------------------------------------------------
     df_export.to_csv(output_path, header=True, index=False, na_rep='')
     return df_export
-
-
-def get_file_id(service, filename, folder_id):
-    safe_filename = filename.replace("'", "\\'")
-    query = f"name='{safe_filename}' and '{folder_id}' in parents and trashed=false"
-    results = service.files().list(q=query, fields='files(id, name)').execute()
-    items = results.get('files', [])
-    return items[0]['id'] if items else None
-
-
-def download_drive_file(service, file_id):
-    request = service.files().get_media(fileId=file_id)
-    downloaded_data = io.BytesIO()
-    downloader = MediaIoBaseDownload(downloaded_data, request)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-    downloaded_data.seek(0)
-    return downloaded_data
-
-
-if __name__ == '__main__':
-    FOLDER_ID = os.getenv('DRIVE_FOLDER_ID')
-    SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
-    GARMIN_FILENAME = 'drw_garmin_data.csv'
-    ACTIVITIES_FILENAME = 'drw_garmin_activities_list.csv'
-    WITHINGS_FILENAME = 'drw_withings_bodyscan_data.csv'
-    MEDICAL_FILENAME = "Daniel's Full Medical Notes.csv"
-    ZONES_BASE_URL = 'https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv'
-    ZONES_URL = f'{ZONES_BASE_URL}?v={int(time.time())}'
-    TARGET_FILENAME = 'drw_quantified_self.csv'
-
-    if not FOLDER_ID:
-        raise ValueError('DRIVE_FOLDER_ID environment variable is not set.')
-    if not SERVICE_ACCOUNT_JSON:
-        raise ValueError('GOOGLE_SHEETS_CREDENTIALS environment variable is not set.')
-
-    print('Authenticating with Google Drive...')
-    service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
-    creds = service_account.Credentials.from_service_account_info(
-        service_account_info, scopes=['https://www.googleapis.com/auth/drive']
-    )
-    drive_service = build('drive', 'v3', credentials=creds)
-
-    print(f'Locating files in folder {FOLDER_ID}...')
-    garmin_file_id = get_file_id(drive_service, GARMIN_FILENAME, FOLDER_ID)
-    activities_file_id = get_file_id(drive_service, ACTIVITIES_FILENAME, FOLDER_ID)
-    withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
-    medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
-    if not medical_file_id:
-        medical_file_id = get_file_id(drive_service, "Daniel's Medical Test Results.csv", FOLDER_ID)
-    target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
-
-    if not garmin_file_id:
-        raise FileNotFoundError(f"Could not find '{GARMIN_FILENAME}' in Drive.")
-    if not activities_file_id:
-        raise FileNotFoundError(f"Could not find '{ACTIVITIES_FILENAME}' in Drive.")
-    if not withings_file_id:
-        raise FileNotFoundError(f"Could not find '{WITHINGS_FILENAME}' in Drive.")
-    if not medical_file_id:
-        raise FileNotFoundError(f"Could not find '{MEDICAL_FILENAME}' in Drive.")
-
-    print('Downloading raw data from Google Drive and Home Assistant...')
-    garmin_data = download_drive_file(drive_service, garmin_file_id)
-    activities_data = download_drive_file(drive_service, activities_file_id)
-    withings_data = download_drive_file(drive_service, withings_file_id)
-    medical_data = download_drive_file(drive_service, medical_file_id)
-
-    df_garmin_raw = pd.read_csv(garmin_data)
-    df_activities_raw = pd.read_csv(activities_data)
-    df_withings_raw = pd.read_csv(withings_data)
-    df_medical_raw = pd.read_csv(medical_data)
-    df_zones_raw = load_zones_data(ZONES_URL)
-
-    print('Processing physiological metrics...')
-    generate_quantified_self_csv(
-        df_garmin_raw,
-        df_withings_raw,
-        df_medical_raw,
-        df_activities_raw,
-        df_zones_raw,
-        output_path=TARGET_FILENAME,
-    )
-
-    print('Uploading updated CSV to Google Drive...')
-    media = MediaFileUpload(TARGET_FILENAME, mimetype='text/csv', resumable=True)
-    if target_file_id:
-        drive_service.files().update(fileId=target_file_id, media_body=media).execute()
-    else:
-        file_metadata = {'name': TARGET_FILENAME, 'parents': [FOLDER_ID]}
-        drive_service.files().create(body=file_metadata, media_body=media).execute()
-
-    print('Export and upload complete.')
