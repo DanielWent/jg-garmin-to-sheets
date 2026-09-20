@@ -119,9 +119,7 @@ def generate_quantified_self_csv(
     df_zones: pd.DataFrame,
     output_path: str = 'drw_quantified_self.csv',
 ):
-    # ---------------------------------------------------------
-    # 1. Process Garmin Daily Data
-    # ---------------------------------------------------------
+    print("Processing Garmin Daily Data...")
     garmin_mapping = {
         'Date (YYYY-MM-DD)': 'Date_YYYY_MM_DD',
         'Date': 'Date_YYYY_MM_DD',
@@ -147,22 +145,6 @@ def generate_quantified_self_csv(
         'Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
         'Avg Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
         'Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
-        # Direct 7d aerobic & anaerobic training load mapping
-        'Garmin Low Aerobic Exercise Load - 7d Sum (Score)': 'Garmin_Low_Aerobic_7d_Sum',
-        'Garmin High Aerobic Exercise Load - 7d Sum (Score)': 'Garmin_High_Aerobic_7d_Sum',
-        'Garmin Anaerobic Exercise Load - 7d Sum (Score)': 'Garmin_Anaerobic_7d_Sum',
-        'Garmin Low Aerobic Exercise Load - Daily Sum (Score)': 'Garmin_Low_Aerobic_7d_Sum',
-        'Garmin High Aerobic Exercise Load - Daily Sum (Score)': 'Garmin_High_Aerobic_7d_Sum',
-        'Garmin Anaerobic Exercise Load - Daily Sum (Score)': 'Garmin_Anaerobic_7d_Sum',
-        'Low Aerobic Load': 'Garmin_Low_Aerobic_7d_Sum',
-        'High Aerobic Load': 'Garmin_High_Aerobic_7d_Sum',
-        'Anaerobic Load': 'Garmin_Anaerobic_7d_Sum',
-        'Low Aerobic Training Load': 'Garmin_Low_Aerobic_7d_Sum',
-        'High Aerobic Training Load': 'Garmin_High_Aerobic_7d_Sum',
-        'Anaerobic Training Load': 'Garmin_Anaerobic_7d_Sum',
-        'Low Aerobic Training Load (7d sum)': 'Garmin_Low_Aerobic_7d_Sum',
-        'High Aerobic Training Load (7d sum)': 'Garmin_High_Aerobic_7d_Sum',
-        'Anaerobic Training Load (7d sum)': 'Garmin_Anaerobic_7d_Sum',
     }
 
     df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x)).copy()
@@ -172,14 +154,38 @@ def generate_quantified_self_csv(
     )
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
 
-    # Positional indexing for 7d Training Loads from drw_data
-    # Col 50: Anaerobic, Col 51: High Aerobic, Col 52: Low Aerobic (0-indexed)
-    if 'Garmin_Anaerobic_7d_Sum' not in df_g.columns and df_garmin.shape[1] > 50:
-        df_g['Garmin_Anaerobic_7d_Sum'] = pd.to_numeric(df_garmin.iloc[:, 50], errors='coerce')
-    if 'Garmin_High_Aerobic_7d_Sum' not in df_g.columns and df_garmin.shape[1] > 51:
-        df_g['Garmin_High_Aerobic_7d_Sum'] = pd.to_numeric(df_garmin.iloc[:, 51], errors='coerce')
-    if 'Garmin_Low_Aerobic_7d_Sum' not in df_g.columns and df_garmin.shape[1] > 52:
-        df_g['Garmin_Low_Aerobic_7d_Sum'] = pd.to_numeric(df_garmin.iloc[:, 52], errors='coerce')
+    # Remove any existing mapped load columns to avoid duplicate column conflicts in df_g
+    for target_col in ['Garmin_Anaerobic_7d_Sum', 'Garmin_High_Aerobic_7d_Sum', 'Garmin_Low_Aerobic_7d_Sum']:
+        if target_col in df_g.columns:
+            df_g = df_g.drop(columns=[target_col])
+
+    # Positional extraction directly from raw drw_data (df_garmin)
+    if df_garmin.shape[1] > 52:
+        df_g['Garmin_Anaerobic_7d_Sum'] = pd.to_numeric(
+            df_garmin.iloc[:, 50].astype(str).str.replace(',', '').str.strip(), errors='coerce'
+        )
+        df_g['Garmin_High_Aerobic_7d_Sum'] = pd.to_numeric(
+            df_garmin.iloc[:, 51].astype(str).str.replace(',', '').str.strip(), errors='coerce'
+        )
+        df_g['Garmin_Low_Aerobic_7d_Sum'] = pd.to_numeric(
+            df_garmin.iloc[:, 52].astype(str).str.replace(',', '').str.strip(), errors='coerce'
+        )
+    else:
+        anaerobic_col = find_column_by_keywords(df_garmin, ['anaerobic'], exclude_keywords=['high', 'low'])
+        high_col = find_column_by_keywords(df_garmin, ['high', 'aerobic'])
+        low_col = find_column_by_keywords(df_garmin, ['low', 'aerobic'])
+        if anaerobic_col:
+            df_g['Garmin_Anaerobic_7d_Sum'] = pd.to_numeric(
+                df_garmin[anaerobic_col].astype(str).str.replace(',', '').str.strip(), errors='coerce'
+            )
+        if high_col:
+            df_g['Garmin_High_Aerobic_7d_Sum'] = pd.to_numeric(
+                df_garmin[high_col].astype(str).str.replace(',', '').str.strip(), errors='coerce'
+            )
+        if low_col:
+            df_g['Garmin_Low_Aerobic_7d_Sum'] = pd.to_numeric(
+                df_garmin[low_col].astype(str).str.replace(',', '').str.strip(), errors='coerce'
+            )
 
     if 'Garmin_Moderate_Intensity_Minutes' not in df_g.columns and df_garmin.shape[1] > 43:
         df_g['Garmin_Moderate_Intensity_Minutes'] = df_garmin.iloc[:, 43]
@@ -197,9 +203,7 @@ def generate_quantified_self_csv(
 
     df_g = df_g.loc[:, ~df_g.columns.duplicated()]
 
-    # ---------------------------------------------------------
-    # 2. Process Garmin Activities Data
-    # ---------------------------------------------------------
+    print("Processing Garmin Activities...")
     act_date_col = next(
         (c for c in ['Date (YYYY-MM-DD)', 'Date', 'Date_YYYY_MM_DD'] if c in df_activities.columns),
         df_activities.columns[0],
@@ -217,7 +221,6 @@ def generate_quantified_self_csv(
     else:
         df_act['Activity_Load_Numeric'] = 0.0
 
-    # Independent column lookup for training loads
     low_col = find_column_by_keywords(df_act, ['low', 'aerobic']) or find_column_by_keywords(df_act, ['low_aerobic'])
     high_col = find_column_by_keywords(df_act, ['high', 'aerobic']) or find_column_by_keywords(df_act, ['high_aerobic'])
     anaerobic_col = find_column_by_keywords(df_act, ['anaerobic'], exclude_keywords=['high', 'low'])
@@ -229,7 +232,6 @@ def generate_quantified_self_csv(
     if anaerobic_col:
         df_act['Anaerobic_Load'] = pd.to_numeric(df_act[anaerobic_col], errors='coerce').fillna(0)
 
-    # Fallback using benefit descriptor if individual load columns do not exist
     benefit_col = next((c for c in df_act.columns if 'benefit' in c.lower() or 'training effect' in c.lower()), None)
     if benefit_col:
         b_str = df_act[benefit_col].astype(str).str.lower()
@@ -300,14 +302,7 @@ def generate_quantified_self_csv(
     )
     df_a_daily = pd.merge(df_a_daily, df_runs_daily, on='Date_YYYY_MM_DD', how='left')
 
-    # Ensure numeric types and handle conflicts for load metrics
-    for load_metric in ['Garmin_Low_Aerobic_7d_Sum', 'Garmin_High_Aerobic_7d_Sum', 'Garmin_Anaerobic_7d_Sum']:
-        if load_metric in df_g.columns:
-            df_g[load_metric] = pd.to_numeric(df_g[load_metric], errors='coerce')
-
-    # ---------------------------------------------------------
-    # 3. Process Withings Data
-    # ---------------------------------------------------------
+    print("Processing Withings Data...")
     date_col_w = next(
         (c for c in ['date', 'Date', 'Date (YYYY-MM-DD)'] if c in df_withings.columns),
         df_withings.columns[0],
@@ -348,9 +343,7 @@ def generate_quantified_self_csv(
         rename_w[w_dia_col] = 'Withings_Diastolic_mmHg'
     df_w_daily = df_w_daily.rename(columns=rename_w)
 
-    # ---------------------------------------------------------
-    # 4. Process Medical Data
-    # ---------------------------------------------------------
+    print("Processing Medical Data...")
     df_med = df_medical.copy()
     df_med['Date_YYYY_MM_DD'] = parse_to_iso_date(df_med.iloc[:, 0])
     sig_col = df_med.iloc[:, 3]
@@ -371,9 +364,7 @@ def generate_quantified_self_csv(
     else:
         df_m_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Medical_Notes'])
 
-    # ---------------------------------------------------------
-    # 5. Process Home Assistant Zone Data
-    # ---------------------------------------------------------
+    print("Processing Home Assistant Zone Data...")
     if not df_zones.empty:
         zone_date_col = next(
             (c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_zones.columns),
@@ -392,9 +383,7 @@ def generate_quantified_self_csv(
     else:
         df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time_in_Work_Zone_hours'])
 
-    # ---------------------------------------------------------
-    # 6. Merge Datasets
-    # ---------------------------------------------------------
+    print("Merging Dataframes...")
     df = pd.merge(df_g, df_a_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
@@ -419,9 +408,7 @@ def generate_quantified_self_csv(
     elif 'Withings_Diastolic_mmHg' in df.columns:
         df['Resting_Diastolic_Blood_Pressure_mmHg'] = df['Resting_Diastolic_Blood_Pressure_mmHg'].fillna(df['Withings_Diastolic_mmHg'])
 
-    # ---------------------------------------------------------
-    # 7. Derived Metrics & Mathematical Formulations
-    # ---------------------------------------------------------
+    print("Calculating Derived Metrics...")
     if 'Daily_Activity_Training_Load' not in df.columns:
         df['Daily_Activity_Training_Load'] = 0.0
     else:
@@ -485,9 +472,7 @@ def generate_quantified_self_csv(
     if 'Lactate_Threshold_Pace' in df.columns:
         df['Lactate_Threshold_Pace_decimal'] = df['Lactate_Threshold_Pace'].apply(convert_pace_to_decimal)
 
-    # ---------------------------------------------------------
-    # 8. Export Column Selection and Exact Renaming
-    # ---------------------------------------------------------
+    print("Formatting Columns and Precision...")
     df_export = df.tail(730).copy()
     df_export['_sort_date'] = pd.to_datetime(df_export['Date_YYYY_MM_DD'], format='%Y-%m-%d', errors='coerce')
     df_export = df_export.sort_values(by='_sort_date', ascending=False).reset_index(drop=True)
@@ -539,9 +524,6 @@ def generate_quantified_self_csv(
 
     df_export = clean_export
 
-    # ---------------------------------------------------------
-    # 9. Strict Type & Decimal Precision Formatting
-    # ---------------------------------------------------------
     integer_columns = [
         'Systolic Blood Pressure (mmHg)',
         'Diastolic Blood Pressure (mmHg)',
@@ -598,8 +580,77 @@ def generate_quantified_self_csv(
                 s = s.iloc[:, 0]
             df_export[col] = pd.to_numeric(s, errors='coerce').round(2)
 
-    # ---------------------------------------------------------
-    # 10. Write Out Clean CSV
-    # ---------------------------------------------------------
     df_export.to_csv(output_path, header=True, index=False, na_rep='')
+    print(f"Export completed successfully -> {output_path}")
     return df_export
+
+
+# ---------------------------------------------------------
+# Execution Entry Point
+# ---------------------------------------------------------
+if __name__ == '__main__':
+    creds_json = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
+    drive_folder_id = os.getenv('DRIVE_FOLDER_ID')
+
+    if not creds_json or not drive_folder_id:
+        raise ValueError("Missing GOOGLE_SHEETS_CREDENTIALS or DRIVE_FOLDER_ID environment variables.")
+
+    creds_dict = json.loads(creds_json)
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict,
+        scopes=['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+    )
+
+    drive_service = build('drive', 'v3', credentials=creds)
+
+    def download_csv_from_drive(file_name: str) -> pd.DataFrame:
+        query = f"'{drive_folder_id}' in parents and name = '{file_name}' and trashed = false"
+        res = drive_service.files().list(q=query, fields="files(id, name)").execute()
+        files = res.get('files', [])
+        if not files:
+            print(f"Warning: {file_name} not found in Google Drive folder.")
+            return pd.DataFrame()
+        
+        file_id = files[0]['id']
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        fh.seek(0)
+        return pd.read_csv(fh, on_bad_lines='skip', engine='python')
+
+    print("Fetching CSV data from Google Drive...")
+    df_garmin = download_csv_from_drive('drw_data.csv')
+    df_withings = download_csv_from_drive('withings_data.csv')
+    df_medical = download_csv_from_drive('drw_medical.csv')
+    df_activities = download_csv_from_drive('drw_activities.csv')
+
+    zone_url = os.getenv('HOME_ASSISTANT_ZONES_URL', '')
+    df_zones = load_zones_data(zone_url) if zone_url else pd.DataFrame()
+
+    out_csv = 'drw_quantified_self.csv'
+    df_result = generate_quantified_self_csv(
+        df_garmin=df_garmin,
+        df_withings=df_withings,
+        df_medical=df_medical,
+        df_activities=df_activities,
+        df_zones=df_zones,
+        output_path=out_csv,
+    )
+
+    # Upload clean CSV back to Google Drive
+    query = f"'{drive_folder_id}' in parents and name = '{out_csv}' and trashed = false"
+    res = drive_service.files().list(q=query, fields="files(id, name)").execute()
+    files = res.get('files', [])
+
+    media = MediaFileUpload(out_csv, mimetype='text/csv')
+    if files:
+        file_id = files[0]['id']
+        drive_service.files().update(fileId=file_id, media_body=media).execute()
+        print(f"Updated existing Google Drive file: {out_csv}")
+    else:
+        file_metadata = {'name': out_csv, 'parents': [drive_folder_id]}
+        drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        print(f"Uploaded new Google Drive file: {out_csv}")
