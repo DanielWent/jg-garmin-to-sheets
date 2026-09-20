@@ -2,6 +2,7 @@ import io
 import json
 import os
 import time
+import urllib.request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -84,6 +85,32 @@ def find_column_by_keywords(df: pd.DataFrame, include_keywords: list, exclude_ke
     return None
 
 
+def load_zones_data(url: str) -> pd.DataFrame:
+    fallback_df = pd.DataFrame(columns=['Date', 'Time in Work Zone (hours)'])
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            if response.status != 200:
+                print(f"Warning: HTTP status {response.status} when fetching zone history. Proceeding with empty zone data.")
+                return fallback_df
+            raw_bytes = response.read()
+
+        preview = raw_bytes[:300].decode('utf-8', errors='ignore').strip().lower()
+        if preview.startswith('<!doctype') or '<html' in preview:
+            print("Warning: Zone endpoint returned HTML instead of CSV. Proceeding with empty zone data.")
+            return fallback_df
+
+        df = pd.read_csv(
+            io.BytesIO(raw_bytes),
+            on_bad_lines='skip',
+            engine='python'
+        )
+        return df
+    except Exception as e:
+        print(f"Warning: Failed to retrieve or parse Home Assistant zone data ({e}). Proceeding without zone data.")
+        return fallback_df
+
+
 def generate_quantified_self_csv(
     df_garmin: pd.DataFrame,
     df_withings: pd.DataFrame,
@@ -154,7 +181,6 @@ def generate_quantified_self_csv(
     df_act = df_activities.copy()
     df_act['Date_YYYY_MM_DD'] = parse_to_iso_date(df_act[act_date_col])
 
-    # Identify primary activity columns
     activity_type_col = next((c for c in df_act.columns if 'activity type' in c.lower() or c.lower() == 'type'), None)
     load_col = next(
         (c for c in df_act.columns if 'activity training load' in c.lower() or 'exercise load' in c.lower() or c.lower() == 'training load'),
@@ -165,7 +191,6 @@ def generate_quantified_self_csv(
     else:
         df_act['Activity_Load_Numeric'] = 0.0
 
-    # Categorize Exercise Loads (Low Aerobic, High Aerobic, Anaerobic)
     low_col = find_column_by_keywords(df_act, ['low', 'aerobic'])
     high_col = find_column_by_keywords(df_act, ['high', 'aerobic'])
     anaerobic_col = find_column_by_keywords(df_act, ['anaerobic'], exclude_keywords=['high', 'low'])
@@ -186,7 +211,6 @@ def generate_quantified_self_csv(
             df_act['High_Aerobic_Load'] = 0.0
             df_act['Anaerobic_Load'] = 0.0
 
-    # Strength Training Duration
     duration_col = next(
         (c for c in df_act.columns if any(k in c.lower() for k in ['duration', 'elapsed time', 'time']) and 'zone' not in c.lower() and 'work' not in c.lower()),
         None,
@@ -201,7 +225,6 @@ def generate_quantified_self_csv(
     else:
         df_act['Strength_Duration_min'] = 0.0
 
-    # Running Activities: Grade Adjusted Pace (GAP)
     if activity_type_col:
         runs_mask = df_act[activity_type_col].astype(str).str.contains('run', case=False, na=False)
     else:
@@ -224,7 +247,6 @@ def generate_quantified_self_csv(
         .rename(columns={'Run_GAP_Decimal': 'Daily_Avg_Run_GAP_decimal'})
     )
 
-    # Aggregate Activity Metrics by Day
     df_a_daily = (
         df_act.groupby('Date_YYYY_MM_DD')
         .agg({
@@ -269,7 +291,6 @@ def generate_quantified_self_csv(
             fat_col = df_w.columns[3] if df_w.shape[1] > 3 else df_w.columns[-1]
 
     agg_w = {weight_col: 'mean', pwv_col: 'mean', fat_col: 'mean'}
-    # Also capture BP if logged via Withings
     w_sys_col = find_column_by_keywords(df_w, ['systolic'])
     w_dia_col = find_column_by_keywords(df_w, ['diastolic'])
     if w_sys_col:
@@ -315,15 +336,21 @@ def generate_quantified_self_csv(
     # ---------------------------------------------------------
     # 5. Process Home Assistant Zone Data
     # ---------------------------------------------------------
-    zone_date_col = next(
-        (c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_zones.columns),
-        df_zones.columns[0],
-    )
-    df_z = df_zones.copy()
-    df_z['Date_YYYY_MM_DD'] = parse_to_iso_date(df_z[zone_date_col])
-    work_col = next((c for c in df_z.columns if 'work' in c.lower()), None)
-    if work_col:
-        df_z_daily = df_z[['Date_YYYY_MM_DD', work_col]].rename(columns={work_col: 'Time_in_Work_Zone_hours'})
+    if not df_zones.empty:
+        zone_date_col = next(
+            (c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_zones.columns),
+            df_zones.columns[0] if len(df_zones.columns) > 0 else None,
+        )
+        if zone_date_col:
+            df_z = df_zones.copy()
+            df_z['Date_YYYY_MM_DD'] = parse_to_iso_date(df_z[zone_date_col])
+            work_col = next((c for c in df_z.columns if 'work' in c.lower()), None)
+            if work_col:
+                df_z_daily = df_z[['Date_YYYY_MM_DD', work_col]].rename(columns={work_col: 'Time_in_Work_Zone_hours'})
+            else:
+                df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time_in_Work_Zone_hours'])
+        else:
+            df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time_in_Work_Zone_hours'])
     else:
         df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time_in_Work_Zone_hours'])
 
@@ -342,7 +369,6 @@ def generate_quantified_self_csv(
     df = df.drop(columns=['_sort_date'])
     df = df.loc[:, ~df.columns.duplicated()]
 
-    # Consolidate Blood Pressure
     if 'Resting_Systolic_Blood_Pressure_mmHg' not in df.columns or df['Resting_Systolic_Blood_Pressure_mmHg'].isna().all():
         if 'Withings_Systolic_mmHg' in df.columns:
             df['Resting_Systolic_Blood_Pressure_mmHg'] = df['Withings_Systolic_mmHg']
@@ -361,7 +387,6 @@ def generate_quantified_self_csv(
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0.0)
     df['Date_Datetime'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
 
-    # CTL (28d EWMA), ATL (7d EWMA), and ACWR
     df['Chronic_Training_Load_28d_EWMA'] = df['Daily_Activity_Training_Load'].ewm(
         halflife=pd.Timedelta(days=28), times=df['Date_Datetime']
     ).mean()
@@ -370,13 +395,11 @@ def generate_quantified_self_csv(
     ).mean()
     df['ACWR'] = df['Acute_Training_Load_7d_EWMA'] / df['Chronic_Training_Load_28d_EWMA'].replace(0, np.nan)
 
-    # General Health 7-day Rolling Averages
     if 'Daily_Morning_Weight_kg' in df.columns:
         df['Weight_Morning_7d_Avg_kg'] = df['Daily_Morning_Weight_kg'].rolling(window=7, min_periods=1).mean()
     if 'Daily_Body_Fat_pct' in df.columns:
         df['Body_Fat_7d_Avg_pct'] = df['Daily_Body_Fat_pct'].rolling(window=7, min_periods=1).mean()
 
-    # Sleep Metrics
     def time_to_decimal(time_str):
         if pd.isna(time_str):
             return np.nan
@@ -399,7 +422,6 @@ def generate_quantified_self_csv(
             halflife=pd.Timedelta(days=4), times=df['Date_Datetime']
         ).mean()
 
-    # 3d EWMA vs 60d Baseline Z-Scores (7-day buffer)
     if 'Overnight_Resting_Heart_Rate_bpm' in df.columns:
         shifted_rhr = df['Overnight_Resting_Heart_Rate_bpm'].shift(7)
         shifted_60d_rhr_mean = shifted_rhr.rolling(window=60, min_periods=30).mean()
@@ -463,13 +485,17 @@ def generate_quantified_self_csv(
         'Lactate_Threshold_Pace_decimal': 'Lactate Threshold Pace (min/km)',
     }
 
-    for internal_col in target_columns_map.keys():
-        if internal_col not in df_export.columns:
-            df_export[internal_col] = np.nan
+    clean_export = pd.DataFrame(index=df_export.index)
+    for internal_col, target_col in target_columns_map.items():
+        if internal_col in df_export.columns:
+            series = df_export[internal_col]
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
+            clean_export[target_col] = series
+        else:
+            clean_export[target_col] = np.nan
 
-    df_export = df_export.rename(columns=target_columns_map)
-    final_columns = list(target_columns_map.values())
-    df_export = df_export[final_columns]
+    df_export = clean_export
 
     # ---------------------------------------------------------
     # 9. Strict Type & Decimal Precision Formatting
@@ -491,7 +517,10 @@ def generate_quantified_self_csv(
     ]
     for col in integer_columns:
         if col in df_export.columns:
-            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
+            s = df_export[col]
+            if isinstance(s, pd.DataFrame):
+                s = s.iloc[:, 0]
+            df_export[col] = pd.to_numeric(s, errors='coerce').round().astype('Int64')
 
     float_1dp_columns = [
         'Time at Work (hours)',
@@ -502,7 +531,10 @@ def generate_quantified_self_csv(
     ]
     for col in float_1dp_columns:
         if col in df_export.columns:
-            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(1)
+            s = df_export[col]
+            if isinstance(s, pd.DataFrame):
+                s = s.iloc[:, 0]
+            df_export[col] = pd.to_numeric(s, errors='coerce').round(1)
 
     float_2dp_columns = [
         'Weight - Morning 7d Avg (kg)',
@@ -519,7 +551,10 @@ def generate_quantified_self_csv(
     ]
     for col in float_2dp_columns:
         if col in df_export.columns:
-            df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(2)
+            s = df_export[col]
+            if isinstance(s, pd.DataFrame):
+                s = s.iloc[:, 0]
+            df_export[col] = pd.to_numeric(s, errors='coerce').round(2)
 
     # ---------------------------------------------------------
     # 10. Write Out Clean CSV
@@ -598,7 +633,7 @@ if __name__ == '__main__':
     df_activities_raw = pd.read_csv(activities_data)
     df_withings_raw = pd.read_csv(withings_data)
     df_medical_raw = pd.read_csv(medical_data)
-    df_zones_raw = pd.read_csv(ZONES_URL)
+    df_zones_raw = load_zones_data(ZONES_URL)
 
     print('Processing physiological metrics...')
     generate_quantified_self_csv(
