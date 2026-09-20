@@ -147,16 +147,22 @@ def generate_quantified_self_csv(
         'Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
         'Avg Overnight Respiration (brpm)': 'Overnight_Respiration_Rate_brpm',
         'Respiration Rate (brpm)': 'Overnight_Respiration_Rate_brpm',
-        # Direct daily aerobic & anaerobic training load mapping
-        'Garmin Low Aerobic Exercise Load - Daily Sum (Score)': 'Garmin_Low_Aerobic_Daily_Sum',
-        'Garmin High Aerobic Exercise Load - Daily Sum (Score)': 'Garmin_High_Aerobic_Daily_Sum',
-        'Garmin Anaerobic Exercise Load - Daily Sum (Score)': 'Garmin_Anaerobic_Daily_Sum',
-        'Low Aerobic Load': 'Garmin_Low_Aerobic_Daily_Sum',
-        'High Aerobic Load': 'Garmin_High_Aerobic_Daily_Sum',
-        'Anaerobic Load': 'Garmin_Anaerobic_Daily_Sum',
-        'Low Aerobic Training Load': 'Garmin_Low_Aerobic_Daily_Sum',
-        'High Aerobic Training Load': 'Garmin_High_Aerobic_Daily_Sum',
-        'Anaerobic Training Load': 'Garmin_Anaerobic_Daily_Sum',
+        # Direct 7d aerobic & anaerobic training load mapping
+        'Garmin Low Aerobic Exercise Load - 7d Sum (Score)': 'Garmin_Low_Aerobic_7d_Sum',
+        'Garmin High Aerobic Exercise Load - 7d Sum (Score)': 'Garmin_High_Aerobic_7d_Sum',
+        'Garmin Anaerobic Exercise Load - 7d Sum (Score)': 'Garmin_Anaerobic_7d_Sum',
+        'Garmin Low Aerobic Exercise Load - Daily Sum (Score)': 'Garmin_Low_Aerobic_7d_Sum',
+        'Garmin High Aerobic Exercise Load - Daily Sum (Score)': 'Garmin_High_Aerobic_7d_Sum',
+        'Garmin Anaerobic Exercise Load - Daily Sum (Score)': 'Garmin_Anaerobic_7d_Sum',
+        'Low Aerobic Load': 'Garmin_Low_Aerobic_7d_Sum',
+        'High Aerobic Load': 'Garmin_High_Aerobic_7d_Sum',
+        'Anaerobic Load': 'Garmin_Anaerobic_7d_Sum',
+        'Low Aerobic Training Load': 'Garmin_Low_Aerobic_7d_Sum',
+        'High Aerobic Training Load': 'Garmin_High_Aerobic_7d_Sum',
+        'Anaerobic Training Load': 'Garmin_Anaerobic_7d_Sum',
+        'Low Aerobic Training Load (7d sum)': 'Garmin_Low_Aerobic_7d_Sum',
+        'High Aerobic Training Load (7d sum)': 'Garmin_High_Aerobic_7d_Sum',
+        'Anaerobic Training Load (7d sum)': 'Garmin_Anaerobic_7d_Sum',
     }
 
     df_g = df_garmin.rename(columns=lambda x: garmin_mapping.get(x, x)).copy()
@@ -165,6 +171,15 @@ def generate_quantified_self_csv(
         df_g.columns[0],
     )
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
+
+    # Positional indexing for 7d Training Loads from drw_data
+    # Col 50: Anaerobic, Col 51: High Aerobic, Col 52: Low Aerobic (0-indexed)
+    if 'Garmin_Anaerobic_7d_Sum' not in df_g.columns and df_garmin.shape[1] > 50:
+        df_g['Garmin_Anaerobic_7d_Sum'] = pd.to_numeric(df_garmin.iloc[:, 50], errors='coerce')
+    if 'Garmin_High_Aerobic_7d_Sum' not in df_g.columns and df_garmin.shape[1] > 51:
+        df_g['Garmin_High_Aerobic_7d_Sum'] = pd.to_numeric(df_garmin.iloc[:, 51], errors='coerce')
+    if 'Garmin_Low_Aerobic_7d_Sum' not in df_g.columns and df_garmin.shape[1] > 52:
+        df_g['Garmin_Low_Aerobic_7d_Sum'] = pd.to_numeric(df_garmin.iloc[:, 52], errors='coerce')
 
     if 'Garmin_Moderate_Intensity_Minutes' not in df_g.columns and df_garmin.shape[1] > 43:
         df_g['Garmin_Moderate_Intensity_Minutes'] = df_garmin.iloc[:, 43]
@@ -285,13 +300,10 @@ def generate_quantified_self_csv(
     )
     df_a_daily = pd.merge(df_a_daily, df_runs_daily, on='Date_YYYY_MM_DD', how='left')
 
-    # Avoid merge suffix conflicts with df_g
-    for load_metric in ['Garmin_Low_Aerobic_Daily_Sum', 'Garmin_High_Aerobic_Daily_Sum', 'Garmin_Anaerobic_Daily_Sum']:
+    # Ensure numeric types and handle conflicts for load metrics
+    for load_metric in ['Garmin_Low_Aerobic_7d_Sum', 'Garmin_High_Aerobic_7d_Sum', 'Garmin_Anaerobic_7d_Sum']:
         if load_metric in df_g.columns:
             df_g[load_metric] = pd.to_numeric(df_g[load_metric], errors='coerce')
-            df_a_daily[load_metric] = pd.to_numeric(df_a_daily[load_metric], errors='coerce')
-            df_g[load_metric] = df_g[load_metric].fillna(df_a_daily.set_index('Date_YYYY_MM_DD')[load_metric].reindex(df_g['Date_YYYY_MM_DD']).values)
-            df_a_daily = df_a_daily.drop(columns=[load_metric])
 
     # ---------------------------------------------------------
     # 3. Process Withings Data
@@ -483,7 +495,6 @@ def generate_quantified_self_csv(
 
     target_columns_map = {
         'Date_YYYY_MM_DD': 'Date (YYYY-MM-DD)',
-        'Medical_Notes': 'Medical Note',
         'Time_in_Work_Zone_hours': 'Time at Work (hours)',
         'Weight_Morning_7d_Avg_kg': 'Weight - Morning 7d Avg (kg)',
         'Body_Fat_7d_Avg_pct': 'Body Fat - US Army Calibrated 7d Avg (%)',
@@ -503,9 +514,9 @@ def generate_quantified_self_csv(
         'Daily_Steps_Count': 'Daily Steps',
         'Garmin_Moderate_Intensity_Minutes': 'Daily Moderate Intensity Minutes',
         'Garmin_Vigorous_Intensity_Minutes': 'Daily Vigorous Intensity Minutes',
-        'Garmin_Low_Aerobic_Daily_Sum': 'Garmin Low Aerobic Exercise Load - Daily Sum (Score)',
-        'Garmin_High_Aerobic_Daily_Sum': 'Garmin High Aerobic Exercise Load - Daily Sum (Score)',
-        'Garmin_Anaerobic_Daily_Sum': 'Garmin Anaerobic Exercise Load - Daily Sum (Score)',
+        'Garmin_Low_Aerobic_7d_Sum': 'Garmin Low Aerobic Exercise Load - 7d Sum (Score)',
+        'Garmin_High_Aerobic_7d_Sum': 'Garmin High Aerobic Exercise Load - 7d Sum (Score)',
+        'Garmin_Anaerobic_7d_Sum': 'Garmin Anaerobic Exercise Load - 7d Sum (Score)',
         'Chronic_Training_Load_28d_EWMA': 'Chronic Training Load (28d EWMA)',
         'ACWR': 'Acute-to-Chronic Workload Ratio - ACWR (7d EWMA / 28d EWMA Ratio)',
         'Daily_Running_Distance_km': 'Daily Running Distance (km)',
@@ -513,6 +524,7 @@ def generate_quantified_self_csv(
         'Total_Strength_Training_Duration_min': 'Total Strength Training Duration (min)',
         'Garmin_VO2_Max_ml_kg_min': 'VO2 Max (ml/kg/min)',
         'Lactate_Threshold_Pace_decimal': 'Lactate Threshold Pace (min/km)',
+        'Medical_Notes': 'Medical Note',
     }
 
     clean_export = pd.DataFrame(index=df_export.index)
@@ -540,9 +552,9 @@ def generate_quantified_self_csv(
         'Daily Steps',
         'Daily Moderate Intensity Minutes',
         'Daily Vigorous Intensity Minutes',
-        'Garmin Low Aerobic Exercise Load - Daily Sum (Score)',
-        'Garmin High Aerobic Exercise Load - Daily Sum (Score)',
-        'Garmin Anaerobic Exercise Load - Daily Sum (Score)',
+        'Garmin Low Aerobic Exercise Load - 7d Sum (Score)',
+        'Garmin High Aerobic Exercise Load - 7d Sum (Score)',
+        'Garmin Anaerobic Exercise Load - 7d Sum (Score)',
         'Total Strength Training Duration (min)',
     ]
     for col in integer_columns:
