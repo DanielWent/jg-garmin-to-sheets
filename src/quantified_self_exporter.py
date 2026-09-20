@@ -28,12 +28,17 @@ def time_to_decimal(time_str):
         return np.nan
 
 
-def pace_to_decimal(pace_str):
+def pace_to_seconds(pace_str):
+    """Converts MM:SS or decimal min/km into total seconds/km"""
     if pd.isna(pace_str):
         return np.nan
     try:
-        m, s = map(int, str(pace_str).split(':'))
-        return m + (s / 60.0)
+        val_str = str(pace_str).strip()
+        if ':' in val_str:
+            m, s = map(float, val_str.split(':'))
+            return m * 60.0 + s
+        else:
+            return float(val_str) * 60.0
     except ValueError:
         return np.nan
 
@@ -89,11 +94,11 @@ def generate_quantified_self_csv(
             runs = pd.merge(runs, vo2_df, on='Date_YYYY_MM_DD', how='left')
             runs[vo2_col] = runs[vo2_col].ffill().bfill()
             
-            runs['Avg Pace (decimal)'] = runs['Avg Pace (min/km)'].apply(pace_to_decimal)
+            runs['Avg Pace (sec/km)'] = runs['Avg Pace (min/km)'].apply(pace_to_seconds)
             
-            # Approximate LT Pace from VO2 Max (e.g. VO2 50 = ~4.4 min/km or 4:24 min/km)
-            runs['Calculated LT Pace (decimal)'] = 220.0 / runs[vo2_col]
-            fallback_is_easy = runs['Avg Pace (decimal)'] > runs['Calculated LT Pace (decimal)']
+            # Approximate LT Pace from VO2 Max (e.g. VO2 50 = ~4.4 min/km * 60 = 264 sec/km)
+            runs['Calculated LT Pace (sec/km)'] = (220.0 / runs[vo2_col]) * 60.0
+            fallback_is_easy = runs['Avg Pace (sec/km)'] > runs['Calculated LT Pace (sec/km)']
         else:
             fallback_is_easy = pd.Series(True, index=runs.index) # Default to easy if pace data doesn't exist
             
@@ -247,10 +252,9 @@ def generate_quantified_self_csv(
         'Daily Running Distance (km)',
         'Highest Load Run Start Time',
         '% Easy Runs (28d Rolling)',
-        'Average Grade Adjusted Pace - GAP (min/km)',
-        'Total Strength Training Duration (min)',
+        'Average Grade Adjusted Pace - GAP (sec/km)',
         'VO2 Max (ml/kg/min)',
-        'Lactate Threshold Pace (min/km)',
+        'Lactate Threshold Pace (sec/km)',
         'Body Fat - US Army Calibrated 7d Avg (%)',
         'Withings Pulse Wave Velocity (m/s)',
         'Systolic Blood Pressure (mmHg)',
@@ -265,12 +269,18 @@ def generate_quantified_self_csv(
         'Overnight Resting HR (bpm)': 'Overnight Resting HR (raw bpm)',
         'Waking Average Stress Score (0-100)': 'Garmin Waking Average Stress Score (raw 0–100)',
         'Total Running Distance (km)': 'Daily Running Distance (km)',
-        "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": 'Average Grade Adjusted Pace - GAP (min/km)',
+        "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": 'Average Grade Adjusted Pace - GAP (sec/km)',
+        'Lactate Threshold Pace (min/km)': 'Lactate Threshold Pace (sec/km)',
         'Pulse_Wave_Velocity_m_s': 'Withings Pulse Wave Velocity (m/s)',
         'Medical_Notes': 'Medical Note'
     }
 
     df.rename(columns=rename_map, inplace=True)
+    
+    # Process Pace string conversions into seconds/km natively in the master dataframe
+    for p_col in ['Average Grade Adjusted Pace - GAP (sec/km)', 'Lactate Threshold Pace (sec/km)']:
+        if p_col in df.columns:
+            df[p_col] = df[p_col].apply(pace_to_seconds)
 
     for col in target_columns:
         if col not in df.columns:
@@ -295,8 +305,8 @@ def generate_quantified_self_csv(
     int_cols = [
         'Sleep Length (min)', 'Garmin Sleep Score (raw 0–100)', 'Overnight Resting HR (raw bpm)', 
         'Daily Steps', 'Daily Moderate Intensity Minutes', 'Daily Vigorous Intensity Minutes', 
-        'Total Strength Training Duration (min)', 'Systolic Blood Pressure (mmHg)', 
-        'Diastolic Blood Pressure (mmHg)'
+        'Systolic Blood Pressure (mmHg)', 'Diastolic Blood Pressure (mmHg)',
+        'Average Grade Adjusted Pace - GAP (sec/km)', 'Lactate Threshold Pace (sec/km)'
     ]
 
     for col in float_1dp:
