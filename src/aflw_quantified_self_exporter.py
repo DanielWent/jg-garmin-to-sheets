@@ -80,7 +80,7 @@ def generate_quantified_self_csv(
         # Get start time of highest load run per day
         highest_load_runs = runs.sort_values('Activity Training Load', ascending=False).drop_duplicates('Date_YYYY_MM_DD')
         highest_load_runs = highest_load_runs[['Date_YYYY_MM_DD', 'Start Time (HH:MM)']]
-        highest_load_runs.rename(columns={'Start Time (HH:MM)': 'Highest Load Run Start Time'}, inplace=True)
+        highest_load_runs.rename(columns={'Start Time (HH:MM)': 'Highest Load Run Start Time (HH:MM)'}, inplace=True)
         
         # Determine Pace-Based Fallback using VO2 Max (if available)
         vo2_col = 'VO2 Max (ml/kg/min)' if 'VO2 Max (ml/kg/min)' in df_g.columns else next((c for c in df_g.columns if 'VO2 Max' in c), None)
@@ -124,7 +124,7 @@ def generate_quantified_self_csv(
         df_a_daily = pd.merge(df_a_daily, highest_load_runs, on='Date_YYYY_MM_DD', how='left')
         df_a_daily = pd.merge(df_a_daily, daily_dur, on='Date_YYYY_MM_DD', how='left')
     else:
-        df_a_daily['Highest Load Run Start Time'] = np.nan
+        df_a_daily['Highest Load Run Start Time (HH:MM)'] = np.nan
         df_a_daily['Easy Duration'] = np.nan
         df_a_daily['Total Duration'] = np.nan
 
@@ -183,16 +183,16 @@ def generate_quantified_self_csv(
 
     # 7. EWMA, Rolling, and Derived Calculations
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
-    df['Chronic Training Load - CTL (28d EWMA)'] = df['Daily_Activity_Training_Load'].ewm(span=28, adjust=False).mean()
+    df['Chronic Training Load - CTL (28d EWMA, 9.7d half-life) (AU)'] = df['Daily_Activity_Training_Load'].ewm(span=28, adjust=False).mean()
     df['ATL_7d'] = df['Daily_Activity_Training_Load'].ewm(span=7, adjust=False).mean()
-    df['Acute-to-Chronic Workload Ratio - ACWR'] = df['ATL_7d'] / df['Chronic Training Load - CTL (28d EWMA)']
+    df['Acute-to-Chronic Workload Ratio - ACWR (2.4d/9.7d half-life) (ratio)'] = df['ATL_7d'] / df['Chronic Training Load - CTL (28d EWMA, 9.7d half-life) (AU)']
 
     if 'Easy Duration' in df.columns and 'Total Duration' in df.columns:
         df['Easy Duration'] = df['Easy Duration'].fillna(0)
         df['Total Duration'] = df['Total Duration'].fillna(0)
         df['Rolling 28d Easy Minutes'] = df.rolling('28D', on='_sort_date')['Easy Duration'].sum()
         df['Rolling 28d Total Minutes'] = df.rolling('28D', on='_sort_date')['Total Duration'].sum()
-        df['% Easy Runs (28d Rolling)'] = (df['Rolling 28d Easy Minutes'] / df['Rolling 28d Total Minutes']) * 100
+        df['% Easy Runs (28d Rolling) (%)'] = (df['Rolling 28d Easy Minutes'] / df['Rolling 28d Total Minutes']) * 100
 
     if 'Sleep Start Time' in df.columns:
         df['Sleep Start Time (decimal hours)'] = df['Sleep Start Time'].apply(time_to_decimal)
@@ -201,7 +201,7 @@ def generate_quantified_self_csv(
 
     if 'Sleep Need (min)' in df.columns and 'Sleep Length (min)' in df.columns:
         sleep_deficit = (df['Sleep Need (min)'] - df['Sleep Length (min)']).clip(lower=0)
-        df['Sleep Deficit EWMA (min)'] = sleep_deficit.ewm(span=4, adjust=False).mean()
+        df['Sleep Deficit EWMA (1.4d half-life, using dynamic Garmin Sleep Need) (min)'] = sleep_deficit.ewm(span=4, adjust=False).mean()
 
     # Z-scores computed against a backward-shifted 60d baseline to prevent data leakage
     if 'Overnight Resting HR (bpm)' in df.columns:
@@ -209,14 +209,14 @@ def generate_quantified_self_csv(
         rhr_mean = shifted_rhr.rolling(60, min_periods=30).mean()
         rhr_std = shifted_rhr.rolling(60, min_periods=30).std()
         daily_rhr_z = (df['Overnight Resting HR (bpm)'] - rhr_mean) / rhr_std
-        df['Resting HR Z-Score - 3d EWMA (SD)'] = daily_rhr_z.ewm(span=3, adjust=False).mean()
+        df['Resting HR Z-Score - 3d EWMA (1d half-life) (SD)'] = daily_rhr_z.ewm(span=3, adjust=False).mean()
 
     if 'Overnight HRV (ms)' in df.columns:
         shifted_hrv = df['Overnight HRV (ms)'].shift(7)
         hrv_mean = shifted_hrv.rolling(60, min_periods=30).mean()
         hrv_std = shifted_hrv.rolling(60, min_periods=30).std()
         daily_hrv_z = (df['Overnight HRV (ms)'] - hrv_mean) / hrv_std
-        df['HRV RMSSD Z-Score - 3d EWMA (SD)'] = daily_hrv_z.ewm(span=3, adjust=False).mean()
+        df['HRV RMSSD Z-Score - 3d EWMA (1d half-life) (SD)'] = daily_hrv_z.ewm(span=3, adjust=False).mean()
 
     if 'Daily_Morning_Weight_kg' in df.columns:
         df['Weight - Morning 7d Avg (kg)'] = df['Daily_Morning_Weight_kg'].rolling(window=7, min_periods=1).mean()
@@ -232,21 +232,21 @@ def generate_quantified_self_csv(
         'Sleep Length (min)',
         'Sleep Start Time (decimal hours)',
         'Sleep Start Time Variance - 7d Rolling Std Dev (hours)',
-        'Sleep Deficit EWMA (min)',
-        'Garmin Sleep Score (raw 0–100)',
+        'Sleep Deficit EWMA (1.4d half-life, using dynamic Garmin Sleep Need) (min)',
+        'Garmin Sleep Score (raw 0-100)',
         'Overnight Respiration Rate (breaths/min)',
         'Overnight Resting HR (raw bpm)',
-        'Resting HR Z-Score - 3d EWMA (SD)',
-        'HRV RMSSD Z-Score - 3d EWMA (SD)',
-        'Garmin Waking Average Stress Score (raw 0–100)',
-        'Daily Steps',
-        'Daily Moderate Intensity Minutes',
-        'Daily Vigorous Intensity Minutes',
-        'Chronic Training Load - CTL (28d EWMA)',
-        'Acute-to-Chronic Workload Ratio - ACWR',
+        'Resting HR Z-Score - 3d EWMA (1d half-life) (SD)',
+        'HRV RMSSD Z-Score - 3d EWMA (1d half-life) (SD)',
+        'Garmin Waking Average Stress Score (raw 0-100)',
+        'Daily Steps (count)',
+        'Daily Moderate Intensity Minutes (min)',
+        'Daily Vigorous Intensity Minutes (min)',
+        'Chronic Training Load - CTL (28d EWMA, 9.7d half-life) (AU)',
+        'Acute-to-Chronic Workload Ratio - ACWR (2.4d/9.7d half-life) (ratio)',
         'Daily Running Distance (km)',
-        'Highest Load Run Start Time',
-        '% Easy Runs (28d Rolling)',
+        'Highest Load Run Start Time (HH:MM)',
+        '% Easy Runs (28d Rolling) (%)',
         'Average Grade Adjusted Pace - GAP (min/km)',
         'Total Strength Training Duration (min)',
         'VO2 Max (ml/kg/min)',
@@ -260,14 +260,19 @@ def generate_quantified_self_csv(
 
     rename_map = {
         'Date_YYYY_MM_DD': 'Date (YYYY-MM-DD)',
-        'Garmin Sleep Score (0-100)': 'Garmin Sleep Score (raw 0–100)',
+        'Garmin Sleep Score (0-100)': 'Garmin Sleep Score (raw 0-100)',
+        'Garmin Sleep Score (raw 0–100)': 'Garmin Sleep Score (raw 0-100)',
         'Overnight Respiration Rate (brpm)': 'Overnight Respiration Rate (breaths/min)',
         'Overnight Resting HR (bpm)': 'Overnight Resting HR (raw bpm)',
-        'Waking Average Stress Score (0-100)': 'Garmin Waking Average Stress Score (raw 0–100)',
+        'Waking Average Stress Score (0-100)': 'Garmin Waking Average Stress Score (raw 0-100)',
+        'Waking Average Stress Score (raw 0–100)': 'Garmin Waking Average Stress Score (raw 0-100)',
         'Total Running Distance (km)': 'Daily Running Distance (km)',
         "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": 'Average Grade Adjusted Pace - GAP (min/km)',
         'Pulse_Wave_Velocity_m_s': 'Withings Pulse Wave Velocity (m/s)',
-        'Medical_Notes': 'Medical Note'
+        'Medical_Notes': 'Medical Note',
+        'Daily Steps': 'Daily Steps (count)',
+        'Daily Moderate Intensity Minutes': 'Daily Moderate Intensity Minutes (min)',
+        'Daily Vigorous Intensity Minutes': 'Daily Vigorous Intensity Minutes (min)',
     }
 
     df.rename(columns=rename_map, inplace=True)
@@ -281,20 +286,23 @@ def generate_quantified_self_csv(
 
     # 9. Strict Type & Decimal Formatting
     float_1dp = [
-        'Time at Work (hours)', 'Garmin Waking Average Stress Score (raw 0–100)', 
-        'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)', '% Easy Runs (28d Rolling)'
+        'Time at Work (hours)', 'Garmin Waking Average Stress Score (raw 0-100)', 
+        'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)', '% Easy Runs (28d Rolling) (%)'
     ]
     float_2dp = [
         'Weight - Morning 7d Avg (kg)', 'Sleep Start Time (decimal hours)', 
-        'Sleep Start Time Variance - 7d Rolling Std Dev (hours)', 'Sleep Deficit EWMA (min)', 
-        'Resting HR Z-Score - 3d EWMA (SD)', 'HRV RMSSD Z-Score - 3d EWMA (SD)', 
-        'Chronic Training Load - CTL (28d EWMA)', 'Acute-to-Chronic Workload Ratio - ACWR', 
+        'Sleep Start Time Variance - 7d Rolling Std Dev (hours)', 
+        'Sleep Deficit EWMA (1.4d half-life, using dynamic Garmin Sleep Need) (min)', 
+        'Resting HR Z-Score - 3d EWMA (1d half-life) (SD)', 
+        'HRV RMSSD Z-Score - 3d EWMA (1d half-life) (SD)', 
+        'Chronic Training Load - CTL (28d EWMA, 9.7d half-life) (AU)', 
+        'Acute-to-Chronic Workload Ratio - ACWR (2.4d/9.7d half-life) (ratio)', 
         'Daily Running Distance (km)', 'Body Fat - US Army Calibrated 7d Avg (%)', 
         'Withings Pulse Wave Velocity (m/s)'
     ]
     int_cols = [
-        'Sleep Length (min)', 'Garmin Sleep Score (raw 0–100)', 'Overnight Resting HR (raw bpm)', 
-        'Daily Steps', 'Daily Moderate Intensity Minutes', 'Daily Vigorous Intensity Minutes', 
+        'Sleep Length (min)', 'Garmin Sleep Score (raw 0-100)', 'Overnight Resting HR (raw bpm)', 
+        'Daily Steps (count)', 'Daily Moderate Intensity Minutes (min)', 'Daily Vigorous Intensity Minutes (min)', 
         'Total Strength Training Duration (min)', 'Systolic Blood Pressure (mmHg)', 
         'Diastolic Blood Pressure (mmHg)'
     ]
