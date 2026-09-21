@@ -10,6 +10,7 @@ import time
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict
+from zoneinfo import ZoneInfo
 
 import typer
 from dotenv import load_dotenv, find_dotenv
@@ -33,13 +34,16 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer()
 
-def get_utc_time() -> datetime:
-    """Safely retrieves the current datetime in UTC."""
-    return datetime.now(timezone.utc)
+# Allows overriding timezone via environment variable, defaulting to London (GMT/BST)
+TARGET_TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Europe/London"))
 
-def get_utc_date() -> date:
-    """Safely retrieves the current date in UTC."""
-    return get_utc_time().date()
+def get_local_time() -> datetime:
+    """Safely retrieves the current datetime in local time (handles GMT/BST automatically)."""
+    return datetime.now(TARGET_TIMEZONE)
+
+def get_local_date() -> date:
+    """Safely retrieves the current date in local time."""
+    return get_local_time().date()
 
 def ensure_credentials_file_exists():
     creds_path = Path('credentials/client_secret.json')
@@ -135,7 +139,11 @@ async def sync(email: str, password: str, start_date: date, end_date: date, outp
                 logger.info(f"[{current_date}] Adjusted Body Fat for {profile_name}: {original_bf}% -> {daily_metrics.body_fat}%")
         
         if data_type in ['summary', 'both']:
-            if current_date >= get_utc_date():
+            local_now = get_local_time()
+            today = local_now.date()
+            
+            # PENDING check strictly follows local time (e.g. 18:00 BST / 18:00 GMT)
+            if current_date > today or (current_date == today and local_now.hour < 18):
                 for f in fields_to_validate:
                     setattr(daily_metrics, f, "PENDING")
             else:
@@ -301,16 +309,16 @@ async def run_automated_sync():
 
     data_type = os.getenv("SYNC_DATA_TYPE", "both")
     
-    utc_time = get_utc_time()
-    today = utc_time.date()
+    local_time = get_local_time()
+    today = local_time.date()
     
-    # Determine date range based on UTC time
-    if utc_time.hour < 6 or (utc_time.hour == 6 and utc_time.minute < 30):
-        # Between 00:00 and 06:29 -> Yesterday and Day before yesterday
+    # Determine date range based on Local time
+    if local_time.hour < 6 or (local_time.hour == 6 and local_time.minute < 30):
+        # Between 00:00 and 06:29 local -> Yesterday and Day before yesterday
         start_target = today - timedelta(days=2)
         end_target = today - timedelta(days=1)
     else:
-        # Between 06:30 and 23:59 -> Today only
+        # Between 06:30 and 23:59 local -> Today only
         start_target = today
         end_target = today
     
