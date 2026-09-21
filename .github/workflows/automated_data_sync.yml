@@ -32,8 +32,11 @@ jobs:
           if [ "$LOCAL_HOUR" -ge 6 ] && [ "$LOCAL_HOUR" -lt 12 ]; then
             echo "Within 06:00–12:00 local time. Proceeding with sync."
             echo "should_run=true" >> $GITHUB_OUTPUT
+          elif [ "$LOCAL_HOUR" -ge 18 ]; then
+            echo "After 18:00 local time. Proceeding with forced evening sync."
+            echo "should_run=true" >> $GITHUB_OUTPUT
           else
-            echo "Outside 06:00–12:00 local time. Skipping sync."
+            echo "Outside active windows. Skipping sync."
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
@@ -68,8 +71,22 @@ jobs:
         USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
       run: python pre_flight_check.py
 
+    - name: Evaluate Evening Force Sync
+      id: sync-flags
+      run: |
+        LOCAL_HOUR=$(TZ="Europe/London" date +%-H)
+        if [ "$LOCAL_HOUR" -ge 18 ]; then
+          echo "Current UK time is >= 18:00 ($LOCAL_HOUR:xx). Forcing sync regardless of spreadsheet data."
+          echo "run_user1=true" >> $GITHUB_OUTPUT
+          echo "run_user2=true" >> $GITHUB_OUTPUT
+        else
+          echo "Using standard pre-flight outputs."
+          echo "run_user1=${{ steps.preflight.outputs.run_user1 }}" >> $GITHUB_OUTPUT
+          echo "run_user2=${{ steps.preflight.outputs.run_user2 }}" >> $GITHUB_OUTPUT
+        fi
+
     - name: Set Sync Parameters
-      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
+      if: steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true'
       id: sync-params
       run: |
         export TZ="Europe/London"
@@ -77,7 +94,7 @@ jobs:
         echo "end_date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
     - name: Connect to Tailscale
-      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
+      if: steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true'
       uses: tailscale/github-action@v3
       with:
         oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
@@ -85,7 +102,7 @@ jobs:
         tags: tag:github-actions
 
     - name: Route Traffic through Exit Node (With Retries)
-      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
+      if: steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true'
       run: |
         echo "Attempting to route through Tailscale exit node..."
         for i in {1..3}; do
@@ -100,7 +117,7 @@ jobs:
         exit 1
 
     - name: Restore Garmin Sessions Cache
-      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
+      if: steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true'
       uses: actions/cache/restore@v4
       with:
         path: ~/.garth_encrypted
@@ -109,7 +126,7 @@ jobs:
           garmin-sessions-
 
     - name: Decrypt Garmin Sessions
-      if: steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true'
+      if: steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true'
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
@@ -123,7 +140,7 @@ jobs:
         fi
 
     - name: Run Sync Script (USER1)
-      if: steps.preflight.outputs.run_user1 == 'true'
+      if: steps.sync-flags.outputs.run_user1 == 'true'
       env:
         USER1_GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         USER1_GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
@@ -138,7 +155,7 @@ jobs:
         python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile USER1 --output-type drive --data-type "summary"
 
     - name: Run Sync Script (USER2)
-      if: steps.preflight.outputs.run_user2 == 'true'
+      if: steps.sync-flags.outputs.run_user2 == 'true'
       env:
         USER2_GARMIN_EMAIL: ${{ secrets.USER2_GARMIN_EMAIL }}
         USER2_GARMIN_PASSWORD: ${{ secrets.USER2_GARMIN_PASSWORD }}
@@ -153,7 +170,7 @@ jobs:
         python -m src.main cli-sync --start-date "${{ steps.sync-params.outputs.start_date }}" --end-date "${{ steps.sync-params.outputs.end_date }}" --profile USER2 --output-type drive --data-type "summary"
 
     - name: Encrypt Garmin Sessions
-      if: always() && (steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true')
+      if: always() && (steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true')
       env:
         GARMIN_SESSION_KEY: ${{ secrets.GARMIN_SESSION_KEY }}
       run: |
@@ -166,7 +183,7 @@ jobs:
         fi
 
     - name: Save Garmin Sessions Cache
-      if: always() && (steps.preflight.outputs.run_user1 == 'true' || steps.preflight.outputs.run_user2 == 'true')
+      if: always() && (steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true')
       uses: actions/cache/save@v4
       with:
         path: ~/.garth_encrypted
