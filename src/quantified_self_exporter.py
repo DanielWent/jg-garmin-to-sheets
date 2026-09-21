@@ -19,17 +19,19 @@ def parse_to_iso_date(series: pd.Series) -> pd.Series:
 
 
 def time_to_decimal(time_str):
+    """Converts HH:MM string to continuous decimal hours (e.g. 17:30 -> 17.50)."""
     if pd.isna(time_str):
         return np.nan
     try:
-        h, m = map(int, str(time_str).split(':'))
-        return h + (m / 60.0)
-    except ValueError:
+        parts = str(time_str).strip().split(':')
+        h, m = int(parts[0]), int(parts[1])
+        return round(h + (m / 60.0), 2)
+    except (ValueError, IndexError):
         return np.nan
 
 
 def pace_to_seconds(pace_str):
-    """Converts MM:SS or decimal min/km into total seconds/km"""
+    """Converts MM:SS or decimal min/km into total seconds/km."""
     if pd.isna(pace_str):
         return np.nan
     try:
@@ -43,13 +45,17 @@ def pace_to_seconds(pace_str):
         return np.nan
 
 
-def adjust_for_midnight(val):
-    """Shifts decimal sleep times < 12:00 PM to the next day for accurate std dev math"""
+def adjust_for_midnight_offset(val):
+    """
+    Shifts sleep start time to a continuous signed offset from midnight (hours):
+      - 22:45 (22.75) -> -1.25 h
+      - 23:30 (23.50) -> -0.50 h
+      - 00:30 (0.50)  -> +0.50 h
+    Enables linear calculations across midnight without modulo or polar conversions.
+    """
     if pd.isna(val):
         return np.nan
-    if val < 12.0:
-        return val + 24.0
-    return val
+    return val - 24.0 if val >= 12.0 else val
 
 
 def generate_quantified_self_csv(
@@ -65,8 +71,6 @@ def generate_quantified_self_csv(
     df_g = df_garmin.copy()
     date_col_g = next((c for c in ['Date (YYYY-MM-DD)', 'Date'] if c in df_g.columns), df_g.columns[0])
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
-    
-    # Drop the original date column to strictly prevent duplicate date columns in the output
     if date_col_g != 'Date_YYYY_MM_DD':
         df_g = df_g.drop(columns=[date_col_g])
 
@@ -75,63 +79,74 @@ def generate_quantified_self_csv(
     act_date_col = next((c for c in ['Date (YYYY-MM-DD)', 'Date'] if c in df_a.columns), df_a.columns[1])
     df_a['Date_YYYY_MM_DD'] = parse_to_iso_date(df_a[act_date_col])
 
-    # Base CTL/ATL Training Load Sum
+    # Sum of daily Garmin Activity Training Load
     df_a_daily = df_a.groupby('Date_YYYY_MM_DD')['Activity Training Load'].sum().reset_index()
     df_a_daily.rename(columns={'Activity Training Load': 'Daily_Activity_Training_Load'}, inplace=True)
 
-    # Process Running-Specific Metrics (Highest Load Start Time & Easy % calculations)
+    # Process Running-Specific Metrics
     runs = df_a[df_a['Activity Type'].astype(str).str.lower() == 'running'].copy()
     if not runs.empty:
-        # Get start time of highest load run per day
+        # Calculate Daily Running Distance and Distance-Weighted GAP from Activities
+        runs['GAP_sec'] = runs['Average Grade Adjusted Pace (min/km)'].apply(pace_to_seconds)
+        runs['GAP_weight'] = runs['GAP_sec'] * runs['Distance (km)']
+
+        daily_run_dist = runs.groupby('Date_YYYY_MM_DD')['Distance (km)'].sum().reset_index()
+        daily_run_dist.rename(columns={'Distance (km)': 'Daily Running Distance (km)'}, inplace=True)
+
+        def calc_daily_gap(x):
+            mask = x['GAP_sec'].notna() & x['Distance (km)'].notna()
+            total_dist = x.loc[mask, 'Distance (km)'].sum()
+            if total_dist > 0:
+                return x.loc[mask, 'GAP_weight'].sum() / total_dist
+            return np.nan
+
+        daily_gap = runs.groupby('Date_YYYY_MM_DD').apply(calc_daily_gap).reset_index(name='Average Grade Adjusted Pace - GAP (sec/km)')
+
+        # Numeric decimal hour start time of highest load run
         highest_load_runs = runs.sort_values('Activity Training Load', ascending=False).drop_duplicates('Date_YYYY_MM_DD')
-        highest_load_runs = highest_load_runs[['Date_YYYY_MM_DD', 'Start Time (HH:MM)']]
-        highest_load_runs.rename(columns={'Start Time (HH:MM)': 'Highest Load Run Start Time (HH:MM)'}, inplace=True)
-        
-        # Determine Pace-Based Fallback using VO2 Max (if available)
+        highest_load_runs['Highest Load Run Start Time (decimal hours)'] = highest_load_runs['Start Time (HH:MM)'].apply(time_to_decimal)
+        highest_load_runs = highest_load_runs[['Date_YYYY_MM_DD', 'Highest Load Run Start Time (decimal hours)']]
+
+        # Fallback LT pace estimation from VO2 Max
         vo2_col = 'VO2 Max (ml/kg/min)' if 'VO2 Max (ml/kg/min)' in df_g.columns else next((c for c in df_g.columns if 'VO2 Max' in c), None)
         if vo2_col:
             vo2_df = df_g[['Date_YYYY_MM_DD', vo2_col]].dropna()
             runs = pd.merge(runs, vo2_df, on='Date_YYYY_MM_DD', how='left')
             runs[vo2_col] = runs[vo2_col].ffill().bfill()
-            
             runs['Avg Pace (sec/km)'] = runs['Avg Pace (min/km)'].apply(pace_to_seconds)
-            
-            # Approximate LT Pace from VO2 Max (e.g. VO2 50 = ~4.4 min/km * 60 = 264 sec/km)
             runs['Calculated LT Pace (sec/km)'] = (220.0 / runs[vo2_col]) * 60.0
             fallback_is_easy = runs['Avg Pace (sec/km)'] > runs['Calculated LT Pace (sec/km)']
         else:
-            fallback_is_easy = pd.Series(True, index=runs.index) # Default to easy if pace data doesn't exist
-            
-        # Parse Primary Training Effect Labels
+            fallback_is_easy = pd.Series(True, index=runs.index)
+
         if 'Garmin Training Effect Label' in runs.columns:
             labels = runs['Garmin Training Effect Label'].astype(str).str.strip().str.upper()
         else:
             labels = pd.Series('UNKNOWN', index=runs.index)
-            
+
         easy_labels = {'AEROBIC_BASE', 'BASE', 'RECOVERY', 'LOW_AEROBIC', 'NO_BENEFIT', 'NONE'}
         hard_labels = {'TEMPO', 'LACTATE_THRESHOLD', 'THRESHOLD', 'VO2MAX', 'VO2_MAX', 'ANAEROBIC_CAPACITY', 'ANAEROBIC', 'SPEED', 'SPRINT', 'HIGH_AEROBIC'}
-        
-        # Categorize run intensity (Priority 1: Label, Priority 2: Pace vs LT Pace)
+
         runs['Is Easy'] = np.where(
             labels.isin(easy_labels), True,
-            np.where(
-                labels.isin(hard_labels), False,
-                fallback_is_easy
-            )
+            np.where(labels.isin(hard_labels), False, fallback_is_easy)
         )
-        
-        # Calculate daily aggregate durations
+
         runs['Easy Duration'] = np.where(runs['Is Easy'], runs['Duration (min)'], 0)
         runs['Total Duration'] = runs['Duration (min)']
-        
+
         daily_dur = runs.groupby('Date_YYYY_MM_DD')[['Easy Duration', 'Total Duration']].sum().reset_index()
-        
+
         df_a_daily = pd.merge(df_a_daily, highest_load_runs, on='Date_YYYY_MM_DD', how='left')
         df_a_daily = pd.merge(df_a_daily, daily_dur, on='Date_YYYY_MM_DD', how='left')
+        df_a_daily = pd.merge(df_a_daily, daily_run_dist, on='Date_YYYY_MM_DD', how='left')
+        df_a_daily = pd.merge(df_a_daily, daily_gap, on='Date_YYYY_MM_DD', how='left')
     else:
-        df_a_daily['Highest Load Run Start Time (HH:MM)'] = np.nan
+        df_a_daily['Highest Load Run Start Time (decimal hours)'] = np.nan
         df_a_daily['Easy Duration'] = np.nan
         df_a_daily['Total Duration'] = np.nan
+        df_a_daily['Daily Running Distance (km)'] = np.nan
+        df_a_daily['Average Grade Adjusted Pace - GAP (sec/km)'] = np.nan
 
     # 3. Process Withings Data
     df_w = df_withings.copy()
@@ -186,7 +201,7 @@ def generate_quantified_self_csv(
     df['_sort_date'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
     df = df.sort_values('_sort_date').reset_index(drop=True)
 
-    # 7. EWMA, Rolling, and Derived Calculations
+    # 7. EWMA, Rolling, and Derived Calculations (Chronologically ascending)
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
     df['Chronic Training Load - CTL - 28d Span / 13.5d Half-Life EWMA (load)'] = df['Daily_Activity_Training_Load'].ewm(span=28, adjust=False).mean()
     df['ATL_7d'] = df['Daily_Activity_Training_Load'].ewm(span=7, adjust=False).mean()
@@ -200,15 +215,15 @@ def generate_quantified_self_csv(
         df['Easy Runs - 28d Rolling (%)'] = (df['Rolling 28d Easy Minutes'] / df['Rolling 28d Total Minutes']) * 100
 
     if 'Sleep Start Time' in df.columns:
-        df['Sleep Start Time (decimal hours)'] = df['Sleep Start Time'].apply(time_to_decimal)
-        sleep_adj = df['Sleep Start Time (decimal hours)'].apply(adjust_for_midnight)
-        df['Sleep Start Time Variance - 7d Rolling Std Dev (hours)'] = sleep_adj.rolling(window=7, min_periods=3).std()
+        raw_dec = df['Sleep Start Time'].apply(time_to_decimal)
+        df['Sleep Start Time - Midnight Offset (hours)'] = raw_dec.apply(adjust_for_midnight_offset)
+        df['Sleep Start Time Variance - 7d Rolling Std Dev (hours)'] = df['Sleep Start Time - Midnight Offset (hours)'].rolling(window=7, min_periods=3).std()
 
     if 'Sleep Need (min)' in df.columns and 'Sleep Length (min)' in df.columns:
         sleep_deficit = (df['Sleep Need (min)'] - df['Sleep Length (min)']).clip(lower=0)
         df['Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.5d Half-Life EWMA (min)'] = sleep_deficit.ewm(span=4, adjust=False).mean()
 
-    # Z-scores computed against a backward-shifted 60d baseline to prevent data leakage
+    # Z-scores computed against backward-shifted 60d baseline
     if 'Overnight Resting HR (bpm)' in df.columns:
         shifted_rhr = df['Overnight Resting HR (bpm)'].shift(7)
         rhr_mean = shifted_rhr.rolling(60, min_periods=30).mean()
@@ -229,13 +244,40 @@ def generate_quantified_self_csv(
     if 'Daily_Body_Fat_pct' in df.columns:
         df['Body Fat - US Army Calibrated 7d Avg (%)'] = df['Daily_Body_Fat_pct'].rolling(window=7, min_periods=1).mean()
 
-    # 8. Column Mapping & Selecting Exact User Structure
+    # 8. Renaming & Metric Harmonisation
+    rename_map = {
+        'Date_YYYY_MM_DD': 'Date (YYYY-MM-DD)',
+        'Garmin Sleep Score (0-100)': 'Garmin Sleep Score (raw 0-100)',
+        'Garmin Sleep Score (raw 0–100)': 'Garmin Sleep Score (raw 0-100)',
+        'Overnight Respiration Rate (brpm)': 'Overnight Respiration Rate (breaths/min)',
+        'Overnight Resting HR (bpm)': 'Overnight Resting HR (raw bpm)',
+        'Waking Average Stress Score (0-100)': 'Garmin Waking Average Stress Score (raw 0-100)',
+        'Garmin Waking Average Stress Score (raw 0–100)': 'Garmin Waking Average Stress Score (raw 0-100)',
+        'Lactate Threshold Pace (min/km)': 'Lactate Threshold Pace (sec/km)',
+        'Pulse_Wave_Velocity_m_s': 'Withings Pulse Wave Velocity (m/s)',
+        'Medical_Notes': 'Medical Note',
+        'Daily Steps': 'Daily Steps (count)',
+        'Daily Moderate Intensity Minutes': 'Daily Moderate Intensity (min)',
+        'Daily Vigorous Intensity Minutes': 'Daily Vigorous Intensity (min)'
+    }
+    df.rename(columns=rename_map, inplace=True)
+
+    # Process pace conversions into seconds/km and compute derived SI speed (m/s)
+    # (GAP is now calculated directly in seconds from activities)
+    for p_col in ['Lactate Threshold Pace (sec/km)']:
+        if p_col in df.columns:
+            df[p_col] = df[p_col].apply(pace_to_seconds)
+
+    if 'Average Grade Adjusted Pace - GAP (sec/km)' in df.columns:
+        gap_sec = df['Average Grade Adjusted Pace - GAP (sec/km)']
+        df['Average Grade Adjusted Speed - GAS (m/s)'] = np.where(gap_sec > 0, 1000.0 / gap_sec, np.nan)
+
     target_columns = [
         'Date (YYYY-MM-DD)',
         'Time at Work (hours)',
         'Weight - Morning 7d Avg (kg)',
         'Sleep Length (min)',
-        'Sleep Start Time (decimal hours)',
+        'Sleep Start Time - Midnight Offset (hours)',
         'Sleep Start Time Variance - 7d Rolling Std Dev (hours)',
         'Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.5d Half-Life EWMA (min)',
         'Garmin Sleep Score (raw 0-100)',
@@ -250,9 +292,10 @@ def generate_quantified_self_csv(
         'Chronic Training Load - CTL - 28d Span / 13.5d Half-Life EWMA (load)',
         'Acute-to-Chronic Workload Ratio - ACWR (ratio)',
         'Daily Running Distance (km)',
-        'Highest Load Run Start Time (HH:MM)',
+        'Highest Load Run Start Time (decimal hours)',
         'Easy Runs - 28d Rolling (%)',
         'Average Grade Adjusted Pace - GAP (sec/km)',
+        'Average Grade Adjusted Speed - GAS (m/s)',
         'VO2 Max (ml/kg/min)',
         'Lactate Threshold Pace (sec/km)',
         'Body Fat - US Army Calibrated 7d Avg (%)',
@@ -262,35 +305,11 @@ def generate_quantified_self_csv(
         'Medical Note'
     ]
 
-    rename_map = {
-        'Date_YYYY_MM_DD': 'Date (YYYY-MM-DD)',
-        'Garmin Sleep Score (0-100)': 'Garmin Sleep Score (raw 0-100)',
-        'Garmin Sleep Score (raw 0–100)': 'Garmin Sleep Score (raw 0-100)',
-        'Overnight Respiration Rate (brpm)': 'Overnight Respiration Rate (breaths/min)',
-        'Overnight Resting HR (bpm)': 'Overnight Resting HR (raw bpm)',
-        'Waking Average Stress Score (0-100)': 'Garmin Waking Average Stress Score (raw 0-100)',
-        'Garmin Waking Average Stress Score (raw 0–100)': 'Garmin Waking Average Stress Score (raw 0-100)',
-        'Total Running Distance (km)': 'Daily Running Distance (km)',
-        "Average Grade Adjusted Pace for that day's runs (weighted by distance or time)": 'Average Grade Adjusted Pace - GAP (sec/km)',
-        'Lactate Threshold Pace (min/km)': 'Lactate Threshold Pace (sec/km)',
-        'Pulse_Wave_Velocity_m_s': 'Withings Pulse Wave Velocity (m/s)',
-        'Medical_Notes': 'Medical Note',
-        'Daily Steps': 'Daily Steps (count)',
-        'Daily Moderate Intensity Minutes': 'Daily Moderate Intensity (min)',
-        'Daily Vigorous Intensity Minutes': 'Daily Vigorous Intensity (min)'
-    }
-
-    df.rename(columns=rename_map, inplace=True)
-    
-    # Process Pace string conversions into seconds/km natively in the master dataframe
-    for p_col in ['Average Grade Adjusted Pace - GAP (sec/km)', 'Lactate Threshold Pace (sec/km)']:
-        if p_col in df.columns:
-            df[p_col] = df[p_col].apply(pace_to_seconds)
-
     for col in target_columns:
         if col not in df.columns:
             df[col] = np.nan
 
+    # Sort strictly descending (newest at top) for export
     df_export = df.sort_values('_sort_date', ascending=False).reset_index(drop=True)
     df_export = df_export[target_columns]
 
@@ -300,12 +319,13 @@ def generate_quantified_self_csv(
         'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)', 'Easy Runs - 28d Rolling (%)'
     ]
     float_2dp = [
-        'Weight - Morning 7d Avg (kg)', 'Sleep Start Time (decimal hours)', 
+        'Weight - Morning 7d Avg (kg)', 'Sleep Start Time - Midnight Offset (hours)', 
         'Sleep Start Time Variance - 7d Rolling Std Dev (hours)', 'Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.5d Half-Life EWMA (min)', 
         'Resting HR Z-Score - 3d Span / 1d Half-Life EWMA (SD)', 'HRV RMSSD Z-Score - 3d Span / 1d Half-Life EWMA (SD)', 
         'Chronic Training Load - CTL - 28d Span / 13.5d Half-Life EWMA (load)', 'Acute-to-Chronic Workload Ratio - ACWR (ratio)', 
-        'Daily Running Distance (km)', 'Body Fat - US Army Calibrated 7d Avg (%)', 
-        'Withings Pulse Wave Velocity (m/s)'
+        'Daily Running Distance (km)', 'Highest Load Run Start Time (decimal hours)',
+        'Average Grade Adjusted Speed - GAS (m/s)',
+        'Body Fat - US Army Calibrated 7d Avg (%)', 'Withings Pulse Wave Velocity (m/s)'
     ]
     int_cols = [
         'Sleep Length (min)', 'Garmin Sleep Score (raw 0-100)', 'Overnight Resting HR (raw bpm)', 
@@ -324,7 +344,7 @@ def generate_quantified_self_csv(
         if col in df_export.columns:
             df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
 
-    # 10. Output Clean CSV
+    # 10. Output CSV without trailing whitespace in headers
     df_export.to_csv(output_path, header=True, index=False, na_rep='')
     return df_export
 
@@ -351,10 +371,9 @@ def download_drive_file(service, file_id):
 if __name__ == '__main__':
     FOLDER_ID = os.getenv('DRIVE_FOLDER_ID')
     SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
-    
-    # New output folder variable
+
     drw_quantified_self_folder = '0B06ZX4hUnMRtT2VLR2pNYnJEVkE'
-    
+
     GARMIN_FILENAME = 'drw_garmin_data.csv'
     ACTIVITIES_FILENAME = 'drw_garmin_activities_list.csv'
     WITHINGS_FILENAME = 'drw_withings_bodyscan_data.csv'
@@ -384,7 +403,6 @@ if __name__ == '__main__':
     if not medical_file_id:
         medical_file_id = get_file_id(drive_service, "Daniel's Medical Test Results.csv", FOLDER_ID)
 
-    # Use the new target folder for the upload
     target_file_id = get_file_id(drive_service, TARGET_FILENAME, drw_quantified_self_folder)
 
     for name, f_id in zip(
@@ -414,7 +432,6 @@ if __name__ == '__main__':
             fileId=target_file_id, media_body=media, fields='id, modifiedTime'
         ).execute()
     else:
-        # Save into the new output folder
         file_metadata = {'name': TARGET_FILENAME, 'parents': [drw_quantified_self_folder], 'mimeType': 'text/csv'}
         drive_service.files().create(
             body=file_metadata, media_body=media, fields='id, modifiedTime'
