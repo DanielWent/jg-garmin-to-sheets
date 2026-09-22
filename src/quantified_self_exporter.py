@@ -73,6 +73,8 @@ def generate_quantified_self_csv(
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
     if date_col_g != 'Date_YYYY_MM_DD':
         df_g = df_g.drop(columns=[date_col_g])
+    if len(df_garmin.columns) > 21:
+        df_g['Daily Max Body Battery (0 - 100)'] = df_garmin.iloc[:, 21]
 
     # 2. Process Garmin Activities Data 
     df_a = df_activities.copy()
@@ -281,6 +283,7 @@ def generate_quantified_self_csv(
         'Sleep Start Time Variance - 7d Rolling Std Dev (hours)',
         'Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.5d Half-Life EWMA (min)',
         'Garmin Sleep Score (raw 0-100)',
+        'Daily Max Body Battery (0 - 100)',
         'Overnight Respiration Rate (breaths/min)',
         'Overnight Resting HR (raw bpm)',
         'Resting HR Z-Score - 3d Span / 1d Half-Life EWMA (SD)',
@@ -328,7 +331,7 @@ def generate_quantified_self_csv(
         'Body Fat - US Army Calibrated 7d Avg (%)', 'Withings Pulse Wave Velocity (m/s)'
     ]
     int_cols = [
-        'Sleep Length (min)', 'Garmin Sleep Score (raw 0-100)', 'Overnight Resting HR (raw bpm)', 
+        'Sleep Length (min)', 'Garmin Sleep Score (raw 0-100)', 'Daily Max Body Battery (0 - 100)', 'Overnight Resting HR (raw bpm)', 
         'Daily Steps (count)', 'Daily Moderate Intensity (min)', 'Daily Vigorous Intensity (min)', 
         'Systolic Blood Pressure (mmHg)', 'Diastolic Blood Pressure (mmHg)',
         'Average Grade Adjusted Pace - GAP (sec/km)', 'Lactate Threshold Pace (sec/km)'
