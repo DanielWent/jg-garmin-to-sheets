@@ -2,6 +2,7 @@ import io
 import json
 import os
 import time
+import urllib.request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -196,15 +197,28 @@ def generate_quantified_self_csv(
 
     # 5. Process Home Assistant Zone Data
     df_z = df_zones.copy()
-    zone_date_col = next((c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_z.columns), df_z.columns[0])
-    df_z['Date_YYYY_MM_DD'] = parse_to_iso_date(df_z[zone_date_col])
-    if 'Time in Work Zone (hours)' in df_z.columns:
-        df_z_daily = df_z[['Date_YYYY_MM_DD', 'Time in Work Zone (hours)']].rename(columns={'Time in Work Zone (hours)': 'Time at Work (hours)'})
+    df_z.columns = df_z.columns.astype(str).str.strip()
+    zone_date_col = next((c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_z.columns), df_z.columns[0] if len(df_z.columns) > 0 else 'Date')
+    
+    if zone_date_col in df_z.columns:
+        df_z['Date_YYYY_MM_DD'] = parse_to_iso_date(df_z[zone_date_col])
+        work_col = next((c for c in df_z.columns if 'work' in c.lower()), None)
+        if work_col:
+            df_z[work_col] = pd.to_numeric(df_z[work_col], errors='coerce')
+            df_z_daily = df_z.groupby('Date_YYYY_MM_DD')[work_col].sum().reset_index()
+            df_z_daily.rename(columns={work_col: 'Time at Work (hours)'}, inplace=True)
+        else:
+            df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time at Work (hours)'])
     else:
         df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time at Work (hours)'])
 
     # 6. Merge Datasets
     df = df_g.copy()
+    
+    # Avoid _x / _y collisions if Time at Work already exists in Garmin data
+    if 'Time at Work (hours)' in df.columns:
+        df = df.drop(columns=['Time at Work (hours)'])
+
     df = pd.merge(df, df_a_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
@@ -425,11 +439,22 @@ if __name__ == '__main__':
     withings_data = download_drive_file(drive_service, withings_file_id)
     medical_data = download_drive_file(drive_service, medical_file_id)
 
+    # Fetch Home Assistant Zone CSV with browser headers and fallback
+    try:
+        req = urllib.request.Request(
+            ZONES_URL, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            df_zones_raw = pd.read_csv(io.StringIO(resp.read().decode('utf-8')))
+    except Exception as e:
+        print(f"Warning: Could not fetch Home Assistant zone history from URL ({e}). Initialising empty zones frame.")
+        df_zones_raw = pd.DataFrame(columns=['Date', 'Time in Work Zone (hours)'])
+
     df_garmin_raw = pd.read_csv(garmin_data)
     df_activities_raw = pd.read_csv(activities_data)
     df_withings_raw = pd.read_csv(withings_data)
     df_medical_raw = pd.read_csv(medical_data)
-    df_zones_raw = pd.read_csv(ZONES_URL)
 
     print('Processing physiological metrics...')
     generate_quantified_self_csv(
