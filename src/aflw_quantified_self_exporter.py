@@ -2,7 +2,6 @@ import io
 import json
 import os
 import time
-import urllib.request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -39,27 +38,6 @@ def pace_to_decimal(pace_str):
         return np.nan
 
 
-def duration_to_minutes(val):
-    if pd.isna(val):
-        return np.nan
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        pass
-    val_str = str(val).strip()
-    if ':' in val_str:
-        parts = val_str.split(':')
-        try:
-            parts = [float(p) for p in parts]
-            if len(parts) == 3:
-                return parts[0] * 60.0 + parts[1] + parts[2] / 60.0
-            elif len(parts) == 2:
-                return parts[0] + parts[1] / 60.0
-        except ValueError:
-            return np.nan
-    return np.nan
-
-
 def adjust_for_midnight(val):
     """Shifts decimal sleep times < 12:00 PM to the next day for accurate std dev math"""
     if pd.isna(val):
@@ -83,7 +61,7 @@ def generate_quantified_self_csv(
     date_col_g = next((c for c in ['Date (YYYY-MM-DD)', 'Date'] if c in df_g.columns), df_g.columns[0])
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
     
-    # Drop original date column to prevent duplicate date columns in the output
+    # Drop the original date column to strictly prevent duplicate date columns in the output
     if date_col_g != 'Date_YYYY_MM_DD':
         df_g = df_g.drop(columns=[date_col_g])
 
@@ -96,13 +74,15 @@ def generate_quantified_self_csv(
     df_a_daily = df_a.groupby('Date_YYYY_MM_DD')['Activity Training Load'].sum().reset_index()
     df_a_daily.rename(columns={'Activity Training Load': 'Daily_Activity_Training_Load'}, inplace=True)
 
-    # Process Running-Specific Metrics
+    # Process Running-Specific Metrics (Highest Load Start Time & Easy % calculations)
     runs = df_a[df_a['Activity Type'].astype(str).str.lower() == 'running'].copy()
     if not runs.empty:
+        # Get start time of highest load run per day
         highest_load_runs = runs.sort_values('Activity Training Load', ascending=False).drop_duplicates('Date_YYYY_MM_DD')
         highest_load_runs = highest_load_runs[['Date_YYYY_MM_DD', 'Start Time (HH:MM)']]
         highest_load_runs.rename(columns={'Start Time (HH:MM)': 'Highest Load Run Start Time (HH:MM)'}, inplace=True)
         
+        # Determine Pace-Based Fallback using VO2 Max (if available)
         vo2_col = 'VO2 Max (ml/kg/min)' if 'VO2 Max (ml/kg/min)' in df_g.columns else next((c for c in df_g.columns if 'VO2 Max' in c), None)
         if vo2_col:
             vo2_df = df_g[['Date_YYYY_MM_DD', vo2_col]].dropna()
@@ -110,11 +90,14 @@ def generate_quantified_self_csv(
             runs[vo2_col] = runs[vo2_col].ffill().bfill()
             
             runs['Avg Pace (decimal)'] = runs['Avg Pace (min/km)'].apply(pace_to_decimal)
+            
+            # Approximate LT Pace from VO2 Max (e.g. VO2 50 = ~4.4 min/km or 4:24 min/km)
             runs['Calculated LT Pace (decimal)'] = 220.0 / runs[vo2_col]
             fallback_is_easy = runs['Avg Pace (decimal)'] > runs['Calculated LT Pace (decimal)']
         else:
-            fallback_is_easy = pd.Series(True, index=runs.index)
+            fallback_is_easy = pd.Series(True, index=runs.index)  # Default to easy if pace data doesn't exist
             
+        # Parse Primary Training Effect Labels
         if 'Garmin Training Effect Label' in runs.columns:
             labels = runs['Garmin Training Effect Label'].astype(str).str.strip().str.upper()
         else:
@@ -123,6 +106,7 @@ def generate_quantified_self_csv(
         easy_labels = {'AEROBIC_BASE', 'BASE', 'RECOVERY', 'LOW_AEROBIC', 'NO_BENEFIT', 'NONE'}
         hard_labels = {'TEMPO', 'LACTATE_THRESHOLD', 'THRESHOLD', 'VO2MAX', 'VO2_MAX', 'ANAEROBIC_CAPACITY', 'ANAEROBIC', 'SPEED', 'SPRINT', 'HIGH_AEROBIC'}
         
+        # Categorize run intensity (Priority 1: Label, Priority 2: Pace vs LT Pace)
         runs['Is Easy'] = np.where(
             labels.isin(easy_labels), True,
             np.where(
@@ -131,6 +115,7 @@ def generate_quantified_self_csv(
             )
         )
         
+        # Calculate daily aggregate durations
         runs['Easy Duration'] = np.where(runs['Is Easy'], runs['Duration (min)'], 0)
         runs['Total Duration'] = runs['Duration (min)']
         
@@ -143,24 +128,13 @@ def generate_quantified_self_csv(
         df_a_daily['Easy Duration'] = np.nan
         df_a_daily['Total Duration'] = np.nan
 
-    # Process Strength Training Duration
-    dur_col_a = next((c for c in ['Duration (min)', 'Duration', 'Time (min)', 'Time'] if c in df_a.columns), None)
-    type_col_a = next((c for c in ['Activity Type', 'type', 'Type'] if c in df_a.columns), None)
-    name_col_a = next((c for c in ['Activity Name', 'name', 'Name'] if c in df_a.columns), None)
-
-    if type_col_a and dur_col_a:
-        is_type_strength = df_a[type_col_a].astype(str).str.strip().str.lower().str.contains('strength', na=False)
-        is_name_strength = df_a[name_col_a].astype(str).str.strip().str.lower().str.contains('strength', na=False) if name_col_a else False
-        is_strength = is_type_strength | is_name_strength
-        
-        strength_acts = df_a[is_strength].copy()
-        if not strength_acts.empty:
-            strength_acts['Strength_Duration'] = strength_acts[dur_col_a].apply(duration_to_minutes)
-            daily_strength = strength_acts.groupby('Date_YYYY_MM_DD')['Strength_Duration'].sum().reset_index()
-            daily_strength.rename(columns={'Strength_Duration': 'Total Strength Training Duration (min)'}, inplace=True)
-            df_a_daily = pd.merge(df_a_daily, daily_strength, on='Date_YYYY_MM_DD', how='left')
-        else:
-            df_a_daily['Total Strength Training Duration (min)'] = np.nan
+    # Process Strength Training Duration (strictly 'strength_training')
+    strength_acts = df_a[df_a['Activity Type'].astype(str).str.strip().str.lower() == 'strength_training'].copy()
+    if not strength_acts.empty and 'Duration (min)' in strength_acts.columns:
+        strength_acts['Duration (min)'] = pd.to_numeric(strength_acts['Duration (min)'], errors='coerce')
+        daily_strength = strength_acts.groupby('Date_YYYY_MM_DD')['Duration (min)'].sum().reset_index()
+        daily_strength.rename(columns={'Duration (min)': 'Total Strength Training Duration (min)'}, inplace=True)
+        df_a_daily = pd.merge(df_a_daily, daily_strength, on='Date_YYYY_MM_DD', how='left')
     else:
         df_a_daily['Total Strength Training Duration (min)'] = np.nan
 
@@ -199,28 +173,19 @@ def generate_quantified_self_csv(
 
     # 5. Process Home Assistant Zone Data
     df_z = df_zones.copy()
-    df_z.columns = df_z.columns.astype(str).str.strip()
-    zone_date_col = next((c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_z.columns), df_z.columns[0] if len(df_z.columns) > 0 else 'Date')
-    
-    if zone_date_col in df_z.columns:
-        df_z['Date_YYYY_MM_DD'] = parse_to_iso_date(df_z[zone_date_col])
-        work_col = next((c for c in df_z.columns if 'work' in c.lower()), None)
-        if work_col:
-            df_z[work_col] = pd.to_numeric(df_z[work_col], errors='coerce')
-            df_z_daily = df_z.groupby('Date_YYYY_MM_DD')[work_col].sum().reset_index()
-            df_z_daily.rename(columns={work_col: 'Time at Work (hours)'}, inplace=True)
-        else:
-            df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time at Work (hours)'])
+    zone_date_col = next((c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_z.columns), df_z.columns[0])
+    df_z['Date_YYYY_MM_DD'] = parse_to_iso_date(df_z[zone_date_col])
+    if 'Time in Work Zone (hours)' in df_z.columns:
+        df_z_daily = df_z[['Date_YYYY_MM_DD', 'Time in Work Zone (hours)']].rename(columns={'Time in Work Zone (hours)': 'Time at Work (hours)'})
     else:
         df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time at Work (hours)'])
 
-    # 6. Merge Datasets (Systematically drop overlapping columns from df to prevent _x / _y collisions)
+    # 6. Merge Datasets (removes overlapping columns first to prevent _x / _y collisions)
     df = df_g.copy()
-    
     for incoming_df in [df_a_daily, df_w_daily, df_m_daily, df_z_daily]:
-        cols_to_drop = [c for c in incoming_df.columns if c in df.columns and c != 'Date_YYYY_MM_DD']
-        if cols_to_drop:
-            df = df.drop(columns=cols_to_drop)
+        overlap_cols = [c for c in incoming_df.columns if c in df.columns and c != 'Date_YYYY_MM_DD']
+        if overlap_cols:
+            df = df.drop(columns=overlap_cols)
         df = pd.merge(df, incoming_df, on='Date_YYYY_MM_DD', how='outer')
 
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
@@ -321,14 +286,7 @@ def generate_quantified_self_csv(
         'Daily Vigorous Intensity Minutes': 'Daily Vigorous Intensity Minutes (min)',
     }
 
-    # Safe renaming preventing duplicate key overwrites
-    for old_col, new_col in rename_map.items():
-        if old_col in df.columns:
-            if new_col in df.columns and old_col != new_col:
-                df[new_col] = df[new_col].combine_first(df[old_col])
-                df.drop(columns=[old_col], inplace=True)
-            else:
-                df.rename(columns={old_col: new_col}, inplace=True)
+    df.rename(columns=rename_map, inplace=True)
 
     for col in target_columns:
         if col not in df.columns:
@@ -445,21 +403,16 @@ if __name__ == '__main__':
     withings_data = download_drive_file(drive_service, withings_file_id)
     medical_data = download_drive_file(drive_service, medical_file_id)
 
-    try:
-        req = urllib.request.Request(
-            ZONES_URL, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            df_zones_raw = pd.read_csv(io.StringIO(resp.read().decode('utf-8')))
-    except Exception as e:
-        print(f"Warning: Could not fetch Home Assistant zone history from URL ({e}). Initialising empty zones frame.")
-        df_zones_raw = pd.DataFrame(columns=['Date', 'Time in Work Zone (hours)'])
-
     df_garmin_raw = pd.read_csv(garmin_data)
     df_activities_raw = pd.read_csv(activities_data)
     df_withings_raw = pd.read_csv(withings_data)
     df_medical_raw = pd.read_csv(medical_data)
+    
+    try:
+        df_zones_raw = pd.read_csv(ZONES_URL)
+    except Exception as e:
+        print(f"Warning: Could not fetch zones data ({e}). Continuing with empty zones data.")
+        df_zones_raw = pd.DataFrame(columns=['Date', 'Time in Work Zone (hours)'])
 
     print('Processing physiological metrics...')
     generate_quantified_self_csv(
