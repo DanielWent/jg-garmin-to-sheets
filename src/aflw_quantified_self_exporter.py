@@ -38,6 +38,27 @@ def pace_to_decimal(pace_str):
         return np.nan
 
 
+def duration_to_minutes(val):
+    if pd.isna(val):
+        return np.nan
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        pass
+    val_str = str(val).strip()
+    if ':' in val_str:
+        parts = val_str.split(':')
+        try:
+            parts = [float(p) for p in parts]
+            if len(parts) == 3:
+                return parts[0] * 60.0 + parts[1] + parts[2] / 60.0
+            elif len(parts) == 2:
+                return parts[0] + parts[1] / 60.0
+        except ValueError:
+            return np.nan
+    return np.nan
+
+
 def adjust_for_midnight(val):
     """Shifts decimal sleep times < 12:00 PM to the next day for accurate std dev math"""
     if pd.isna(val):
@@ -95,7 +116,7 @@ def generate_quantified_self_csv(
             runs['Calculated LT Pace (decimal)'] = 220.0 / runs[vo2_col]
             fallback_is_easy = runs['Avg Pace (decimal)'] > runs['Calculated LT Pace (decimal)']
         else:
-            fallback_is_easy = pd.Series(True, index=runs.index) # Default to easy if pace data doesn't exist
+            fallback_is_easy = pd.Series(True, index=runs.index)  # Default to easy if pace data doesn't exist
             
         # Parse Primary Training Effect Labels
         if 'Garmin Training Effect Label' in runs.columns:
@@ -127,6 +148,18 @@ def generate_quantified_self_csv(
         df_a_daily['Highest Load Run Start Time (HH:MM)'] = np.nan
         df_a_daily['Easy Duration'] = np.nan
         df_a_daily['Total Duration'] = np.nan
+
+    # Process Strength Training Duration
+    dur_col_a = next((c for c in ['Duration (min)', 'Duration', 'Time (min)', 'Time'] if c in df_a.columns), None)
+    is_strength = df_a['Activity Type'].astype(str).str.strip().str.lower().str.contains('strength', na=False)
+    strength_acts = df_a[is_strength].copy()
+    if not strength_acts.empty and dur_col_a:
+        strength_acts['Strength_Duration'] = strength_acts[dur_col_a].apply(duration_to_minutes)
+        daily_strength = strength_acts.groupby('Date_YYYY_MM_DD')['Strength_Duration'].sum().reset_index()
+        daily_strength.rename(columns={'Strength_Duration': 'Total Strength Training Duration (min)'}, inplace=True)
+        df_a_daily = pd.merge(df_a_daily, daily_strength, on='Date_YYYY_MM_DD', how='left')
+    else:
+        df_a_daily['Total Strength Training Duration (min)'] = np.nan
 
     # 3. Process Withings Data
     df_w = df_withings.copy()
@@ -357,9 +390,7 @@ if __name__ == '__main__':
     if not FOLDER_ID:
         raise ValueError('USER2_DRIVE_FOLDER_ID environment variable is not set.')
     if not SERVICE_ACCOUNT_JSON:
-        raise ValueError(
-            'GOOGLE_SHEETS_CREDENTIALS environment variable is not set.'
-        )
+        raise ValueError('GOOGLE_SHEETS_CREDENTIALS environment variable is not set.')
 
     print('Authenticating with Google Drive...')
     service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
@@ -370,25 +401,19 @@ if __name__ == '__main__':
 
     print(f'Locating files in folder {FOLDER_ID}...')
     garmin_file_id = get_file_id(drive_service, GARMIN_FILENAME, FOLDER_ID)
-    activities_file_id = get_file_id(
-        drive_service, ACTIVITIES_FILENAME, FOLDER_ID
-    )
+    activities_file_id = get_file_id(drive_service, ACTIVITIES_FILENAME, FOLDER_ID)
     withings_file_id = get_file_id(drive_service, WITHINGS_FILENAME, FOLDER_ID)
     medical_file_id = get_file_id(drive_service, MEDICAL_FILENAME, FOLDER_ID)
 
     if not medical_file_id:
-        medical_file_id = get_file_id(
-            drive_service, "April's Medical Test Results.csv", FOLDER_ID
-        )
+        medical_file_id = get_file_id(drive_service, "April's Medical Test Results.csv", FOLDER_ID)
 
     target_file_id = get_file_id(drive_service, TARGET_FILENAME, FOLDER_ID)
 
     if not garmin_file_id:
         raise FileNotFoundError(f"Could not find '{GARMIN_FILENAME}' in Drive.")
     if not activities_file_id:
-        raise FileNotFoundError(
-            f"Could not find '{ACTIVITIES_FILENAME}' in Drive."
-        )
+        raise FileNotFoundError(f"Could not find '{ACTIVITIES_FILENAME}' in Drive.")
     if not withings_file_id:
         raise FileNotFoundError(f"Could not find '{WITHINGS_FILENAME}' in Drive.")
     if not medical_file_id:
