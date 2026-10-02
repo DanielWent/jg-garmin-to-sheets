@@ -4,15 +4,19 @@ on:
   schedule:
     # Morning targets (06:45, 07:15, 07:45, 08:15, 08:45, 09:15 UK time)
     # Covers GMT (UTC+0) and BST (UTC+1) candidates:
-    - cron: '45 5 * * *'       # 05:45 UTC -> 06:45 BST
+    - cron: '45 5 * * *'        # 05:45 UTC -> 06:45 BST
     - cron: '15,45 6-8 * * *'  # 06:15–08:45 UTC -> covers middle morning runs in both GMT & BST
-    - cron: '15 9 * * *'       # 09:15 UTC -> 09:15 GMT
+    - cron: '15 9 * * *'        # 09:15 UTC -> 09:15 GMT
 
     # Evening targets (18:00, 18:30, 19:00, 19:30, 20:00 UK time)
     # Covers GMT (UTC+0) and BST (UTC+1) candidates:
     - cron: '0,30 17-19 * * *' # 17:00–19:30 UTC -> covers 18:00–20:00 in BST and 18:00–19:30 in GMT
-    - cron: '0 20 * * *'       # 20:00 UTC -> 20:00 GMT
+    - cron: '0 20 * * *'        # 20:00 UTC -> 20:00 GMT
   workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write # Required to dispatch downstream workflows via gh CLI
 
 concurrency:
   group: garmin-sync-lock
@@ -41,10 +45,8 @@ jobs:
           LOCAL_TIME=$(TZ="Europe/London" date +"%H:%M")
           echo "Current Europe/London local time: $LOCAL_TIME ($LOCAL_MINS mins since midnight)"
 
-          # Morning targets: 06:45 (405m) to 09:15 (555m).
-          # Gate window (395m–575m / 06:35–09:35) accepts target runs while tolerating GitHub Actions runner queue jitter.
-          # Evening targets: 18:00 (1080m) to 20:00 (1200m).
-          # Gate window (1065m–1220m / 17:45–20:20) accepts target runs while ignoring off-season runs (17:30 GMT or 20:30 BST).
+          # Morning targets: 06:45 (405m) to 09:15 (555m)
+          # Evening targets: 18:00 (1080m) to 20:00 (1200m)
           if [ "$LOCAL_MINS" -ge 395 ] && [ "$LOCAL_MINS" -le 575 ]; then
             echo "Within morning window (06:45–09:15 UK). Proceeding."
             echo "should_run=true" >> $GITHUB_OUTPUT
@@ -61,7 +63,7 @@ jobs:
     if: needs.check-window.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    
+
     defaults:
       run:
         shell: bash
@@ -155,6 +157,74 @@ jobs:
               echo "Session cache restored."
           fi
 
+      - name: Snapshot Drive State Before Sync
+        if: steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true'
+        env:
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+          USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
+        run: |
+          python - << 'EOF'
+          import json, os, sys, urllib.parse
+
+          creds_raw = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
+          if not creds_raw:
+              sys.exit(0)
+
+          folders = {
+              "user1": os.environ.get("USER1_DRIVE_FOLDER_ID"),
+              "user2": os.environ.get("USER2_DRIVE_FOLDER_ID")
+          }
+
+          try:
+              from google.oauth2 import service_account
+              from googleapiclient.discovery import build
+              creds = service_account.Credentials.from_service_account_info(
+                  json.loads(creds_raw),
+                  scopes=["https://www.googleapis.com/auth/drive.metadata.readonly", "https://www.googleapis.com/auth/drive.readonly"]
+              )
+              service = build("drive", "v3", credentials=creds)
+              def fetch_files(folder_id):
+                  q = f"'{folder_id}' in parents and trashed = false"
+                  res = service.files().list(q=q, fields="files(id, name, modifiedTime, version)", pageSize=50).execute()
+                  return res.get("files", [])
+          except ImportError:
+              from google.oauth2 import service_account
+              from google.auth.transport.requests import AuthorizedSession
+              creds = service_account.Credentials.from_service_account_info(
+                  json.loads(creds_raw),
+                  scopes=["https://www.googleapis.com/auth/drive.metadata.readonly", "https://www.googleapis.com/auth/drive.readonly"]
+              )
+              session = AuthorizedSession(creds)
+              def fetch_files(folder_id):
+                  q = f"'{folder_id}' in parents and trashed = false"
+                  url = f"https://www.googleapis.com/drive/v3/files?q={urllib.parse.quote(q)}&fields=files(id,name,modifiedTime,version)&pageSize=50"
+                  r = session.get(url)
+                  r.raise_for_status()
+                  return r.json().get("files", [])
+
+          state = {}
+          for user, folder_id in folders.items():
+              if not folder_id:
+                  continue
+              try:
+                  files = fetch_files(folder_id)
+                  state[user] = {
+                      f["id"]: {
+                          "name": f.get("name"),
+                          "modifiedTime": f.get("modifiedTime"),
+                          "version": f.get("version")
+                      }
+                      for f in files
+                  }
+              except Exception as e:
+                  print(f"Warning: could not snapshot folder for {user}: {e}", file=sys.stderr)
+
+          with open("/tmp/pre_sync_drive_state.json", "w") as f:
+              json.dump(state, f)
+          print("Pre-sync Google Drive state recorded.")
+          EOF
+
       - name: Run Sync Script (USER1)
         if: steps.sync-flags.outputs.run_user1 == 'true'
         env:
@@ -204,3 +274,93 @@ jobs:
         with:
           path: ~/.garth_encrypted
           key: garmin-sessions-${{ github.run_id }}
+
+      - name: Check for Drive File Changes
+        id: drive-diff
+        if: steps.sync-flags.outputs.run_user1 == 'true' || steps.sync-flags.outputs.run_user2 == 'true'
+        env:
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+          USER1_DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          USER2_DRIVE_FOLDER_ID: ${{ secrets.USER2_DRIVE_FOLDER_ID }}
+        run: |
+          python - << 'EOF'
+          import json, os, sys, urllib.parse
+
+          if not os.path.exists("/tmp/pre_sync_drive_state.json"):
+              print("No pre-sync snapshot available.")
+              sys.exit(0)
+
+          with open("/tmp/pre_sync_drive_state.json") as f:
+              pre_state = json.load(f)
+
+          creds_raw = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
+          folders = {
+              "user1": os.environ.get("USER1_DRIVE_FOLDER_ID"),
+              "user2": os.environ.get("USER2_DRIVE_FOLDER_ID")
+          }
+
+          try:
+              from google.oauth2 import service_account
+              from googleapiclient.discovery import build
+              creds = service_account.Credentials.from_service_account_info(
+                  json.loads(creds_raw),
+                  scopes=["https://www.googleapis.com/auth/drive.metadata.readonly", "https://www.googleapis.com/auth/drive.readonly"]
+              )
+              service = build("drive", "v3", credentials=creds)
+              def fetch_files(folder_id):
+                  q = f"'{folder_id}' in parents and trashed = false"
+                  res = service.files().list(q=q, fields="files(id, name, modifiedTime, version)", pageSize=50).execute()
+                  return res.get("files", [])
+          except ImportError:
+              from google.oauth2 import service_account
+              from google.auth.transport.requests import AuthorizedSession
+              creds = service_account.Credentials.from_service_account_info(
+                  json.loads(creds_raw),
+                  scopes=["https://www.googleapis.com/auth/drive.metadata.readonly", "https://www.googleapis.com/auth/drive.readonly"]
+              )
+              session = AuthorizedSession(creds)
+              def fetch_files(folder_id):
+                  q = f"'{folder_id}' in parents and trashed = false"
+                  url = f"https://www.googleapis.com/drive/v3/files?q={urllib.parse.quote(q)}&fields=files(id,name,modifiedTime,version)&pageSize=50"
+                  r = session.get(url)
+                  r.raise_for_status()
+                  return r.json().get("files", [])
+
+          altered = False
+          for user, pre_files in pre_state.items():
+              folder_id = folders.get(user)
+              if not folder_id:
+                  continue
+              try:
+                  curr_files = {f["id"]: f for f in fetch_files(folder_id)}
+              except Exception as e:
+                  print(f"Warning: could not check folder for {user}: {e}", file=sys.stderr)
+                  continue
+
+              for fid, meta in pre_files.items():
+                  if fid not in curr_files:
+                      print(f"[{user.upper()}] File missing or removed: {meta.get('name')}")
+                      altered = True
+                  else:
+                      curr = curr_files[fid]
+                      if curr.get("modifiedTime") != meta.get("modifiedTime") or curr.get("version") != meta.get("version"):
+                          print(f"[{user.upper()}] File altered: {curr.get('name')} (modified: {meta.get('modifiedTime')} -> {curr.get('modifiedTime')})")
+                          altered = True
+
+              for fid, curr in curr_files.items():
+                  if fid not in pre_files:
+                      print(f"[{user.upper()}] New file detected: {curr.get('name')}")
+                      altered = True
+
+          print(f"Drive files altered: {altered}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as gh_out:
+              gh_out.write(f"altered={'true' if altered else 'false'}\n")
+          EOF
+
+      - name: Trigger Quantified Self Export
+        if: steps.drive-diff.outputs.altered == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Changes detected in Google Drive files. Dispatching quantified_self_export.yml..."
+          gh workflow run quantified_self_export.yml
