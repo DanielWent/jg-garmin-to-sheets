@@ -227,7 +227,7 @@ def generate_quantified_self_csv(
         hrv_mean = shifted_hrv.rolling(60, min_periods=30).mean()
         hrv_std = shifted_hrv.rolling(60, min_periods=30).std()
         daily_hrv_z = (df['Overnight HRV (ms)'] - hrv_mean) / hrv_std
-        df['HRV RMSSD Z-Score - 3d EWMA (1d half-life) (SD)'] = daily_hrv_z.ewm(span=3, adjust=False).mean()
+        df['HRV RMSSD Z-Score (60d baseline) (SD)'] = daily_hrv_z
 
     if 'Daily_Morning_Weight_kg' in df.columns:
         df['Weight - Morning 7d Avg (kg)'] = df['Daily_Morning_Weight_kg'].rolling(window=7, min_periods=1).mean()
@@ -248,7 +248,7 @@ def generate_quantified_self_csv(
         'Overnight Respiration Rate (breaths/min)',
         'Overnight Resting HR (raw bpm)',
         'Resting HR Z-Score - 3d EWMA (1d half-life) (SD)',
-        'HRV RMSSD Z-Score - 3d EWMA (1d half-life) (SD)',
+        'HRV RMSSD Z-Score (60d baseline) (SD)',
         'Garmin Waking Average Stress Score (raw 0-100)',
         'Daily Steps (count)',
         'Daily Moderate Intensity Minutes (min)',
@@ -305,7 +305,7 @@ def generate_quantified_self_csv(
         'Sleep Start Time Variance - 7d Rolling Std Dev (hours)', 
         'Sleep Deficit EWMA (1.4d half-life, using dynamic Garmin Sleep Need) (min)', 
         'Resting HR Z-Score - 3d EWMA (1d half-life) (SD)', 
-        'HRV RMSSD Z-Score - 3d EWMA (1d half-life) (SD)', 
+        'HRV RMSSD Z-Score (60d baseline) (SD)', 
         'Chronic Training Load - CTL (28d EWMA, 9.7d half-life) (AU)', 
         'Acute-to-Chronic Workload Ratio - ACWR (2.4d/9.7d half-life) (ratio)', 
         'Daily Running Distance (km)', 'Body Fat - US Army Calibrated 7d Avg (%)', 
@@ -402,11 +402,6 @@ if __name__ == '__main__':
     activities_data = download_drive_file(drive_service, activities_file_id)
     withings_data = download_drive_file(drive_service, withings_file_id)
     medical_data = download_drive_file(drive_service, medical_file_id)
-
-    df_garmin_raw = pd.read_csv(garmin_data)
-    df_activities_raw = pd.read_csv(activities_data)
-    df_withings_raw = pd.read_csv(withings_data)
-    df_medical_raw = pd.read_csv(medical_data)
     
     try:
         df_zones_raw = pd.read_csv(ZONES_URL)
@@ -430,11 +425,11 @@ if __name__ == '__main__':
     if target_file_id:
         drive_service.files().update(
             fileId=target_file_id, media_body=media
-        ).execute()
+        ).execute(num_retries=5)
     else:
         file_metadata = {'name': TARGET_FILENAME, 'parents': [FOLDER_ID]}
         drive_service.files().create(
             body=file_metadata, media_body=media
-        ).execute()
+        ).execute(num_retries=5)
 
     print('Export and upload complete.')
