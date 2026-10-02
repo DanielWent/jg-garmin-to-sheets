@@ -402,9 +402,14 @@ if __name__ == '__main__':
     activities_data = download_drive_file(drive_service, activities_file_id)
     withings_data = download_drive_file(drive_service, withings_file_id)
     medical_data = download_drive_file(drive_service, medical_file_id)
+
+    df_garmin_raw = pd.read_csv(garmin_data)
+    df_activities_raw = pd.read_csv(activities_data)
+    df_withings_raw = pd.read_csv(withings_data)
+    df_medical_raw = pd.read_csv(medical_data)
     
     try:
-        df_zones_raw = pd.read_csv(ZONES_URL)
+        df_zones_raw = pd.read_csv(ZONES_URL, on_bad_lines='skip')
     except Exception as e:
         print(f"Warning: Could not fetch zones data ({e}). Continuing with empty zones data.")
         df_zones_raw = pd.DataFrame(columns=['Date', 'Time in Work Zone (hours)'])
