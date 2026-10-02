@@ -127,7 +127,7 @@ def generate_quantified_self_csv(
             labels = pd.Series('UNKNOWN', index=runs.index)
 
         easy_labels = {'AEROBIC_BASE', 'BASE', 'RECOVERY', 'LOW_AEROBIC', 'NO_BENEFIT', 'NONE'}
-        hard_labels = {'TEMPO', 'LACTATE_THRESHOLD', 'THRESHOLD', 'VO2MAX', 'VO2_MAX', 'ANAEROBIC_CAPACITY', 'ANAEROBIC', 'SPEED', 'SPRINT', 'HIGH_AEROBIC'}
+        hard_labels = {'TEMPO', 'LACTATE_THRESHOLD', 'THRESHOLD', 'VO2MAX', 'VO2_MAX', 'ANAEROBIC_CAPACITY', 'ANAERIC', 'SPEED', 'SPRINT', 'HIGH_AEROBIC'}
 
         runs['Is Easy'] = np.where(
             labels.isin(easy_labels), True,
@@ -238,7 +238,7 @@ def generate_quantified_self_csv(
         hrv_mean = shifted_hrv.rolling(60, min_periods=30).mean()
         hrv_std = shifted_hrv.rolling(60, min_periods=30).std()
         daily_hrv_z = (df['Overnight HRV (ms)'] - hrv_mean) / hrv_std
-        df['HRV RMSSD Z-Score - 3d Span / 1d Half-Life EWMA (SD)'] = daily_hrv_z.ewm(span=3, adjust=False).mean()
+        df['HRV RMSSD Z-Score (60d baseline) (SD)'] = daily_hrv_z
 
     if 'Daily_Morning_Weight_kg' in df.columns:
         df['Weight - Morning 7d Avg (kg)'] = df['Daily_Morning_Weight_kg'].rolling(window=7, min_periods=1).mean()
@@ -287,7 +287,7 @@ def generate_quantified_self_csv(
         'Overnight Respiration Rate (breaths/min)',
         'Overnight Resting HR (raw bpm)',
         'Resting HR Z-Score - 3d Span / 1d Half-Life EWMA (SD)',
-        'HRV RMSSD Z-Score - 3d Span / 1d Half-Life EWMA (SD)',
+        'HRV RMSSD Z-Score (60d baseline) (SD)',
         'Garmin Waking Average Stress Score (raw 0-100)',
         'Daily Steps (count)',
         'Daily Moderate Intensity (min)',
@@ -324,7 +324,7 @@ def generate_quantified_self_csv(
     float_2dp = [
         'Weight - Morning 7d Avg (kg)', 'Sleep Start Time - Midnight Offset (hours)', 
         'Sleep Start Time Variance - 7d Rolling Std Dev (hours)', 'Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.5d Half-Life EWMA (min)', 
-        'Resting HR Z-Score - 3d Span / 1d Half-Life EWMA (SD)', 'HRV RMSSD Z-Score - 3d Span / 1d Half-Life EWMA (SD)', 
+        'Resting HR Z-Score - 3d Span / 1d Half-Life EWMA (SD)', 'HRV RMSSD Z-Score (60d baseline) (SD)', 
         'Chronic Training Load - CTL - 28d Span / 13.5d Half-Life EWMA (load)', 'Acute-to-Chronic Workload Ratio - ACWR (ratio)', 
         'Daily Running Distance (km)', 'Highest Load Run Start Time (decimal hours)',
         'Average Grade Adjusted Speed - GAS (m/s)',
@@ -433,11 +433,11 @@ if __name__ == '__main__':
     if target_file_id:
         drive_service.files().update(
             fileId=target_file_id, media_body=media, fields='id, modifiedTime'
-        ).execute()
+        ).execute(num_retries=5)
     else:
         file_metadata = {'name': TARGET_FILENAME, 'parents': [drw_quantified_self_folder], 'mimeType': 'text/csv'}
         drive_service.files().create(
             body=file_metadata, media_body=media, fields='id, modifiedTime'
-        ).execute()
+        ).execute(num_retries=5)
 
     print('Export and upload complete.')
