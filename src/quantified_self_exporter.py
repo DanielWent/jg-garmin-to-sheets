@@ -64,6 +64,7 @@ def generate_quantified_self_csv(
     df_medical: pd.DataFrame,
     df_activities: pd.DataFrame,
     df_zones: pd.DataFrame,
+    df_sleep: pd.DataFrame = None,
     output_path: str = 'drw_quantified_self.csv',
 ):
 
@@ -88,7 +89,6 @@ def generate_quantified_self_csv(
     # Process Running-Specific Metrics
     runs = df_a[df_a['Activity Type'].astype(str).str.lower() == 'running'].copy()
     if not runs.empty:
-        # Calculate Daily Running Distance and Distance-Weighted GAP from Activities
         runs['GAP_sec'] = runs['Average Grade Adjusted Pace (min/km)'].apply(pace_to_seconds)
         runs['GAP_weight'] = runs['GAP_sec'] * runs['Distance (km)']
 
@@ -104,12 +104,10 @@ def generate_quantified_self_csv(
 
         daily_gap = runs.groupby('Date_YYYY_MM_DD').apply(calc_daily_gap).reset_index(name='Average Grade Adjusted Pace - GAP (sec/km)')
 
-        # Numeric decimal hour start time of highest load run
         highest_load_runs = runs.sort_values('Activity Training Load', ascending=False).drop_duplicates('Date_YYYY_MM_DD')
         highest_load_runs['Highest Load Run Start Time (decimal hours)'] = highest_load_runs['Start Time (HH:MM)'].apply(time_to_decimal)
         highest_load_runs = highest_load_runs[['Date_YYYY_MM_DD', 'Highest Load Run Start Time (decimal hours)']]
 
-        # Fallback LT pace estimation from VO2 Max
         vo2_col = 'VO2 Max (ml/kg/min)' if 'VO2 Max (ml/kg/min)' in df_g.columns else next((c for c in df_g.columns if 'VO2 Max' in c), None)
         if vo2_col:
             vo2_df = df_g[['Date_YYYY_MM_DD', vo2_col]].dropna()
@@ -192,18 +190,32 @@ def generate_quantified_self_csv(
     else:
         df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time at Work (hours)'])
 
-    # 6. Merge Datasets
+    # 6. Process Home Assistant Sleep Data
+    if df_sleep is not None and not df_sleep.empty:
+        df_s = df_sleep.copy()
+        sleep_date_col = next((c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_s.columns), df_s.columns[0])
+        df_s['Date_YYYY_MM_DD'] = parse_to_iso_date(df_s[sleep_date_col])
+        sleep_cols = ['Date_YYYY_MM_DD']
+        for col in ['Sleep Onset Latency (mins)', 'Sleep Efficiency (%)']:
+            if col in df_s.columns:
+                sleep_cols.append(col)
+        df_s_daily = df_s[sleep_cols].drop_duplicates(subset=['Date_YYYY_MM_DD'])
+    else:
+        df_s_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Sleep Onset Latency (mins)', 'Sleep Efficiency (%)'])
+
+    # 7. Merge Datasets
     df = df_g.copy()
     df = pd.merge(df, df_a_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_m_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
+    df = pd.merge(df, df_s_daily, on='Date_YYYY_MM_DD', how='outer')
 
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
     df['_sort_date'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
     df = df.sort_values('_sort_date').reset_index(drop=True)
 
-    # 7. EWMA, Rolling, and Derived Calculations (Chronologically ascending)
+    # 8. EWMA, Rolling, and Derived Calculations (Chronologically ascending)
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
     df['Chronic Training Load - CTL - 28d Span / 13.5d Half-Life EWMA (load)'] = df['Daily_Activity_Training_Load'].ewm(span=28, adjust=False).mean()
     df['ATL_7d'] = df['Daily_Activity_Training_Load'].ewm(span=7, adjust=False).mean()
@@ -246,7 +258,7 @@ def generate_quantified_self_csv(
     if 'Daily_Body_Fat_pct' in df.columns:
         df['Body Fat - US Army Calibrated 7d Avg (%)'] = df['Daily_Body_Fat_pct'].rolling(window=7, min_periods=1).mean()
 
-    # 8. Renaming & Metric Harmonisation
+    # 9. Renaming & Metric Harmonisation
     rename_map = {
         'Date_YYYY_MM_DD': 'Date (YYYY-MM-DD)',
         'Garmin Sleep Score (0-100)': 'Garmin Sleep Score (raw 0-100)',
@@ -264,8 +276,6 @@ def generate_quantified_self_csv(
     }
     df.rename(columns=rename_map, inplace=True)
 
-    # Process pace conversions into seconds/km and compute derived SI speed (m/s)
-    # (GAP is now calculated directly in seconds from activities)
     for p_col in ['Lactate Threshold Pace (sec/km)']:
         if p_col in df.columns:
             df[p_col] = df[p_col].apply(pace_to_seconds)
@@ -274,6 +284,7 @@ def generate_quantified_self_csv(
         gap_sec = df['Average Grade Adjusted Pace - GAP (sec/km)']
         df['Average Grade Adjusted Speed - GAS (m/s)'] = np.where(gap_sec > 0, 1000.0 / gap_sec, np.nan)
 
+    # Position Sleep Onset Latency and Sleep Efficiency directly alongside Garmin Sleep Score
     target_columns = [
         'Date (YYYY-MM-DD)',
         'Time at Work (hours)',
@@ -283,6 +294,8 @@ def generate_quantified_self_csv(
         'Sleep Start Time Variance - 7d Rolling Std Dev (hours)',
         'Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.5d Half-Life EWMA (min)',
         'Garmin Sleep Score (raw 0-100)',
+        'Sleep Onset Latency (mins)',
+        'Sleep Efficiency (%)',
         'Daily Max Body Battery (0 - 100)',
         'Overnight Respiration Rate (breaths/min)',
         'Overnight Resting HR (raw bpm)',
@@ -316,10 +329,11 @@ def generate_quantified_self_csv(
     df_export = df.sort_values('_sort_date', ascending=False).reset_index(drop=True)
     df_export = df_export[target_columns]
 
-    # 9. Strict Type & Decimal Formatting
+    # 10. Strict Type & Decimal Formatting
     float_1dp = [
         'Time at Work (hours)', 'Garmin Waking Average Stress Score (raw 0-100)', 
-        'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)', 'Easy Runs - 28d Rolling (%)'
+        'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)', 'Easy Runs - 28d Rolling (%)',
+        'Sleep Efficiency (%)'
     ]
     float_2dp = [
         'Weight - Morning 7d Avg (kg)', 'Sleep Start Time - Midnight Offset (hours)', 
@@ -334,7 +348,8 @@ def generate_quantified_self_csv(
         'Sleep Length (min)', 'Garmin Sleep Score (raw 0-100)', 'Daily Max Body Battery (0 - 100)', 'Overnight Resting HR (raw bpm)', 
         'Daily Steps (count)', 'Daily Moderate Intensity (min)', 'Daily Vigorous Intensity (min)', 
         'Systolic Blood Pressure (mmHg)', 'Diastolic Blood Pressure (mmHg)',
-        'Average Grade Adjusted Pace - GAP (sec/km)', 'Lactate Threshold Pace (sec/km)'
+        'Average Grade Adjusted Pace - GAP (sec/km)', 'Lactate Threshold Pace (sec/km)',
+        'Sleep Onset Latency (mins)'
     ]
 
     for col in float_1dp:
@@ -347,7 +362,7 @@ def generate_quantified_self_csv(
         if col in df_export.columns:
             df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
 
-    # 10. Output CSV without trailing whitespace in headers
+    # 11. Output CSV without trailing whitespace in headers
     df_export.to_csv(output_path, header=True, index=False, na_rep='')
     return df_export
 
@@ -383,6 +398,8 @@ if __name__ == '__main__':
     MEDICAL_FILENAME = "Daniel's Full Medical Notes.csv"
     ZONES_BASE_URL = 'https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_home_assistant_zone_history.csv'
     ZONES_URL = f'{ZONES_BASE_URL}?v={int(time.time())}'
+    SLEEP_BASE_URL = 'https://dfexhoblv7ytpsxp7uiasfchbdxbl8vt.ui.nabu.casa/local/drw_sleep_history.csv'
+    SLEEP_URL = f'{SLEEP_BASE_URL}?v={int(time.time())}'
     TARGET_FILENAME = 'drw_quantified_self.csv'
 
     if not FOLDER_ID:
@@ -421,10 +438,17 @@ if __name__ == '__main__':
     df_withings_raw = pd.read_csv(download_drive_file(drive_service, withings_file_id))
     df_medical_raw = pd.read_csv(download_drive_file(drive_service, medical_file_id))
     df_zones_raw = pd.read_csv(ZONES_URL)
+    df_sleep_raw = pd.read_csv(SLEEP_URL)
 
     print('Processing physiological metrics...')
     generate_quantified_self_csv(
-        df_garmin_raw, df_withings_raw, df_medical_raw, df_activities_raw, df_zones_raw, output_path=TARGET_FILENAME
+        df_garmin_raw,
+        df_withings_raw,
+        df_medical_raw,
+        df_activities_raw,
+        df_zones_raw,
+        df_sleep_raw,
+        output_path=TARGET_FILENAME,
     )
 
     print('Uploading updated CSV...')
