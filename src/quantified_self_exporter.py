@@ -68,7 +68,7 @@ def generate_quantified_self_csv(
     output_path: str = 'drw_quantified_self.csv',
 ):
 
-    # 1. Process Garmin Daily Data
+    # 1. Process Garmin Daily Data (Deduplicate keeping latest sync)
     df_g = df_garmin.copy()
     date_col_g = next((c for c in ['Date (YYYY-MM-DD)', 'Date'] if c in df_g.columns), df_g.columns[0])
     df_g['Date_YYYY_MM_DD'] = parse_to_iso_date(df_g[date_col_g])
@@ -76,6 +76,7 @@ def generate_quantified_self_csv(
         df_g = df_g.drop(columns=[date_col_g])
     if len(df_garmin.columns) > 21:
         df_g['Daily Max Body Battery (0 - 100)'] = df_garmin.iloc[:, 21]
+    df_g = df_g.drop_duplicates(subset=['Date_YYYY_MM_DD'], keep='last')
 
     # 2. Process Garmin Activities Data 
     df_a = df_activities.copy()
@@ -186,7 +187,11 @@ def generate_quantified_self_csv(
     zone_date_col = next((c for c in ['Date', 'date', 'Date (YYYY-MM-DD)'] if c in df_z.columns), df_z.columns[0])
     df_z['Date_YYYY_MM_DD'] = parse_to_iso_date(df_z[zone_date_col])
     if 'Time in Work Zone (hours)' in df_z.columns:
-        df_z_daily = df_z[['Date_YYYY_MM_DD', 'Time in Work Zone (hours)']].rename(columns={'Time in Work Zone (hours)': 'Time at Work (hours)'})
+        df_z_daily = (
+            df_z.groupby('Date_YYYY_MM_DD', as_index=False)['Time in Work Zone (hours)']
+            .max()
+            .rename(columns={'Time in Work Zone (hours)': 'Time at Work (hours)'})
+        )
     else:
         df_z_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Time at Work (hours)'])
 
@@ -199,11 +204,11 @@ def generate_quantified_self_csv(
         for col in ['Sleep Onset Latency (mins)', 'Sleep Efficiency (%)']:
             if col in df_s.columns:
                 sleep_cols.append(col)
-        df_s_daily = df_s[sleep_cols].drop_duplicates(subset=['Date_YYYY_MM_DD'])
+        df_s_daily = df_s[sleep_cols].drop_duplicates(subset=['Date_YYYY_MM_DD'], keep='last')
     else:
         df_s_daily = pd.DataFrame(columns=['Date_YYYY_MM_DD', 'Sleep Onset Latency (mins)', 'Sleep Efficiency (%)'])
 
-    # 7. Merge Datasets
+    # 7. Merge Datasets (Guaranteed 1-to-1 joins)
     df = df_g.copy()
     df = pd.merge(df, df_a_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_w_daily, on='Date_YYYY_MM_DD', how='outer')
@@ -211,11 +216,13 @@ def generate_quantified_self_csv(
     df = pd.merge(df, df_z_daily, on='Date_YYYY_MM_DD', how='outer')
     df = pd.merge(df, df_s_daily, on='Date_YYYY_MM_DD', how='outer')
 
+    # Drop nulls, sort chronologically, and deduplicate before rolling calculations
     df = df.dropna(subset=['Date_YYYY_MM_DD'])
     df['_sort_date'] = pd.to_datetime(df['Date_YYYY_MM_DD'])
     df = df.sort_values('_sort_date').reset_index(drop=True)
+    df = df.drop_duplicates(subset=['Date_YYYY_MM_DD'], keep='last').reset_index(drop=True)
 
-    # 8. EWMA, Rolling, and Derived Calculations (Chronologically ascending)
+    # 8. EWMA, Rolling, and Derived Calculations (Chronologically ascending on full history)
     df['Daily_Activity_Training_Load'] = df['Daily_Activity_Training_Load'].fillna(0)
     df['Chronic Training Load - CTL - 28d Span / 13.5d Half-Life EWMA (load)'] = df['Daily_Activity_Training_Load'].ewm(span=28, adjust=False).mean()
     df['ATL_7d'] = df['Daily_Activity_Training_Load'].ewm(span=7, adjust=False).mean()
@@ -284,7 +291,11 @@ def generate_quantified_self_csv(
         gap_sec = df['Average Grade Adjusted Pace - GAP (sec/km)']
         df['Average Grade Adjusted Speed - GAS (m/s)'] = np.where(gap_sec > 0, 1000.0 / gap_sec, np.nan)
 
-    # Position Sleep Onset Latency and Sleep Efficiency directly alongside Garmin Sleep Score
+    # 10. Filter to strictly 2 years of rolling data
+    if not df.empty and df['_sort_date'].notna().any():
+        cutoff_date = df['_sort_date'].max() - pd.DateOffset(years=2)
+        df = df[df['_sort_date'] >= cutoff_date].copy()
+
     target_columns = [
         'Date (YYYY-MM-DD)',
         'Time at Work (hours)',
@@ -329,7 +340,7 @@ def generate_quantified_self_csv(
     df_export = df.sort_values('_sort_date', ascending=False).reset_index(drop=True)
     df_export = df_export[target_columns]
 
-    # 10. Strict Type & Decimal Formatting
+    # 11. Strict Type & Decimal Formatting
     float_1dp = [
         'Time at Work (hours)', 'Garmin Waking Average Stress Score (raw 0-100)', 
         'Overnight Respiration Rate (breaths/min)', 'VO2 Max (ml/kg/min)', 'Easy Runs - 28d Rolling (%)',
@@ -362,7 +373,7 @@ def generate_quantified_self_csv(
         if col in df_export.columns:
             df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round().astype('Int64')
 
-    # 11. Output CSV without trailing whitespace in headers
+    # 12. Output CSV without trailing whitespace in headers
     df_export.to_csv(output_path, header=True, index=False, na_rep='')
     return df_export
 
