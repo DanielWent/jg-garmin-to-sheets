@@ -143,7 +143,7 @@ def generate_quantified_self_csv(
             labels = pd.Series('UNKNOWN', index=runs.index)
 
         easy_labels = {'AEROBIC_BASE', 'BASE', 'RECOVERY', 'LOW_AEROBIC', 'NO_BENEFIT', 'NONE'}
-        hard_labels = {'TEMPO', 'LACTATE_THRESHOLD', 'THRESHOLD', 'VO2MAX', 'VO2_MAX', 'ANAEROBIC_CAPACITY', 'ANAERIC', 'SPEED', 'SPRINT', 'HIGH_AEROBIC'}
+        hard_labels = {'TEMPO', 'LACTATE_THRESHOLD', 'THRESHOLD', 'VO2MAX', 'VO2_MAX', 'ANAERII_CAPACITY', 'ANAEROBIC_CAPACITY', 'ANAERIC', 'SPEED', 'SPRINT', 'HIGH_AEROBIC'}
 
         runs['Is Easy'] = np.where(
             labels.isin(easy_labels), True,
@@ -271,8 +271,26 @@ def generate_quantified_self_csv(
     if 'Sleep Need (min)' in df.columns and 'Sleep Length (min)' in df.columns:
         sleep_need = pd.to_numeric(df['Sleep Need (min)'], errors='coerce')
         sleep_len = pd.to_numeric(df['Sleep Length (min)'], errors='coerce')
-        sleep_deficit = (sleep_need - sleep_len).clip(lower=0)
-        df['Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.4d Half-Life EWMA (min)'] = sleep_deficit.ewm(span=4, adjust=False).mean()
+        raw_diff = sleep_need - sleep_len
+
+        # Option B: Asymmetric payback efficiency (eta = 0.50 for surplus sleep)
+        # with running EWMA state floored at zero to prevent sleep banking
+        asymmetric_deficit = np.where(raw_diff < 0, 0.50 * raw_diff, raw_diff)
+        alpha = 2.0 / (4.0 + 1.0)  # 0.40 smoothing factor for 4d span
+        debt_values = np.full(len(df), np.nan)
+        running_debt = np.nan
+
+        for i, val in enumerate(asymmetric_deficit):
+            if np.isnan(val):
+                debt_values[i] = running_debt
+            else:
+                if np.isnan(running_debt):
+                    running_debt = max(0.0, float(val))
+                else:
+                    running_debt = max(0.0, alpha * float(val) + (1.0 - alpha) * running_debt)
+                debt_values[i] = running_debt
+
+        df['Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.4d Half-Life EWMA (min)'] = debt_values
 
     # Z-scores computed against backward-shifted 60d baseline
     hrv_source_col = 'Average Overnight RMSSD HRV (ms)' if 'Average Overnight RMSSD HRV (ms)' in df.columns else ('Overnight HRV (ms)' if 'Overnight HRV (ms)' in df.columns else None)
