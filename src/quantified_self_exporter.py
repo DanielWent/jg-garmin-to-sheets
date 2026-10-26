@@ -58,6 +58,70 @@ def adjust_for_midnight_offset(val):
     return val - 24.0 if val >= 12.0 else val
 
 
+def calculate_diminishing_sleep_input(need, length):
+    """
+    Computes daily sleep deficit/surplus input with non-linear diminishing returns:
+      - Need >= Length: 100% accumulation of lost minutes.
+      - Length > Need (Surplus Payback):
+          * 0 - 90 min: 60% recovery efficiency (eta = 0.60)
+          * 90 - 180 min: 30% recovery efficiency (eta = 0.30)
+          * > 180 min: 10% recovery efficiency (eta = 0.10)
+    """
+    if pd.isna(need) or pd.isna(length):
+        return np.nan
+    raw_diff = float(need) - float(length)
+    if raw_diff >= 0:
+        return raw_diff
+
+    surplus = float(length) - float(need)
+    if surplus <= 90.0:
+        credit = 0.60 * surplus
+    elif surplus <= 180.0:
+        credit = 54.0 + 0.30 * (surplus - 90.0)
+    else:
+        credit = 81.0 + 0.10 * (surplus - 180.0)
+    return -credit
+
+
+def compute_calendar_aware_sleep_ewma(dates: pd.Series, daily_inputs: list, span: float) -> np.ndarray:
+    """
+    Calculates asymmetric EWMA with:
+      - Calendar interval awareness: decayed by (1 - alpha)^delta_days across gaps or missing syncs.
+      - Bounded zero floor: prevents negative sleep banking.
+    """
+    alpha = 2.0 / (span + 1.0)
+    debt_values = np.full(len(dates), np.nan)
+    running_debt = np.nan
+    last_date = None
+
+    for i, (dt, val) in enumerate(zip(dates, daily_inputs)):
+        if pd.isna(dt):
+            continue
+
+        if last_date is None:
+            delta_days = 1.0
+        else:
+            delta_days = max(1.0, (dt - last_date).total_seconds() / 86400.0)
+
+        decay = (1.0 - alpha) ** delta_days
+
+        if np.isnan(val):
+            if not np.isnan(running_debt):
+                running_debt = running_debt * decay
+                debt_values[i] = running_debt
+        else:
+            val_float = float(val)
+            if np.isnan(running_debt):
+                running_debt = max(0.0, val_float)
+            else:
+                running_debt = max(0.0, alpha * val_float + decay * running_debt)
+            debt_values[i] = running_debt
+
+        last_date = dt
+
+    return debt_values
+
+
 def generate_quantified_self_csv(
     df_garmin: pd.DataFrame,
     df_withings: pd.DataFrame,
@@ -271,26 +335,20 @@ def generate_quantified_self_csv(
     if 'Sleep Need (min)' in df.columns and 'Sleep Length (min)' in df.columns:
         sleep_need = pd.to_numeric(df['Sleep Need (min)'], errors='coerce')
         sleep_len = pd.to_numeric(df['Sleep Length (min)'], errors='coerce')
-        raw_diff = sleep_need - sleep_len
 
-        # Option B: Asymmetric payback efficiency (eta = 0.50 for surplus sleep)
-        # with running EWMA state floored at zero to prevent sleep banking
-        asymmetric_deficit = np.where(raw_diff < 0, 0.50 * raw_diff, raw_diff)
-        alpha = 2.0 / (4.0 + 1.0)  # 0.40 smoothing factor for 4d span
-        debt_values = np.full(len(df), np.nan)
-        running_debt = np.nan
+        # Change 2: Diminishing returns on surplus sleep
+        daily_sleep_inputs = [
+            calculate_diminishing_sleep_input(n, l)
+            for n, l in zip(sleep_need, sleep_len)
+        ]
 
-        for i, val in enumerate(asymmetric_deficit):
-            if np.isnan(val):
-                debt_values[i] = running_debt
-            else:
-                if np.isnan(running_debt):
-                    running_debt = max(0.0, float(val))
-                else:
-                    running_debt = max(0.0, alpha * float(val) + (1.0 - alpha) * running_debt)
-                debt_values[i] = running_debt
-
-        df['Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.4d Half-Life EWMA (min)'] = debt_values
+        # Changes 1 & 3: Calendar-aware delta_t decay & Dual-pool architecture (Acute 4d / Chronic 14d)
+        df['Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.4d Half-Life EWMA (min)'] = (
+            compute_calendar_aware_sleep_ewma(df['_sort_date'], daily_sleep_inputs, span=4.0)
+        )
+        df['Chronic Sleep Debt - CSD - 14d Span / 4.8d Half-Life EWMA (min)'] = (
+            compute_calendar_aware_sleep_ewma(df['_sort_date'], daily_sleep_inputs, span=14.0)
+        )
 
     # Z-scores computed against backward-shifted 60d baseline
     hrv_source_col = 'Average Overnight RMSSD HRV (ms)' if 'Average Overnight RMSSD HRV (ms)' in df.columns else ('Overnight HRV (ms)' if 'Overnight HRV (ms)' in df.columns else None)
@@ -358,6 +416,7 @@ def generate_quantified_self_csv(
         'Sleep Onset Latency (mins)',
         'Sleep Efficiency (%)',
         'Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.4d Half-Life EWMA (min)',
+        'Chronic Sleep Debt - CSD - 14d Span / 4.8d Half-Life EWMA (min)',
         # Block C: Autonomic Readiness & Mental Stress
         'Daily Max Body Battery (0 - 100)',
         'Overnight Resting HR (raw bpm)',
@@ -409,6 +468,7 @@ def generate_quantified_self_csv(
         'Weight - Morning 7d Avg (kg)',
         'Sleep Start Time - Midnight Offset (hours)',
         'Sleep Deficit vs Garmin Sleep Need - 4d Span / 1.4d Half-Life EWMA (min)',
+        'Chronic Sleep Debt - CSD - 14d Span / 4.8d Half-Life EWMA (min)',
         'HRV RMSSD Z-Score (60d baseline) (SD)',
         'Chronic Training Load - CTL - 28d Span / 9.7d Half-Life EWMA (load)',
         'Acute-to-Chronic Workload Ratio - ACWR (ratio)',
